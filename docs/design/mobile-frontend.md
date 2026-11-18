@@ -682,6 +682,57 @@ Approvals, and a Reviews and checks list. Every page behind that list is the sin
 - **A split transaction under review** reads "Split in N parts". Approve splits keeps the
   parts. Choosing one category asks "Replace N parts?" first, because it removes them.
 
+### Finance spending views, saved defaults and Assistant state
+
+Spending reads on the account's saved Spending defaults: accounting basis, whether pending is
+included, whether matched refunds are subtracted and whether uncategorized spending is included.
+The line under the total states what it counts, written from those defaults ("Full outflow · pending
+left out · …"), and uncategorized spending that was left out is stated with its amount. Spending
+waits for the defaults and the saved week start before it reads: a total is never shown on an
+assumed basis, and a failed read of the defaults offers Retry instead of falling back to product
+defaults. The iPhone applies these defaults and does not change them; they are edited in Finance
+settings, whose "Spending defaults" group says they apply on iPhone, web and desktop. The saved
+view, grouping and selected accounts remain web and desktop layout choices.
+
+The period control offers Today, Week, Month and Custom. A visit opens on the saved
+default period unless a link names one; choosing another period lasts for the visit and is not
+saved. The week follows the account's "Week starts on" choice. Custom shows From and Through date
+fields and starts as today; a range that is incomplete, reversed or longer than the API's ten-year
+limit is explained beside the fields and is not read. Dates are days in the account timezone.
+
+Summary has three views, chosen with a segmented control:
+
+- **List** keeps the daily bars and the category or bucket rows.
+- **Trends** shows the period so far as bars (days up to a month, weeks counted from the range
+  start up to half a year, then months), the equal span before it with the difference, and one row
+  per day, week or month. A comparison that rests on incomplete or out-of-date data says so. When
+  only the comparison period fails, the trend stays and the comparison offers Retry.
+- **Rhythm** is a grid whose colour strength is the amount: hours for a single day, days under
+  their weekday for up to two months, then calendar weeks, months or years. Choosing a block names
+  it, its amount and its state below the grid. An hour is assigned only from a source timestamp;
+  purchases without a time are one "Time not provided" block.
+
+Every bar and block carries its amount and state in its accessible label, so coverage, pending,
+refunds and future days are not carried by colour. A group, a trend row and a chosen rhythm block
+open the transactions behind them with the exact query and server revision that produced the
+summary; an hour of the day never does, because a date-only record cannot select an hour. Without
+a server revision nothing offers a drill-down. Bubbles is not offered on iPhone (open decision).
+
+A recorded activity row opens its evidence in place: who acted and when, the explanation, the
+records it concerns, source messages, the audited before and after of each changed field, the
+authority it ran under and its identifiers. Records this app can open are links (transaction,
+account, review case, question, the conversation); any other record, and any reference whose stated
+source disagrees with its kind, is shown as text. Further evidence loads on request through one
+Sonner toast and is refused whole if it does not continue the loaded evidence; evidence the account
+may no longer read is dropped from the screen.
+
+The Assistant tab carries the unread count of the Finance conversation as a native tab badge, named
+for a screen reader ("assistant, 3 unread messages"), and the conversation row says the same. An
+unknown count shows no badge; it is never shown as zero. Messages are recorded as read when the
+transcript is on screen, at its latest message, with every unread message loaded: opening the tab,
+a mounted but hidden transcript, or a page that stops short of older unread messages marks nothing.
+A failed mark is silent and is taken again at the next chance.
+
 ### Workspace conversations
 
 Chat uses a bounded, flex-sized transcript beneath fixed page controls. Only the transcript
@@ -960,13 +1011,21 @@ claims only these links on its web origin; every other nohmi page stays in the b
 
 ### Mail read state and archive
 
-A conversation offers Mark as read or Mark as unread, whichever changes it, and Archive when it is in an inbox. Archive removes it from every inbox and keeps its other mailboxes; a conversation that is in no inbox, or whose mailboxes have not loaded, offers no Archive. The actions sit in the action slot at the trailing end of the row's first line, where the disclosure chevron was, and in the conversation's header: a menu when there are two, a single control when there is one. Opening a conversation does not mark it read, as on web. Snooze, bulk selection and deletion are separate work (COO-241); drafts, reply and send are described below.
+A conversation offers Mark as read or Mark as unread, whichever changes it, and Archive when it is in an inbox. Archive removes it from every inbox and keeps its other mailboxes; a conversation that is in no inbox, or whose mailboxes have not loaded, offers no Archive. The actions sit in the action slot at the trailing end of the row's first line, where the disclosure chevron was, and in the conversation's header: a menu when there are two, a single control when there is one. Opening a conversation does not mark it read, as on web. Snooze and selection are described below, as are drafts, reply and send; deletion is not offered.
 
 These actions change the person's mailbox at the provider, so the list shows the change at once but records it only when the API confirms it. The pending change is an overlay on the cached list, never a cache write: an archived conversation leaves the list, a read change restyles the row, the conversation's actions are disabled until the write settles, and archiving from the open conversation closes it. One Sonner toast runs from loading to the outcome and names the action ("Marked as read", "Conversation archived"). A confirmed change is written to cached summaries from the body-free fields of the response and Mail is then re-read for unread counts and other mailboxes; a failure of that read never reports the write as failed.
 
 Every write carries the conversation's displayed `updatedAt`, so a conversation that changed elsewhere is rejected rather than overwritten. A definitive rejection (a 4xx other than 408 that does not carry `partialEffect`) puts the conversation back as it was and says it was not changed, that it changed, or that it is no longer available. Anything else (a timeout, a lost connection, a server fault, or a provider change the API could not record) is unconfirmed: the conversation goes back to its last confirmed state, the toast says the change could not be confirmed and may have reached the mailbox, and Mail is re-read rather than assuming either outcome. Nothing is retried automatically. That re-read returns nohmi's record, which catches up with the provider at the account's next sync, so Mail is read once more five seconds later. An outcome is reported against the session that sent the change: one that settles after the list has closed still reports, and one that settles after sign-out reports nothing and its Undo does nothing.
 
 A confirmed Archive of a Gmail conversation offers Undo for ten seconds. An iCloud archive moves the message to another mailbox and the API cannot yet move it back (it would report success without changing the mailbox), so an iCloud archive offers no Undo. Undo is used once, restores the mailboxes the conversation had against the revision the archive returned, and reports its own outcome in its own toast. A confirmed Undo puts the conversation back in the loaded inbox at its place by date without waiting for the read that follows; a search is left to that read. Read and unread are their own inverse and offer no Undo. No action-result copy is rendered in the list or the conversation.
+
+### Mail snooze and selection
+
+Snooze is nohmi's own record, not a change to the provider mailbox. A conversation's actions include Snooze, which opens a sheet asking when it should return: In 3 hours, Tomorrow morning and Next week (eight o'clock, next week on Monday, in the device's time), or any day and time still ahead. Choosing a time is the whole decision: the sheet closes, the conversation leaves the list and one Sonner toast runs from loading to "Snoozed until …" with Undo. Opened from a conversation, the sheet sits over it and the conversation closes once a time is chosen. The iOS menu reads its icons once when it mounts, so Mail gives a conversation's menu a new key whenever its actions or their icons change; without that an action that arrives after the mailboxes load shows the wrong icon or none. Mailboxes lists Snoozed under All inboxes; a conversation there offers End snooze instead of Snooze. The API has no route to end a snooze, so ending one snoozes the conversation until a time already past, and the list does not carry when a snooze ends, so Snoozed cannot show return times and an ended snooze has no Undo. A snooze that is refused or unconfirmed puts the conversation back and re-reads Mail.
+
+Touching and holding a conversation starts a selection. While one is under way a tap selects instead of opening, each row shows whether it is selected, and the rows' own actions step aside. The bar under the title shows the number selected, Cancel, Select all, and the actions the selection allows: Mark as read and Mark as unread when some selected conversation would change, Archive when every selected conversation is in an inbox, and Snooze (End snooze under Snoozed). A selection holds at most 50 conversations, one loaded page; Select all takes the first 50 listed. The selection is what is still listed, and a new search clears it.
+
+A selection's action writes one conversation at a time through the same guarded writes as a single change, because the bulk route returns no revisions to undo against. One toast reports the whole action: every change confirmed is a success; some confirmed is an error that says how many changed and how many were not confirmed; none confirmed says whether they were refused or could not be confirmed. Conversations that were not confirmed stay selected and the rest leave the selection. Undo is offered only for confirmed changes that can be reversed (read state, a Gmail archive, a snooze) and reverses exactly those, with its own toast and no further Undo. The selection takes no second action while one is in flight, and a session that changes mid-way stops the remaining writes and reports nothing.
 
 ### Mail drafts, reply and send
 

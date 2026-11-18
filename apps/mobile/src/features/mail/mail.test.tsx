@@ -12,7 +12,7 @@ import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import InboxRoute from "../../app/(workspaces)/mail/index";
 import MailboxesRoute from "../../app/(workspaces)/mail/mailboxes";
-import { MAIL_PAGE_SIZE } from "./logic";
+import { MAIL_PAGE_SIZE, snoozeChoices, snoozeTime } from "./logic";
 import { MailReader } from "./reader";
 import { UNCONFIRMED_RECHECK_MS } from "./triage";
 
@@ -37,6 +37,7 @@ const h = vi.hoisted(() => ({
   messages: vi.fn(),
   fullThreads: vi.fn(),
   update: vi.fn(),
+  snooze: vi.fn(),
   drafts: vi.fn(),
   toast: { error: vi.fn(), loading: vi.fn(), success: vi.fn(), dismiss: vi.fn() },
 }));
@@ -96,6 +97,7 @@ vi.mock("../auth/context", () => ({
         listMailMessages: h.messages,
         listMailThreads: h.fullThreads,
         updateMailThread: h.update,
+        snoozeMailThread: h.snooze,
         listMailDrafts: h.drafts,
       }),
     },
@@ -459,7 +461,7 @@ it("lists each account's mailboxes and switches between them", async () => {
   expect(await screen.findByRole("heading", { name: "Personal · me@example.test" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Work · work@example.test" })).toBeTruthy();
   const rows = screen.getAllByRole("button").map((row) => row.textContent);
-  expect(rows).toEqual(["All inboxes", "Inbox3", "Sent", "Receipts", "Inbox"]);
+  expect(rows).toEqual(["All inboxes", "Snoozed", "Inbox3", "Sent", "Receipts", "Inbox"]);
   // The unread count is part of the row's name; a mailbox with none is named plainly.
   expect(screen.getByRole("button", { name: "Inbox, 3 unread" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Inbox" })).toBeTruthy();
@@ -860,9 +862,9 @@ it("offers Archive only for a conversation that is in an inbox", async () => {
   render(wrap(<InboxRoute />));
   await screen.findByRole("button", readRow);
 
-  // One action is a direct control, not a menu.
+  fireEvent.click(screen.getByRole("button", { name: "Actions for Receipt" }));
   expect(screen.getByRole("button", { name: "Mark as unread" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Actions for Receipt" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Snooze" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
 });
 
@@ -1084,4 +1086,622 @@ it("reports nothing when the session changes while reads are being cancelled", a
   // The earlier person's confirmed state is not written into the caches, and nothing is re-read.
   expect(screen.getByRole("button", unreadRow)).toBeTruthy();
   expect(h.summaries).toHaveBeenCalledTimes(reads);
+});
+
+/** Snooze and selection results reach the person only as a toast, never as copy on the screen. */
+const noSnoozeResult = () =>
+  expect(
+    screen.queryByText(
+      /Snoozed until|Snoozing|Snooze ended|Ending|conversations? (snoozed|archived|marked|unsnoozed)|not confirmed|Couldn’t/,
+    ),
+  ).toBeNull();
+const hold = (name: RegExp) => fireEvent.contextMenu(screen.getByRole("button", { name }));
+const row = (name: RegExp, pressed?: boolean) =>
+  screen.queryByRole("button", pressed === undefined ? { name } : { name, pressed });
+const maya = /Maya Chen/;
+const billing = /billing@example\.test/;
+const undoOf = (calls: unknown[][]) =>
+  (calls.at(-1)?.[1] as { action?: { label: string; onClick: () => void } } | undefined)?.action;
+
+it("snoozes a conversation until a chosen time and ends the snooze on Undo", async () => {
+  h.toast.loading.mockReturnValueOnce("snooze-toast").mockReturnValueOnce("undo-toast");
+  let confirm: () => void = () => {};
+  h.snooze.mockReturnValueOnce(new Promise<void>((resolve) => (confirm = resolve)));
+  render(wrap(<InboxRoute />));
+  await screen.findByRole("button", unreadRow);
+
+  choose("Actions for Board packet", "Snooze");
+  const sheet = await screen.findByRole("dialog");
+  expect(within(sheet).getByRole("heading", { name: "Snooze" })).toBeTruthy();
+  expect(h.snooze).not.toHaveBeenCalled();
+  const before = Date.now();
+  fireEvent.click(within(sheet).getByRole("button", { name: /Tomorrow morning/ }));
+
+  // Choosing the time is the whole decision: the sheet closes and the conversation leaves.
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await waitFor(() => expect(screen.queryByRole("button", unreadRow)).toBeNull());
+  expect(h.toast.loading).toHaveBeenCalledExactlyOnceWith("Snoozing conversation…");
+  expect(h.toast.success).not.toHaveBeenCalled();
+  const [id, until] = h.snooze.mock.calls[0];
+  expect(id).toBe("one");
+  const expected = snoozeChoices(new Date(before))[1].until;
+  expect(until).toBe(expected.toISOString());
+  expect(h.update).not.toHaveBeenCalled();
+
+  h.summaries.mockResolvedValue([summary("two")]);
+  await act(async () => confirm());
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  const [title, options] = h.toast.success.mock.calls[0];
+  expect(title).toBe(`Snoozed until ${snoozeTime(expected)}`);
+  expect(options).toMatchObject({ id: "snooze-toast", duration: 10_000 });
+  expect(options.action.label).toBe("Undo");
+  await waitFor(() => expect(h.summaries).toHaveBeenCalledTimes(2));
+  noSnoozeResult();
+
+  // Undo ends the snooze with a time already past, once, and offers no further Undo.
+  h.snooze.mockResolvedValueOnce(undefined);
+  h.summaries.mockResolvedValue([summary("one", { unread: true }), summary("two")]);
+  await act(async () => {
+    options.action.onClick();
+    options.action.onClick();
+  });
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenLastCalledWith("Snooze ended", { id: "undo-toast" }),
+  );
+  expect(h.toast.loading).toHaveBeenLastCalledWith("Ending snooze…");
+  expect(h.snooze).toHaveBeenCalledTimes(2);
+  expect(new Date(h.snooze.mock.calls[1][1]).getTime()).toBeLessThan(Date.now());
+  expect(await screen.findByRole("button", unreadRow)).toBeTruthy();
+  expect(h.toast.error).not.toHaveBeenCalled();
+});
+
+it("snoozes until a picked day and time, and refuses one that is not ahead", async () => {
+  h.snooze.mockResolvedValue(undefined);
+  render(wrap(<InboxRoute />));
+  await screen.findByRole("button", unreadRow);
+  choose("Actions for Board packet", "Snooze");
+  const sheet = await screen.findByRole("dialog");
+  const set = (label: string, value: string) =>
+    fireEvent.change(within(sheet).getByRole("textbox", { name: label }), { target: { value } });
+
+  set("Day", "2020-01-01");
+  fireEvent.click(within(sheet).getByRole("button", { name: "Snooze until this time" }));
+  expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(
+    "Choose a day and time that are still ahead.",
+  );
+  expect(h.snooze).not.toHaveBeenCalled();
+  expect(screen.getByRole("dialog")).toBeTruthy();
+
+  const year = new Date().getFullYear() + 1;
+  set("Day", `${year}-03-04`);
+  set("Time", "09:30");
+  fireEvent.click(within(sheet).getByRole("button", { name: "Snooze until this time" }));
+  await waitFor(() => expect(h.snooze).toHaveBeenCalledTimes(1));
+  expect(h.snooze).toHaveBeenCalledWith("one", new Date(year, 2, 4, 9, 30).toISOString());
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+it("closes the snooze sheet without snoozing", async () => {
+  render(wrap(<InboxRoute />));
+  await screen.findByRole("button", unreadRow);
+  choose("Actions for Board packet", "Snooze");
+  fireEvent.click(
+    within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }),
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(h.snooze).not.toHaveBeenCalled();
+  expect(h.toast.loading).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", unreadRow)).toBeTruthy();
+});
+
+it.each([
+  ["no longer exists", () => rejection(404), "This conversation is no longer available.", false],
+  [
+    "is refused",
+    () => rejection(400),
+    "Couldn’t snooze the conversation. It was not changed.",
+    false,
+  ],
+  [
+    "is unconfirmed",
+    () => new TypeError("Network request failed"),
+    "Couldn’t confirm the conversation was snoozed. Check it once Mail refreshes before trying again.",
+    true,
+  ],
+])("puts the conversation back when the snooze %s", async (_name, fault, text, again) => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  h.toast.loading.mockReturnValue("toast-1");
+  h.snooze.mockRejectedValueOnce(fault());
+  render(wrap(<InboxRoute />));
+  await screen.findByRole("button", unreadRow);
+  choose("Actions for Board packet", "Snooze");
+  fireEvent.click(await screen.findByRole("button", { name: /In 3 hours/ }));
+
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(text, { id: "toast-1" }),
+  );
+  expect(h.toast.success).not.toHaveBeenCalled();
+  expect(await screen.findByRole("button", unreadRow)).toBeTruthy();
+  await waitFor(() => expect(h.summaries).toHaveBeenCalledTimes(2));
+  // Only an unknown outcome is worth a second look.
+  await act(async () => vi.advanceTimersByTime(UNCONFIRMED_RECHECK_MS));
+  await waitFor(() => expect(h.summaries).toHaveBeenCalledTimes(again ? 3 : 2));
+  noSnoozeResult();
+});
+
+it("lists snoozed conversations and ends a snooze from the list", async () => {
+  h.toast.loading.mockReturnValue("toast-1");
+  h.snooze.mockResolvedValueOnce(undefined);
+  h.summaries.mockResolvedValue([summary("later", { subject: "Renewal" })]);
+  render(wrap(<MailboxesRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: "Snoozed" }));
+
+  expect(screen.getByRole("heading", { name: "Snoozed" })).toBeTruthy();
+  expect(await screen.findByText("Renewal")).toBeTruthy();
+  expect(h.summaries).toHaveBeenLastCalledWith({ snoozed: true, limit: MAIL_PAGE_SIZE });
+
+  // A snoozed conversation offers to end its snooze, never a second snooze.
+  fireEvent.click(screen.getByRole("button", { name: "Actions for Renewal" }));
+  expect(screen.queryByRole("button", { name: "Snooze" })).toBeNull();
+  h.summaries.mockResolvedValue([]);
+  fireEvent.click(screen.getByRole("button", { name: "End snooze" }));
+  await waitFor(() => expect(screen.queryByText("Renewal")).toBeNull());
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("Snooze ended", { id: "toast-1" }),
+  );
+  expect(h.snooze).toHaveBeenCalledTimes(1);
+  expect(h.snooze.mock.calls[0][0]).toBe("later");
+  expect(new Date(h.snooze.mock.calls[0][1]).getTime()).toBeLessThan(Date.now());
+  expect(await screen.findByText("Nothing is snoozed")).toBeTruthy();
+  expect(screen.getByText("Conversations you snooze wait here until they return.")).toBeTruthy();
+  noSnoozeResult();
+});
+
+it("snoozes from the open conversation and closes it", async () => {
+  h.snooze.mockResolvedValueOnce(undefined);
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", unreadRow));
+  const reader = await screen.findByRole("dialog");
+  fireEvent.click(within(reader).getByRole("button", { name: "Conversation actions" }));
+  fireEvent.click(screen.getByRole("button", { name: "Snooze" }));
+  // The time is asked over the conversation, which is still open underneath.
+  expect(screen.getByText("Conversation")).toBeTruthy();
+  fireEvent.click(await screen.findByRole("button", { name: /Next week/ }));
+
+  await waitFor(() => expect(h.snooze).toHaveBeenCalledTimes(1));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+});
+
+it("starts a selection on a long press and selects by tapping, without opening anything", async () => {
+  render(wrap(<InboxRoute />));
+  await screen.findByRole("button", unreadRow);
+  expect(screen.queryByText(/selected$/)).toBeNull();
+
+  hold(maya);
+  expect(screen.getByText("1 selected")).toBeTruthy();
+  expect(row(maya, true)).toBeTruthy();
+  expect(row(billing, false)).toBeTruthy();
+  // While selecting, a row's own actions step aside and a tap selects.
+  expect(screen.queryByRole("button", { name: "Actions for Board packet" })).toBeNull();
+  fireEvent.click(row(billing) as HTMLElement);
+  expect(screen.getByText("2 selected")).toBeTruthy();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(h.messages).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Select all" })).toBeNull();
+
+  fireEvent.click(row(maya) as HTMLElement);
+  expect(screen.getByText("1 selected")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  expect(screen.getByText("2 selected")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByText(/selected$/)).toBeNull();
+  expect(screen.getByRole("button", { name: "Actions for Board packet" })).toBeTruthy();
+  expect(h.update).not.toHaveBeenCalled();
+});
+
+it("selects at most one page of conversations and drops the selection when the search changes", async () => {
+  h.summaries.mockResolvedValue(
+    Array.from({ length: MAIL_PAGE_SIZE }, (_, index) =>
+      summary(`t${index}`, { subject: `Note ${index}` }),
+    ),
+  );
+  h.summaries.mockResolvedValueOnce([
+    ...Array.from({ length: MAIL_PAGE_SIZE }, (_, index) =>
+      summary(`t${index}`, { subject: `Note ${index}` }),
+    ),
+  ]);
+  const view = render(wrap(<InboxRoute />));
+  await screen.findByText("Note 0");
+  // A second page brings the list past the limit.
+  h.summaries.mockResolvedValueOnce([summary("extra", { subject: "Extra" })]);
+  await act(async () => h.endReached?.());
+  await screen.findByText("Extra");
+
+  hold(/^Maya Chen\. Extra/);
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  expect(screen.getByText(`${MAIL_PAGE_SIZE} selected`)).toBeTruthy();
+  // The limit is reached, so one more is not taken.
+  fireEvent.click(row(/^Maya Chen\. Extra/) as HTMLElement);
+  expect(screen.getByText(`${MAIL_PAGE_SIZE} selected`)).toBeTruthy();
+
+  h.params = { mailSearch: "note" };
+  h.summaries.mockResolvedValue([summary("t1", { subject: "Note 1" })]);
+  view.rerender(wrap(<InboxRoute />));
+  await waitFor(() => expect(screen.queryByText(/selected$/)).toBeNull());
+});
+
+const three = () => [
+  summary("one", { unread: true }),
+  summary("two", {
+    unread: true,
+    subject: "Invoice",
+    from: { name: "Sam", address: "sam@example.test" },
+  }),
+  summary("three", { subject: "Minutes", from: { name: "Lee", address: "lee@example.test" } }),
+];
+const selectAll = async () => {
+  render(wrap(<InboxRoute />));
+  await screen.findByRole("button", unreadRow);
+  hold(maya);
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+};
+
+it("marks the selection read, keeps a failed conversation selected and undoes only confirmed ones", async () => {
+  h.summaries.mockResolvedValue([
+    ...three(),
+    summary("four", {
+      unread: true,
+      subject: "Agenda",
+      from: { name: "Ana", address: "ana@example.test" },
+    }),
+  ]);
+  h.toast.loading.mockReturnValueOnce("bulk-toast").mockReturnValueOnce("undo-toast");
+  let last: (thread: MailThread) => void = () => {};
+  h.update
+    .mockResolvedValueOnce(confirmedThread("one"))
+    .mockRejectedValueOnce(new TypeError("Network request failed"))
+    .mockReturnValueOnce(new Promise((resolve) => (last = resolve)));
+  await selectAll();
+  expect(screen.getByText("4 selected")).toBeTruthy();
+
+  const act1 = screen.getByRole("button", { name: "Mark 3 conversations as read" });
+  fireEvent.click(act1);
+  fireEvent.click(act1);
+  // Only the three unread conversations are asked to change, one write at a time.
+  expect(h.toast.loading).toHaveBeenCalledExactlyOnceWith("Marking 3 conversations as read…");
+  await waitFor(() => expect(h.update).toHaveBeenCalledTimes(3));
+  expect(h.update.mock.calls.map(([id]) => id)).toEqual(["one", "two", "four"]);
+  expect(h.update).toHaveBeenLastCalledWith("four", {
+    unread: false,
+    expectedUpdatedAt: "2026-11-09T12:00:00.000Z",
+  });
+  // The selection takes no second action while this one is in flight.
+  expect(screen.getByRole("button", { name: "Archive 4 conversations" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  expect(h.toast.error).not.toHaveBeenCalled();
+
+  h.summaries.mockResolvedValue([
+    summary("one", { updatedAt: "2026-11-09T12:05:00.000Z" }),
+    three()[1],
+    three()[2],
+    summary("four", {
+      subject: "Agenda",
+      from: { name: "Ana", address: "ana@example.test" },
+      updatedAt: "2026-11-09T12:05:00.000Z",
+    }),
+  ]);
+  await act(async () => last(confirmedThread("four")));
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(1));
+  const [text, options] = h.toast.error.mock.calls[0];
+  expect(text).toBe(
+    "2 conversations marked as read; 1 not confirmed. Check Mail before trying again.",
+  );
+  expect(options).toMatchObject({ id: "bulk-toast", duration: 10_000 });
+  expect(h.toast.success).not.toHaveBeenCalled();
+  // The conversation that was not confirmed stays selected, and only it.
+  expect(await screen.findByText("1 selected")).toBeTruthy();
+  expect(row(/Sam/, true)).toBeTruthy();
+  expect(row(maya, false)).toBeTruthy();
+  noSnoozeResult();
+
+  // Undo reverses the two confirmed changes against the revisions the API returned.
+  h.update
+    .mockResolvedValueOnce(confirmedThread("one", { unread: true }))
+    .mockResolvedValueOnce(confirmedThread("four", { unread: true }));
+  await act(async () => {
+    options.action.onClick();
+    options.action.onClick();
+  });
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("2 conversations marked as unread", {
+      id: "undo-toast",
+    }),
+  );
+  expect(h.toast.loading).toHaveBeenLastCalledWith("Marking 2 conversations as unread…");
+  expect(h.update).toHaveBeenCalledTimes(5);
+  expect(h.update.mock.calls.slice(3)).toEqual([
+    ["one", { unread: true, expectedUpdatedAt: "2026-11-09T12:05:00.000Z" }],
+    ["four", { unread: true, expectedUpdatedAt: "2026-11-09T12:05:00.000Z" }],
+  ]);
+  // The unconfirmed change is looked at once more.
+  expect(screen.getByText("1 selected")).toBeTruthy();
+});
+
+it("marks the selection unread", async () => {
+  h.toast.loading.mockReturnValue("toast-1");
+  h.summaries.mockResolvedValue(three());
+  h.update.mockResolvedValueOnce(confirmedThread("three", { unread: true }));
+  await selectAll();
+  fireEvent.click(screen.getByRole("button", { name: "Mark 1 conversation as unread" }));
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  expect(h.toast.success.mock.calls[0][0]).toBe("1 conversation marked as unread");
+  expect(undoOf(h.toast.success.mock.calls)?.label).toBe("Undo");
+  expect(h.update).toHaveBeenCalledExactlyOnceWith("three", {
+    unread: true,
+    expectedUpdatedAt: "2026-11-09T12:00:00.000Z",
+  });
+  // Nothing failed, so nothing stays selected.
+  await waitFor(() => expect(screen.queryByText(/selected$/)).toBeNull());
+});
+
+it("archives the selection and moves back only what Gmail can restore", async () => {
+  h.toast.loading.mockReturnValueOnce("bulk-toast").mockReturnValueOnce("undo-toast");
+  h.summaries.mockResolvedValue([
+    summary("one", { unread: true }),
+    summary("cloud", {
+      provider: "icloud",
+      subject: "Statement",
+      from: { name: "Bank", address: "bank@example.test" },
+    } as Partial<MailThreadSummary>),
+  ]);
+  h.update
+    .mockResolvedValueOnce(confirmedThread("one", { mailboxIds: [], unread: true }))
+    .mockResolvedValueOnce(confirmedThread("cloud", { mailboxIds: ["personal-receipts"] }));
+  await selectAll();
+  h.summaries.mockResolvedValue([]);
+  fireEvent.click(screen.getByRole("button", { name: "Archive 2 conversations" }));
+
+  // Both leave the inbox as they are asked to.
+  await waitFor(() => expect(screen.queryByRole("button", { name: maya })).toBeNull());
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  expect(h.toast.loading).toHaveBeenCalledExactlyOnceWith("Archiving 2 conversations…");
+  const [text, options] = h.toast.success.mock.calls[0];
+  expect(text).toBe("2 conversations archived");
+  expect(options.id).toBe("bulk-toast");
+  expect(h.update.mock.calls).toEqual([
+    ["one", { mailboxIds: [], expectedUpdatedAt: "2026-11-09T12:00:00.000Z" }],
+    ["cloud", { mailboxIds: [], expectedUpdatedAt: "2026-11-09T12:00:00.000Z" }],
+  ]);
+  expect(screen.queryByText(/selected$/)).toBeNull();
+  noSnoozeResult();
+
+  h.update.mockResolvedValueOnce(confirmedThread("one", { updatedAt: "2026-11-09T12:06:00.000Z" }));
+  await act(async () => options.action.onClick());
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenLastCalledWith("1 conversation moved back to Inbox", {
+      id: "undo-toast",
+    }),
+  );
+  expect(h.update).toHaveBeenCalledTimes(3);
+  expect(h.update).toHaveBeenLastCalledWith("one", {
+    mailboxIds: ["personal-inbox"],
+    expectedUpdatedAt: "2026-11-09T12:05:00.000Z",
+  });
+});
+
+it("offers no Undo when nothing archived can be moved back, and no Archive outside an inbox", async () => {
+  h.summaries.mockResolvedValue([
+    summary("cloud", { provider: "icloud" } as Partial<MailThreadSummary>),
+    summary("filed", {
+      mailboxIds: ["personal-receipts"],
+      subject: "Receipt",
+      from: { name: "Shop", address: "shop@example.test" },
+    }),
+  ]);
+  h.update.mockResolvedValueOnce(confirmedThread("cloud", { mailboxIds: [] }));
+  render(wrap(<InboxRoute />));
+  await screen.findByRole("button", readRow);
+  hold(/Shop/);
+  hold(maya);
+  // One selected conversation is in no inbox, so the selection cannot be archived.
+  expect(screen.queryByRole("button", { name: /^Archive/ })).toBeNull();
+  fireEvent.click(row(/Shop/) as HTMLElement);
+  fireEvent.click(screen.getByRole("button", { name: "Archive 1 conversation" }));
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  expect(h.toast.success.mock.calls[0][0]).toBe("1 conversation archived");
+  expect(undoOf(h.toast.success.mock.calls)).toBeUndefined();
+});
+
+it("snoozes the selection until one chosen time and ends those snoozes on Undo", async () => {
+  h.toast.loading.mockReturnValueOnce("bulk-toast").mockReturnValueOnce("undo-toast");
+  h.summaries.mockResolvedValue(three());
+  h.snooze
+    .mockResolvedValueOnce(undefined)
+    .mockRejectedValueOnce(rejection(404))
+    .mockResolvedValue(undefined);
+  await selectAll();
+  fireEvent.click(screen.getByRole("button", { name: "Snooze 3 conversations" }));
+  const sheet = await screen.findByRole("dialog");
+  expect(within(sheet).getByRole("heading", { name: "Snooze 3 conversations" })).toBeTruthy();
+  const before = Date.now();
+  fireEvent.click(within(sheet).getByRole("button", { name: /Tomorrow morning/ }));
+  const expected = snoozeChoices(new Date(before))[1].until;
+
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(1));
+  expect(h.toast.loading).toHaveBeenCalledExactlyOnceWith("Snoozing 3 conversations…");
+  expect(h.snooze.mock.calls).toEqual(
+    ["one", "two", "three"].map((id) => [id, expected.toISOString()]),
+  );
+  const [text, options] = h.toast.error.mock.calls[0];
+  expect(text).toBe(
+    `2 conversations snoozed until ${snoozeTime(expected)}; 1 not confirmed. Check Mail before trying again.`,
+  );
+  // A definite refusal is not looked at again; the refused conversation stays selected.
+  expect(await screen.findByText("1 selected")).toBeTruthy();
+  expect(row(/Sam/, true)).toBeTruthy();
+  noSnoozeResult();
+
+  await act(async () => options.action.onClick());
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("2 conversations unsnoozed", {
+      id: "undo-toast",
+    }),
+  );
+  expect(h.toast.loading).toHaveBeenLastCalledWith("Ending the snooze on 2 conversations…");
+  expect(h.snooze.mock.calls.slice(3).map(([id]) => id)).toEqual(["one", "three"]);
+  for (const [, until] of h.snooze.mock.calls.slice(3))
+    expect(new Date(until).getTime()).toBeLessThan(Date.now());
+});
+
+it("ends the snooze on a selection of snoozed conversations", async () => {
+  h.toast.loading.mockReturnValue("toast-1");
+  h.summaries.mockResolvedValue(three());
+  h.snooze.mockResolvedValue(undefined);
+  render(wrap(<MailboxesRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: "Snoozed" }));
+  await screen.findByRole("button", unreadRow);
+  hold(maya);
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  // Snoozed conversations are not snoozed again from here.
+  expect(screen.queryByRole("button", { name: /^Snooze 3/ })).toBeNull();
+  h.summaries.mockResolvedValue([]);
+  fireEvent.click(screen.getByRole("button", { name: "End the snooze on 3 conversations" }));
+
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("3 conversations unsnoozed", {
+      id: "toast-1",
+    }),
+  );
+  expect(h.snooze).toHaveBeenCalledTimes(3);
+  expect(await screen.findByText("Nothing is snoozed")).toBeTruthy();
+});
+
+it.each([
+  [
+    "refused",
+    () => rejection(409),
+    "Couldn’t change these conversations. They were not archived.",
+    false,
+  ],
+  [
+    "unconfirmed",
+    () => new TypeError("Network request failed"),
+    "Couldn’t confirm these conversations were archived. Check Mail before trying again.",
+    true,
+  ],
+])("keeps the whole selection when every change is %s", async (_name, fault, text, again) => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  h.toast.loading.mockReturnValue("toast-1");
+  h.update.mockImplementation(async () => {
+    throw fault();
+  });
+  await selectAll();
+  fireEvent.click(screen.getByRole("button", { name: "Archive 2 conversations" }));
+
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(text, { id: "toast-1" }),
+  );
+  expect(h.toast.success).not.toHaveBeenCalled();
+  expect(h.update).toHaveBeenCalledTimes(2);
+  // Both come back to the list and stay selected.
+  expect(await screen.findByText("2 selected")).toBeTruthy();
+  expect(row(maya, true)).toBeTruthy();
+  await waitFor(() => expect(h.summaries).toHaveBeenCalledTimes(2));
+  await act(async () => vi.advanceTimersByTime(UNCONFIRMED_RECHECK_MS));
+  await waitFor(() => expect(h.summaries).toHaveBeenCalledTimes(again ? 3 : 2));
+  noSnoozeResult();
+});
+
+it("says one conversation was not changed when a selection of one is refused", async () => {
+  h.toast.loading.mockReturnValue("toast-1");
+  h.update.mockRejectedValueOnce(rejection(409));
+  render(wrap(<InboxRoute />));
+  await screen.findByRole("button", unreadRow);
+  hold(maya);
+  fireEvent.click(screen.getByRole("button", { name: "Mark 1 conversation as read" }));
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn’t change this conversation. It was not marked as read.",
+      { id: "toast-1" },
+    ),
+  );
+});
+
+it("says one conversation could not be confirmed when a selection of one is interrupted", async () => {
+  h.toast.loading.mockReturnValue("toast-1");
+  h.snooze.mockRejectedValueOnce(new TypeError("Network request failed"));
+  render(wrap(<InboxRoute />));
+  await screen.findByRole("button", unreadRow);
+  hold(maya);
+  fireEvent.click(screen.getByRole("button", { name: "Snooze 1 conversation" }));
+  const before = Date.now();
+  fireEvent.click(await screen.findByRole("button", { name: /In 3 hours/ }));
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(1));
+  const until = new Date(h.snooze.mock.calls[0][1]);
+  expect(until.getTime() - before).toBeGreaterThanOrEqual(3 * 3_600_000 - 5_000);
+  expect(h.toast.error).toHaveBeenCalledWith(
+    `Couldn’t confirm this conversation was snoozed until ${snoozeTime(until)}. Check Mail before trying again.`,
+    { id: "toast-1" },
+  );
+});
+
+it("reports nothing and stops when the session changes during a selection's action", async () => {
+  h.toast.loading.mockReturnValue("toast-1");
+  let confirm: (thread: MailThread) => void = () => {};
+  h.update.mockReturnValueOnce(new Promise((resolve) => (confirm = resolve)));
+  await selectAll();
+  fireEvent.click(screen.getByRole("button", { name: "Archive 2 conversations" }));
+  await waitFor(() => expect(h.update).toHaveBeenCalledTimes(1));
+
+  h.epoch = 1;
+  await act(async () => confirm(confirmedThread("one", { mailboxIds: [] })));
+  await waitFor(() => expect(h.toast.dismiss).toHaveBeenCalledExactlyOnceWith("toast-1"));
+  // The second conversation is never asked to change for the person who left.
+  expect(h.update).toHaveBeenCalledTimes(1);
+  expect(h.toast.success).not.toHaveBeenCalled();
+  expect(h.toast.error).not.toHaveBeenCalled();
+});
+
+it("does not undo a selection's change once the session has changed", async () => {
+  h.update.mockResolvedValue(confirmedThread("one", { mailboxIds: [], unread: true }));
+  await selectAll();
+  fireEvent.click(screen.getByRole("button", { name: "Archive 2 conversations" }));
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  h.epoch = 1;
+  await act(async () => undoOf(h.toast.success.mock.calls)?.onClick());
+  expect(h.update).toHaveBeenCalledTimes(2);
+  expect(h.toast.loading).toHaveBeenCalledTimes(1);
+});
+
+it("counts a conversation that already has a change in flight as not confirmed", async () => {
+  h.toast.loading.mockReturnValueOnce("single").mockReturnValueOnce("bulk");
+  h.summaries.mockResolvedValue(three());
+  let confirm: (thread: MailThread) => void = () => {};
+  h.update
+    .mockReturnValueOnce(new Promise((resolve) => (confirm = resolve)))
+    .mockResolvedValueOnce(confirmedThread("two", { mailboxIds: [] }))
+    .mockResolvedValueOnce(confirmedThread("three", { mailboxIds: [] }));
+  render(wrap(<InboxRoute />));
+  await screen.findByRole("button", unreadRow);
+  choose("Actions for Board packet", "Mark as read");
+  hold(/Sam/);
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  fireEvent.click(screen.getByRole("button", { name: "Archive 3 conversations" }));
+
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledWith(
+      "2 conversations archived; 1 not confirmed. Check Mail before trying again.",
+      expect.objectContaining({ id: "bulk" }),
+    ),
+  );
+  // The busy conversation was never sent a second change.
+  expect(h.update.mock.calls.map(([id]) => id)).toEqual(["one", "two", "three"]);
+  await act(async () => confirm(confirmedThread("one")));
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenCalledWith("Marked as read", { id: "single" }),
+  );
 });

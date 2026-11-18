@@ -17,7 +17,15 @@ import {
 } from "./data";
 import { type ComposeStart, draftRecipients, draftStage, draftStart } from "./draft-logic";
 import { sendUnconfirmed, useMailDrafts, useUnconfirmedSendsRestored } from "./drafts";
-import { inboxScope, type MailScope, mailboxIcon, mailboxLabel, sortMailboxes } from "./logic";
+import {
+  inboxScope,
+  type MailScope,
+  mailboxIcon,
+  mailboxLabel,
+  scopeTarget,
+  snoozedScope,
+  sortMailboxes,
+} from "./logic";
 import { MailThreadList } from "./thread-list";
 
 /**
@@ -45,13 +53,7 @@ export function MailboxesScreen() {
   // With no mailbox open, a search has no list of its own, so it runs across all inboxes.
   const shown = scope ?? (mailSearch.trim() ? inboxScope : null);
   if (shown)
-    return (
-      <MailThreadList
-        key={shown.kind === "inbox" ? "inbox" : shown.mailboxId}
-        scope={shown}
-        onBack={() => show(null)}
-      />
-    );
+    return <MailThreadList key={scopeTarget(shown)} scope={shown} onBack={() => show(null)} />;
   const accent = workspaceColor(t, "mail");
   return (
     <Screen
@@ -91,6 +93,15 @@ export function MailboxesScreen() {
                   title="All inboxes"
                   leading={<Icon name="inbox" color={accent} />}
                   onPress={() => show(inboxScope)}
+                />
+              </SectionItem>
+              <SectionItem>
+                <RecordRow
+                  centered
+                  title="Snoozed"
+                  leading={<Icon name="clock" color={accent} />}
+                  accessibilityHint="Shows the conversations you snoozed."
+                  onPress={() => show(snoozedScope)}
                 />
               </SectionItem>
             </Section>

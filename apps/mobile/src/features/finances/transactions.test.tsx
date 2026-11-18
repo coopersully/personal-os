@@ -39,6 +39,7 @@ const h = vi.hoisted(() => ({
     getFinanceCategories: vi.fn(),
     getFinanceReviewQueue: vi.fn(),
     getFinanceSpending: vi.fn(),
+    getWorkspaceSettings: vi.fn(),
     createFinanceTransaction: vi.fn(),
     updateFinanceTransaction: vi.fn(),
     removeFinanceTransaction: vi.fn(),
@@ -297,6 +298,11 @@ beforeEach(() => {
   h.api.getFinanceReviewQueue.mockResolvedValue([]);
   h.api.getFinanceTransaction.mockResolvedValue({ data: transaction });
   h.api.getFinanceSpending.mockReturnValue(new Promise(() => undefined));
+  h.api.getWorkspaceSettings.mockImplementation(async (workspace: string) => ({
+    workspace,
+    revision: 1,
+    preferences: workspace === "calendar" ? { weekStartsOn: "monday" } : {},
+  }));
 });
 afterEach(cleanup);
 
@@ -313,11 +319,11 @@ it("opens the new transaction form from Summary, the Transactions action row and
   h.push.mockClear();
   h.params = { mode: "Transactions" };
   const view = mount(<FinanceSpendingScreen />);
-  const add = await screen.findByRole("button", { name: "Add transaction" });
+  // The list waits for the saved Spending defaults, which decide its period.
+  const select = await screen.findByRole("button", { name: "Select transactions" });
+  const add = screen.getByRole("button", { name: "Add transaction" });
   // Add sits in the same line of commands as Select and Filters, not over the list.
-  expect(add.parentElement).toBe(
-    screen.getByRole("button", { name: "Select transactions" }).parentElement,
-  );
+  expect(add.parentElement).toBe(select.parentElement);
   expect(add.querySelector('[data-icon="add"]')).toBeNull();
   fireEvent.click(add);
   expect(h.push).toHaveBeenCalledWith("/finance-transaction-edit");

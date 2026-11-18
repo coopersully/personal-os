@@ -649,17 +649,15 @@ describe("knowledge lifecycle", () => {
       content: input("Wednesday").content,
     });
     await lifecycle().mutate(human, {
-      action: "confirm",
+      action: "resolve_conflict",
       recordId: proposal.recordId,
       expectedRevision: 1,
+      keep: "proposed",
       mutationKey: randomUUID(),
     });
-    await lifecycle().mutate(human, {
-      action: "supersede",
-      recordId: before.recordId,
-      expectedRevision: 1,
-      replacementId: proposal.recordId,
-      mutationKey: randomUUID(),
+    expect(await records().get(human, { id: before.recordId })).toMatchObject({
+      status: "superseded",
+      supersededBy: proposal.recordId,
     });
     expect(
       await records().get(agent, { id: proposal.recordId, purpose: "planning" }),
@@ -668,6 +666,92 @@ describe("knowledge lifecycle", () => {
       origin: "inferred",
       evidenceAvailable: true,
     });
+  });
+
+  it("keeps a pending proposal resolvable until the person resolves its conflict", async () => {
+    const { human, agent } = await fixture();
+    const held = await save(human, input("Tuesday"));
+    const proposal = await lifecycle().mutate(agent, {
+      action: "revise",
+      recordId: held.recordId,
+      expectedRevision: 1,
+      mutationKey: randomUUID(),
+      content: input("Wednesday").content,
+    });
+    const pending = { recordId: proposal.recordId, expectedRevision: 1 };
+    for (const action of [
+      { action: "confirm" as const },
+      { action: "dispute" as const },
+      { action: "revise" as const, content: input("Thursday").content },
+    ])
+      await expect(
+        lifecycle().mutate(human, { ...pending, ...action, mutationKey: randomUUID() }),
+      ).rejects.toMatchObject({
+        status: 409,
+        message: expect.stringContaining("resolve_conflict"),
+      });
+    // Nothing was written: the proposal still conflicts with the person's record and resolves.
+    expect(await records().get(human, { id: proposal.recordId })).toMatchObject({
+      revision: 1,
+      status: "proposed",
+      conflictRecordIds: [held.recordId],
+    });
+    expect(
+      await lifecycle().mutate(human, {
+        ...pending,
+        action: "resolve_conflict",
+        keep: "proposed",
+        mutationKey: randomUUID(),
+      }),
+    ).toMatchObject({ record: { status: "active" } });
+    expect(await records().get(human, { id: held.recordId })).toMatchObject({
+      status: "superseded",
+    });
+  });
+
+  it("refuses to accept a second proposal once another replaced the original", async () => {
+    const { human, agent } = await fixture();
+    const held = await save(human, input("Tuesday"));
+    const propose = (value: string) =>
+      lifecycle().mutate(agent, {
+        action: "revise",
+        recordId: held.recordId,
+        expectedRevision: 1,
+        mutationKey: randomUUID(),
+        content: input(value).content,
+      });
+    const first = await propose("Wednesday");
+    const second = await propose("Thursday");
+    await lifecycle().mutate(human, {
+      action: "resolve_conflict",
+      recordId: first.recordId,
+      expectedRevision: 1,
+      keep: "proposed",
+      mutationKey: randomUUID(),
+    });
+    await expect(
+      lifecycle().mutate(human, {
+        action: "resolve_conflict",
+        recordId: second.recordId,
+        expectedRevision: 1,
+        keep: "proposed",
+        mutationKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(await records().get(human, { id: second.recordId })).toMatchObject({
+      revision: 1,
+      status: "proposed",
+    });
+    // Keeping the person's side still retires the stale proposal.
+    expect(
+      await lifecycle().mutate(human, {
+        action: "resolve_conflict",
+        recordId: second.recordId,
+        expectedRevision: 1,
+        keep: "current",
+        mutationKey: randomUUID(),
+      }),
+    ).toMatchObject({ record: { status: "superseded" } });
   });
 
   it("disputes upstream corrections and lets new evidence restore support", async () => {

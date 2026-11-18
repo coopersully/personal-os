@@ -47,6 +47,16 @@ const agentProposalActions = new Set<KnowledgeLifecycleInput["action"]>([
   "restrict",
   "raise_sensitivity",
 ]);
+/**
+ * Actions that would detach a pending proposal from its conflict: a confirmed, revised or
+ * disputed proposal stops being `proposed`, so `resolve_conflict` could no longer retire the
+ * record it proposes to change. The person resolves the conflict first.
+ */
+const proposalResolutionFirst = new Set<KnowledgeLifecycleInput["action"]>([
+  "revise",
+  "dispute",
+  "confirm",
+]);
 
 async function validateSupersession(
   tx: KnowledgeTransaction,
@@ -161,7 +171,9 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
     const superseded: RevisionWrite[] = [];
     for (const id of originalIds) {
       const original = await ownedKnowledgeRevision(tx, principal, id, true);
-      if (original.snapshot.status === "superseded") continue;
+      // Another proposal already replaced it; activating this one too would leave two.
+      if (original.snapshot.status === "superseded")
+        throw new AppError("conflict", "Another memory already replaced the original.");
       await validateSupersession(tx, principal, id, proposal.snapshot.id);
       const derivations = await knowledgeRevisionDerivations(tx, principal.userId, original);
       if (!original.hasSidecar)
@@ -207,6 +219,8 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
           throw new AppError("forbidden", "The account owner must resolve this dispute.");
         if (agent && snapshot.status === "proposed" && !agentProposalActions.has(input.action))
           throw new AppError("conflict", "The account owner must resolve this proposal.");
+        if (snapshot.status === "proposed" && proposalResolutionFirst.has(input.action))
+          throw new AppError("conflict", "Resolve this proposal with resolve_conflict first.");
 
         const at = now();
         const derivations = await knowledgeRevisionDerivations(tx, principal.userId, current);

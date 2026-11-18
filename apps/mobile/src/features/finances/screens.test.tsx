@@ -1990,7 +1990,19 @@ it.each([
     matching
       ? {
           state: "available",
-          question: { prompt: "Was this purchase reimbursed?", transactionId: null },
+          // The API always names the transaction a contextual question is about.
+          question: {
+            id: "reference-1",
+            prompt: "Was this purchase reimbursed?",
+            status: "answered",
+            transactionId: transaction.id,
+            transaction: {
+              merchant: transaction.merchant,
+              date: transaction.date,
+              amountCents: 4200,
+              currencyCode: "USD",
+            },
+          },
         }
       : { state: "unavailable" },
   );
@@ -1998,15 +2010,13 @@ it.each([
   if (!matching) {
     await screen.findByText("Reference unavailable.");
     expect(screen.queryByRole("button", { name: "View transaction" })).toBeNull();
-  } else if (kind === "review_case") {
+  } else {
+    if (kind === "contextual_question") await screen.findByText("Was this purchase reimbursed?");
     fireEvent.click(await screen.findByRole("button", { name: "View transaction" }));
     expect(h.push).toHaveBeenCalledWith({
       pathname: "/finance-transaction",
       params: { id: transaction.id },
     });
-  } else {
-    await screen.findByText("Was this purchase reimbursed?");
-    expect(screen.queryByRole("button", { name: "View transaction" })).toBeNull();
   }
   if (kind === "review_case")
     expect(h.api.getFinanceReviewQueue).toHaveBeenCalledWith(1, "reference-1");

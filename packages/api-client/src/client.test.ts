@@ -1623,6 +1623,25 @@ describe("Personal OS API client", () => {
     expect(fetch.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
   });
 
+  it("sends a Plaid link-token body only for an account or a named native client", async () => {
+    const bodies: unknown[] = [];
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (_input, init) => {
+        bodies.push(init?.body ? JSON.parse(String(init.body)) : null);
+        return json({ linkToken: "link-token" });
+      },
+    });
+    const accountId = "018f6f2e-0000-7000-8000-000000000001";
+
+    await api.getPlaidLinkToken();
+    await api.getPlaidLinkToken(accountId);
+    await api.getPlaidLinkToken(undefined, "ios");
+    await api.getPlaidLinkToken(accountId, "ios");
+
+    expect(bodies).toEqual([null, { accountId }, { client: "ios" }, { accountId, client: "ios" }]);
+  });
+
   it("serializes budget bucket routes with and without a month", async () => {
     const requests: Array<{ body: unknown; method: string; path: string }> = [];
     const api = createApiClient({
@@ -3308,4 +3327,23 @@ it("preserves durable connector continuation instead of reducing it to a changed
   await expect(api.syncConnector(id)).resolves.toEqual(pending);
   expect(fetch.mock.calls[0]?.[0]).toBe(`https://api.example.com/v1/connectors/${id}/sync`);
   expect(fetch.mock.calls[0]?.[1]).toMatchObject({ method: "POST" });
+});
+
+it("keeps a record id inside its own path segment on single-record reads", async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () => Response.json({}));
+  const api = createApiClient({ baseUrl: "https://api.example.com", fetch });
+  const hostile = "../accounts?all=1#x";
+  await api.getTask(hostile);
+  await api.getReminder(hostile);
+  await api.getEvent(hostile);
+  await api.getMailThread(hostile);
+  await api.listMailMessages(hostile);
+  const encoded = "..%2Faccounts%3Fall%3D1%23x";
+  expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
+    `https://api.example.com/v1/tasks/${encoded}`,
+    `https://api.example.com/v1/reminders/${encoded}`,
+    `https://api.example.com/v1/events/${encoded}`,
+    `https://api.example.com/v1/mail/threads/${encoded}`,
+    `https://api.example.com/v1/mail/threads/${encoded}/messages`,
+  ]);
 });

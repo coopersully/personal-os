@@ -1335,12 +1335,16 @@ export function registerFinanceRoutes({
   );
   app.post("/v1/finances/plaid/link-token", requireHuman, async (context) => {
     const input = context.req.header("content-type")?.includes("application/json")
-      ? await parseBody(context, z.object({ accountId: idSchema.optional() }))
+      ? await parseBody(
+          context,
+          z.object({ accountId: idSchema.optional(), client: z.literal("ios").optional() }),
+        )
       : {};
     return context.json({
       linkToken: await finances.createPlaidLinkToken(
         context.get("principal").userId,
         input.accountId,
+        input.client,
       ),
     });
   });

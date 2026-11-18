@@ -6,6 +6,7 @@ import { AppToaster } from "../components/app-toaster";
 import { stackChromeOptions } from "../components/editor-header";
 import { AuthProvider, useAuth } from "../features/auth/context";
 import { PreviewProvider } from "../features/briefing/context";
+import { LinkOpener } from "../features/links/opener";
 import { NotificationProvider } from "../features/notifications/provider";
 import { MobileDataProvider } from "../features/tasks/data";
 import { useTheme } from "../theme";
@@ -105,6 +106,7 @@ function AuthenticatedLayout() {
             />
           </Stack.Protected>
         </Stack>
+        {state.status === "signedIn" && <LinkOpener />}
       </PreviewProvider>
     </MobileDataProvider>
   );

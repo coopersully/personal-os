@@ -37,6 +37,7 @@ const h = vi.hoisted(() => ({
   messages: vi.fn(),
   fullThreads: vi.fn(),
   update: vi.fn(),
+  drafts: vi.fn(),
   toast: { error: vi.fn(), loading: vi.fn(), success: vi.fn(), dismiss: vi.fn() },
 }));
 vi.mock("react-native", async () => {
@@ -65,6 +66,11 @@ vi.mock("react-native-safe-area-context", () => ({
   SafeAreaView: ({ children }: PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock("sonner-native", () => ({ toast: h.toast }));
+vi.mock("expo-secure-store", () => ({
+  getItemAsync: async () => null,
+  setItemAsync: async () => {},
+  deleteItemAsync: async () => {},
+}));
 vi.mock("expo-router", () => ({
   router: { setParams: h.setParams },
   useLocalSearchParams: () => h.params,
@@ -90,6 +96,7 @@ vi.mock("../auth/context", () => ({
         listMailMessages: h.messages,
         listMailThreads: h.fullThreads,
         updateMailThread: h.update,
+        listMailDrafts: h.drafts,
       }),
     },
   }),
@@ -171,6 +178,7 @@ beforeEach(() => {
     }),
   ]);
   h.accounts.mockResolvedValue({ accounts });
+  h.drafts.mockResolvedValue([]);
   h.messages.mockResolvedValue([message("m1")]);
 });
 afterEach(() => {

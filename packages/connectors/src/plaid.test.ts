@@ -477,6 +477,32 @@ describe("Plaid connector", () => {
     });
   });
 
+  it("adds a redirect only when one is supplied, for new and update-mode Link tokens", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const plaid = createPlaidConnector({
+      clientId: "client-id",
+      environment: "production",
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return Response.json({ link_token: "link-token" });
+      },
+      secret: "connector-secret",
+    });
+    const redirectUri = "https://app.example.com/plaid/return";
+
+    await plaid.createLinkToken(linkInput);
+    await plaid.createLinkToken({ ...linkInput, redirectUri });
+    await plaid.createLinkToken({ ...linkInput, accessToken: "access-token" });
+    await plaid.createLinkToken({ ...linkInput, accessToken: "access-token", redirectUri });
+
+    const [plain, withRedirect, update, updateWithRedirect] = bodies;
+    expect(plain).not.toHaveProperty("redirect_uri");
+    expect(withRedirect).toEqual({ ...plain, redirect_uri: redirectUri });
+    expect(update).not.toHaveProperty("redirect_uri");
+    expect(update).toMatchObject({ access_token: "access-token" });
+    expect(updateWithRedirect).toEqual({ ...update, redirect_uri: redirectUri });
+  });
+
   it("parses exchange, account, and incremental transaction responses", async () => {
     const plaid = createPlaidConnector({
       clientId: "client-id",

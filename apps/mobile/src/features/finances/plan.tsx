@@ -2,6 +2,8 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { BalanceAttention, balanceHint, balancesFor } from "./balances";
 import { BudgetOverview } from "./budget-overview";
+import { BudgetPace } from "./budget-pace";
+import { BudgetPlanDestinations } from "./budget-plan";
 import { FinanceCashflow } from "./cashflow";
 import { categoryIcon } from "./category-presentation";
 import { useFinanceRead } from "./data";
@@ -15,6 +17,8 @@ function Budget() {
   return (
     <>
       <BudgetOverview />
+      <BudgetPace />
+      <BudgetPlanDestinations />
       <ReadState query={query}>
         {budget ? (
           <>

@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { View } from "react-native";
+import { ConnectBank } from "./bank-link";
 import { csvFed } from "./csv-import";
 import { useFinanceRead } from "./data";
 import { InstitutionLogo } from "./institution-logo";
@@ -80,6 +81,7 @@ function AccountList() {
           </Card>
         )}
       </ReadState>
+      <ConnectBank />
       <View style={{ height: 80 }} />
     </FinanceScreen>
   );

@@ -15,6 +15,8 @@ export type PlaidLinkTokenInput = {
   transactions: { daysRequested: number };
   userId: string;
   accessToken?: string;
+  /** OAuth return address for a native client; omitted, the request is unchanged. */
+  redirectUri?: string;
 };
 
 export type PlaidItemToken = { accessToken: string; itemId: string };
@@ -660,6 +662,7 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
           ...(input.accessToken
             ? {}
             : { transactions: { days_requested: input.transactions.daysRequested } }),
+          ...(input.redirectUri ? { redirect_uri: input.redirectUri } : {}),
           user: { client_user_id: input.userId },
         }),
       );

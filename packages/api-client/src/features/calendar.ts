@@ -91,7 +91,9 @@ export function createCalendarApiClient(request: ApiRequest) {
       return response.status;
     },
     async getEvent(id: string): Promise<CalendarEvent> {
-      const response = await request<{ event: CalendarEvent }>(`/v1/events/${id}`);
+      const response = await request<{ event: CalendarEvent }>(
+        `/v1/events/${encodeURIComponent(id)}`,
+      );
       return response.event;
     },
     async listCalendars(): Promise<Calendar[]> {

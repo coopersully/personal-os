@@ -62,6 +62,9 @@ origin allowlists, preserving callback paths, credentials, and the original AWS
 export. It changes the email display name to nohmi but retains the existing verified
 sender address/domain. Before activation, add the new Google and X callback URLs
 to the existing provider applications without removing the old registrations.
+`PLAID_IOS_REDIRECT_URI` is forwarded to the API only when present. Leave it unset until the URI is
+allowed in the Plaid dashboard and opens the iPhone app as a universal link; see "iPhone Plaid
+Link" in `docs/engineering/external-boundary-reliability.md`.
 Check any configured Plaid return URL, webhooks, and push audiences separately;
 rewriting a local value does not change provider registrations. Existing provider
 credentials and data remain intact; browser sessions and MCP connections must be

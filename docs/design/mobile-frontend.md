@@ -241,8 +241,8 @@ when the action has a more informative name. Do not duplicate the same toast in 
 
 The approved mobile Finance map uses Overview, Spending, Plan, Accounts, and Assistant
 as five stable native tabs. Spending owns Summary and Transactions; Plan owns Budget,
-Cash flow, and Wealth. Assistant presents the existing conversation, review queue,
-and recorded activity; it does not create a second decision store. Preserve the native
+Cash flow, and Wealth. Assistant presents the existing conversation, review queue, approvals,
+review and correction pages, and recorded activity; it does not create a second decision store. Preserve the native
 system tab bar, selected workspace tint and filled icons.
 
 Finance summaries must preserve the server's currency, contribution basis, coverage,
@@ -312,6 +312,31 @@ rules; a transaction's top-level category is insufficient. Limit edits retain th
 bind to the displayed revision, and preserve server approval/input outcomes. Use the standard
 Close/Cancel, discard confirmation, floating Save and above-sheet Sonner feedback.
 
+### Budget plan revision
+
+Plan › Budget links to four pages behind one route, `/finance-budget-plan`, whose `view`
+parameter names the page. The budget pace graph sits on the Budget tab itself.
+
+- **Revise plan** edits the effective month, resources, allocations, rationale and assumptions of
+  the version on screen and saves it as a proposal bound to that version. With no plan it creates
+  the first proposal. Save stays disabled until every cent is assigned, names are unique and each
+  debt or goal allocation names its record. A saved proposal opens the existing proposal review,
+  which owns approval; the editor never activates a budget.
+- **Stale revision:** a conflict keeps the draft, disables Save and offers Reload latest version,
+  which asks before replacing the draft. Bucket edits recover the same way. A taken bucket name is
+  a correction, not a stale record.
+- **Uncertain writes:** an unchanged draft is resent under the same idempotency key. Only a
+  definite rejection, or the server recording the earlier attempt as failed, frees a new key.
+- **Budget buckets** shows the month's totals by bucket (never summed) and edits a bucket's name,
+  description and categories against its version. Turning on a category held by another bucket
+  says that it moves.
+- **Budget scope** confirms the approved version, accounts and currency a month is compared with:
+  choose each explicitly, preview the exact scope, then confirm that preview. Any change to the
+  selection or its source records discards the preview. Confirming a scope never approves or
+  rewrites a budget, and a later confirmation of a past month is labelled as such.
+- **Budget pace** shows one cell per day for the week, month or year, with the latest evaluated
+  day summarised in words. Status is never carried by colour alone: each cell has a spoken label.
+
 Account identities use validated provider institution artwork without recoloring it. Missing or
 failed artwork falls back to institution initials, never a fabricated company logo. Reuse the same
 identity component in account rows and details.
@@ -319,7 +344,7 @@ identity component in account rows and details.
 ### Finance account management
 
 Accounts has a floating plus that opens the manual account form; connecting a bank is a separate
-flow. Account details keep ownership and planning as direct rows and put Edit account, Sync
+flow (see Finance bank connection). Account details keep ownership and planning as direct rows and put Edit account, Sync
 account, Review duplicate and the destructive Stop tracking account in the top-right action menu.
 Offer Sync only for a connected account, and neither Sync nor Stop tracking once tracking has
 stopped. A connected account's balance stays read-only; only a manual account edits its balance.
@@ -341,6 +366,27 @@ connected and current, reads both identities, freshness and the overlapping and 
 counts, then confirms. Resolution is bound to the reviewed comparison revision; a changed
 comparison stops nothing and reloads. Stop tracking and duplicate resolution each keep a native
 confirmation that names the account and what is preserved.
+
+### Finance bank connection
+
+On iPhone, Connect a bank sits under the Accounts list and Reconnect account appears on the page
+of a connected account whose bank sign-in has lapsed. Neither is offered once tracking has
+stopped, or outside the iPhone build. Both present Plaid's native Link over the app; bank
+credentials are typed into Plaid's screens and never reach nohmi. The app asks the API for a link
+token as the iPhone app (for one account when reconnecting, which puts Link in update mode), and
+sends back only the public token, the institution and the chosen account names and masks.
+
+One toast follows the attempt: opening, then connecting or verifying, then the outcome the API
+confirmed. Closing Link is a neutral notice that nothing was connected or changed. A Plaid or bank
+error says the sign-in did not finish; Plaid's error text and codes are not shown or sent anywhere.
+A new connection counts the accounts the API returned. A public token is exchanged once, so an
+exchange with an unknown outcome is never sent again and the person is told to check Accounts. A
+reconnect verifies with an idempotency key that is kept while the outcome is unknown and renewed
+after a definitive refusal, whose reason from the server is shown. The key is held per person and
+account outside the screen, and the toast reaches its outcome even if the person leaves the screen
+first. Accounts are re-read after every attempt. The result is dropped only if the signed-in
+person changed. Names sent with the exchange are trimmed to the API's limits so a linked bank is
+not refused for its label.
 
 ### Finance transaction management
 
@@ -603,6 +649,39 @@ only.
 - Message nohmi from transaction details opens the workspace conversation with a removable transaction attachment. Show merchant and amount before sending. Attachment removal preserves the draft; confirmed delivery clears it. Unavailable references block sending until removed, and uncertain retries retain both the reference and delivery key.
 - Sent references remain accessible in conversation history. Chat context is distinct from a transaction note and does not itself confirm a categorization change.
 
+### Finance reviews and corrections
+
+Assistant › For you carries the review work that does not need chat: Needs your input,
+Approvals, and a Reviews and checks list. Every page behind that list is the single
+`/finance-reviews` route; its `view` parameter names the page.
+
+- **Approvals** lists agent-prepared changes still `pending`. Approve reports "Approved and
+  applied" only for an `applied` outcome; `pending_review` and `needs_input` say the change
+  was not applied. A 404 or 409 says nothing was applied. After an outcome nobody confirmed,
+  the card stays locked until the reviews have been read again. Dismiss reports the status
+  the server returned, so an already applied review is never called dismissed.
+- **Period review** opens the latest saved review named by Finance status. It is read-only;
+  an amount the review did not record shows Unavailable, never zero.
+- **Review backlog** shows flag and review counts without adding them together, then the
+  records of one group. A record opens its transaction, where it is worked. Pages belong to
+  one snapshot: a 409 on a further page restarts the list from the top with one toast.
+- **Review history** pages resolved and deferred reviews and opens the recorded outcome of
+  one. An archived review has no transaction to open.
+- **Ledger checks** shows the ledger counts and the open alerts. Run checks again is an
+  explicit command with the full Sonner lifecycle. An alert is resolved or dismissed, and is
+  reported only in the status the server returned.
+- **Reimbursements** lists claims, then one claim with its receipts and past corrections.
+  Correct expectation and Remove receipt match send the revision on screen and one
+  idempotency key. After an unknown outcome the form locks and offers Retry same correction,
+  which resends that exact request; only a definite rejection frees the form for a new one.
+  That includes the server reporting the earlier attempt as failed: nothing was saved, the
+  draft stays, and Save sends it under a new key. A cancelled claim offers no correction.
+- **Contextual questions** opened from chat take an answer in place. The same text is resent
+  under the same operation id, and the text is locked while a send is unconfirmed. A
+  `blocked` answer says nothing was saved and closes the form.
+- **A split transaction under review** reads "Split in N parts". Approve splits keeps the
+  parts. Choosing one category asks "Replace N parts?" first, because it removes them.
+
 ### Workspace conversations
 
 Chat uses a bounded, flex-sized transcript beneath fixed page controls. Only the transcript
@@ -847,15 +926,55 @@ only in Sent or Drafts is not found by the subject search. COO-259 tracks the Ma
 route that removes these limits. Result previews are private: they are not kept in the query cache after the
 list closes.
 
+### nohmi web links
+
+A nohmi web link to one record opens that record in the app (Universal Links, COO-233). The app
+claims only these links on its web origin; every other nohmi page stays in the browser.
+
+| Web link | Opens |
+| --- | --- |
+| `/tasks?task=<id>` | the task editor |
+| `/reminders?reminder=<id>` | the reminder editor |
+| `/finances/transactions?transactionId=<id>` | the transaction |
+| `/calendar?…&event=<id>` | the event |
+| `/mail?…&thread=<id>` | the conversation in the Mail reader, read-only |
+
+- `features/links/parse.ts` is the one list of supported links. The hosted association file
+  (`apps/web/public/.well-known/apple-app-site-association`) must claim exactly that list; a test
+  compares them. Adding a link means changing both.
+- A web link is never routed by its web path. `+native-intent` validates it (configured web
+  origin, known path, one well-formed id), queues it, and the signed-in shell opens it above the
+  current screen, the way a notification tap does. A link that arrives signed out waits in memory
+  for sign-in. A link the app is handed but cannot open raises one Sonner error and changes no
+  screen.
+- A conversation is read by id and shown in the shared reader without actions. Opening,
+  a conversation that no longer exists and a failed read are reported by Sonner only.
+- `/plaid/return` is reserved as the return link for a bank sign-in started in the app (Plaid
+  OAuth, COO-234). The association file claims it with any parameters, so iOS brings the app
+  back to the front; the link handler opens no screen for it and never reads, stores or logs
+  its parameters. The native SDK that started the flow resumes it. Nothing serves this path
+  on the web: without the app it shows the web app's unknown-page state.
+- Custom-scheme paths (`personal-os://`) keep the router's own handling and still prompt in iOS.
+- iOS does not hand over a link followed inside Safari on the same site, a link typed into the
+  address bar, or one the person chose to open in the browser; those stay on the web.
+
 ### Mail read state and archive
 
-A conversation offers Mark as read or Mark as unread, whichever changes it, and Archive when it is in an inbox. Archive removes it from every inbox and keeps its other mailboxes; a conversation that is in no inbox, or whose mailboxes have not loaded, offers no Archive. The actions sit in the action slot at the trailing end of the row's first line, where the disclosure chevron was, and in the conversation's header: a menu when there are two, a single control when there is one. Opening a conversation does not mark it read, as on web. Snooze, bulk selection, deletion, compose and reply are separate work (COO-241, COO-237).
+A conversation offers Mark as read or Mark as unread, whichever changes it, and Archive when it is in an inbox. Archive removes it from every inbox and keeps its other mailboxes; a conversation that is in no inbox, or whose mailboxes have not loaded, offers no Archive. The actions sit in the action slot at the trailing end of the row's first line, where the disclosure chevron was, and in the conversation's header: a menu when there are two, a single control when there is one. Opening a conversation does not mark it read, as on web. Snooze, bulk selection and deletion are separate work (COO-241); drafts, reply and send are described below.
 
 These actions change the person's mailbox at the provider, so the list shows the change at once but records it only when the API confirms it. The pending change is an overlay on the cached list, never a cache write: an archived conversation leaves the list, a read change restyles the row, the conversation's actions are disabled until the write settles, and archiving from the open conversation closes it. One Sonner toast runs from loading to the outcome and names the action ("Marked as read", "Conversation archived"). A confirmed change is written to cached summaries from the body-free fields of the response and Mail is then re-read for unread counts and other mailboxes; a failure of that read never reports the write as failed.
 
 Every write carries the conversation's displayed `updatedAt`, so a conversation that changed elsewhere is rejected rather than overwritten. A definitive rejection (a 4xx other than 408 that does not carry `partialEffect`) puts the conversation back as it was and says it was not changed, that it changed, or that it is no longer available. Anything else (a timeout, a lost connection, a server fault, or a provider change the API could not record) is unconfirmed: the conversation goes back to its last confirmed state, the toast says the change could not be confirmed and may have reached the mailbox, and Mail is re-read rather than assuming either outcome. Nothing is retried automatically. That re-read returns nohmi's record, which catches up with the provider at the account's next sync, so Mail is read once more five seconds later. An outcome is reported against the session that sent the change: one that settles after the list has closed still reports, and one that settles after sign-out reports nothing and its Undo does nothing.
 
 A confirmed Archive of a Gmail conversation offers Undo for ten seconds. An iCloud archive moves the message to another mailbox and the API cannot yet move it back (it would report success without changing the mailbox), so an iCloud archive offers no Undo. Undo is used once, restores the mailboxes the conversation had against the revision the archive returned, and reports its own outcome in its own toast. A confirmed Undo puts the conversation back in the loaded inbox at its place by date without waiting for the read that follows; a search is left to that read. Read and unread are their own inverse and offer no Undo. No action-result copy is rendered in the list or the conversation.
+
+### Mail drafts, reply and send
+
+Mailboxes lists nohmi's unsent drafts, including ones an agent prepared, with Needs review or Sending beside a draft whose send is not settled. Inbox and mailbox lists offer New message, and a loaded conversation opened from Mail offers Reply and Forward; the conversation opened from Today offers neither. A reply stays in its conversation and goes to the sender, their reply address, or the other party when the latest message is the person's own. A forward is a new message carrying the latest message's text. Messages are plain text, and attachments cannot be added or forwarded because the draft API has no attachment field.
+
+The composer is a full-screen sheet, so a swipe cannot dismiss typed text; Close asks before discarding anything not yet saved. Draft text is held only while a screen shows it, like an open conversation. Save draft creates or updates the draft against the revision it opened with. A draft that changed elsewhere is not overwritten: the toast says so and the typed text stays. A create the API never confirmed may have landed, so the next save reads the drafts first and never adopts a draft for it, because the API gives a create no identity: if a draft that did not exist before now holds exactly this text, nothing is written and the toast sends the person to Drafts to open it; text that has changed since is saved as a new draft, which can leave the interrupted copy in Drafts; if the drafts cannot be read, nothing is written. An interrupted update is treated the same way. A recipient name that holds a comma or semicolon is quoted so it stays one recipient.
+
+Sending takes two deliberate steps. Review and send saves the draft and shows the saved record back: sender, recipients, subject and message. Only Send message on that review sends it, at the revision reviewed; a second tap while one is in flight does nothing. A send is called sent only when the API confirms it. After any failure the draft is read again and its record decides: recorded as sent is reported as sent; a refusal the API vouches for (a 4xx other than 408 without `partialEffect`, or `retrySafe`) with the draft still unsent returns to the draft and says it was not sent; everything else is unconfirmed, including an unsent record after a lost connection, because that request may still reach the provider. An unconfirmed message locks: it shows the message read-only with Check again, which reads the draft's record and sends nothing, and, once the API marks it for review, It was sent and It was not sent, which record what the person found in Sent mail. A draft is marked on the device before its send leaves and unmarked only by a confirmed outcome or a successful check, so neither reopening the draft nor restarting the app lifts the lock; only draft ids are stored, never message text. Stored marks are read back before any mark is written, from every composer entry point, so a write never replaces marks the app has not yet seen. If the mark cannot be stored, nothing is sent; if stored marks cannot be read, drafts stay closed behind Load drafts until they can. When a check finds the draft recorded as unsent, the draft is saved again unchanged before it unlocks: that moves its revision on, so the API refuses an interrupted request that had not yet claimed the draft. It does not stop a send the API had already claimed: if the provider call outlives the API's claim timeout and the person records It was not sent, that message can still be delivered afterwards and a resend would duplicate it. Looking in Sent mail can show a delivery that has already happened; it cannot rule out one that happens afterwards. Closing that gap needs an API change. When the record reads unsent but that save is refused (a disconnected account, a deleted conversation), the locked message also offers Discard draft, which warns that the message may already have been sent, sends nothing and ends the lock once the API confirms the draft is gone. A check that finds the draft no longer exists ends the lock and closes the message. A draft whose earlier send is still unconfirmed is never sent again, even if device storage fails, and marks are written one at a time so a slow earlier write cannot replace a later mark. A sent reply re-reads its open conversation. Nothing is ever sent again automatically, and a locked message offers no send. Each action reports through one Sonner toast and no action-result copy is rendered in the composer; the locked note states the draft's recorded state.
 
 ### Transparent sticky workspace search
 

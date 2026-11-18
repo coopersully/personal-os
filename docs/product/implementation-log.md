@@ -1386,6 +1386,22 @@ server code changed.
   covered by focused tests; it was not run on a simulator or device or against a live Gmail or
   iCloud mailbox, and it is not a production or TestFlight release.
 
+
+## 2026-11-16 — Native Mail drafts, reply and send (local candidate)
+
+- COO-237 — On iPhone, Mailboxes lists unsent nohmi drafts, including agent-prepared ones. A person
+  can write a new message, reply to or forward a conversation opened from Mail, edit and save a
+  draft, discard it, and send it. Only existing API routes are used; no server change.
+- Sending needs an explicit review of the saved draft (sender, recipients, subject, message) and a
+  second tap on Send message. It is reported as sent only when the API confirms it. After a failed
+  or interrupted send the draft is read again; an unconfirmed message locks and is never re-sent
+  automatically, and a draft the API marks for review can be recorded as sent or not sent.
+- An interrupted draft create is not repeated blindly: the next save looks for the draft first.
+- Not included: attachments. The draft API has no attachment field, so a file cannot be attached
+  or forwarded from iPhone until the API supports it. Reply all and rich text are also not included.
+- Focused Mail tests, mobile type checking and lint passed. Not observed in the iPhone simulator,
+  and no message was sent through a real provider. This is not a production or TestFlight release.
+
 ## 2026-11-14 — Native task filters by List, Project and due shortcuts (local candidate)
 
 COO-218 — The iPhone task filter sheet narrows global views (To-do, All, Upcoming, History,
@@ -1506,6 +1522,26 @@ details, and restore a deleted event from the delete toast's Undo.
   not included. This is a local candidate covered by focused tests; the simulator check and a
   write against a real Google or iCloud calendar are outstanding. It is not a production or
   TestFlight release.
+
+## 2026-11-17 — nohmi web links open in the iPhone app (local candidate)
+
+COO-233 — The iPhone app can claim nohmi web links to a task, reminder, transaction, calendar
+event or mail conversation and open the matching screen (Universal Links).
+
+- The app validates a handed-over link against the configured web origin and a fixed list of
+  record links, queues it, and opens it once signed in; a conversation opens in the shared Mail
+  reader. Unknown links are rejected with one Sonner error. No API or schema change.
+- Production configuration: the web app now ships
+  `/.well-known/apple-app-site-association`, nginx serves it as JSON, and signed builds carry the
+  `applinks:` associated-domains entitlement for their HTTPS web origin.
+- `/plaid/return` is reserved in the association file as the bank sign-in return link for
+  COO-234. The app drops it without reading its parameters; nothing uses it yet.
+- Not in effect until three things happen outside the repository: the web change is deployed, a
+  new signed build is installed, and the Apple App ID has the Associated Domains capability. See
+  "iPhone Universal Links" in `docs/engineering/external-boundary-reliability.md`.
+- This is a local candidate covered by parsing, opener, nginx and build-output tests. No link has
+  been opened on a device or simulator; Apple's fetch of the file and the signed entitlement are
+  unverified. It is not a production or TestFlight release.
 
 ## 2026-11-16 — Native Calendar blocks, conflicts and free-time check (local candidate)
 

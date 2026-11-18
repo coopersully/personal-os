@@ -4,6 +4,7 @@ import { editorActionsOptions } from "../../components/editor-header";
 import { useTheme } from "../../theme";
 import { AccountActions } from "./account-actions";
 import { AccountPreferences } from "./account-preferences";
+import { ReconnectBank } from "./bank-link";
 import { categoryIcon, categoryLabel } from "./category-presentation";
 import { csvFed, csvSourceLabel } from "./csv-import";
 import { useFinanceRead } from "./data";
@@ -68,6 +69,7 @@ export function FinanceAccountScreen() {
                     }
                     icon="attention"
                   />
+                  <ReconnectBank account={account} />
                   <FinanceRow
                     centered
                     title="Updated"

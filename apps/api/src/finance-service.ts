@@ -253,6 +253,8 @@ type Options = {
   onProposalSnapshotRead?: () => Promise<void>;
   plaid?: PlaidConnector;
   plaidEnvironment?: "sandbox" | "development" | "production";
+  /** Added to a Link token only when the iPhone app asks for one. */
+  plaidIosRedirectUri?: string;
   providerItems?: ReturnType<typeof createFinanceProviderItemService>;
   searchReceiptCandidates?: (
     userId: string,
@@ -808,6 +810,7 @@ export function createFinanceService({
   onProposalSnapshotRead,
   plaid,
   plaidEnvironment,
+  plaidIosRedirectUri,
   providerItems: configuredProviderItems,
   searchReceiptCandidates,
 }: Options) {
@@ -5515,7 +5518,7 @@ export function createFinanceService({
       for (const userId of userIds) await refreshCashflowIntelligence(userId);
       return { processed: userIds.length };
     },
-    async createPlaidLinkToken(userId: string, accountId?: string) {
+    async createPlaidLinkToken(userId: string, accountId?: string, client?: "ios") {
       let accessToken: string | undefined;
       if (accountId) {
         const item = await providerItems.resolveItemForAccount(userId, accountId);
@@ -5545,6 +5548,8 @@ export function createFinanceService({
         language: "en",
         linkCustomizationName: "default",
         products: ["transactions"],
+        // Plaid requires a return address for bank OAuth in a native iOS app, in update mode too.
+        ...(client === "ios" && plaidIosRedirectUri ? { redirectUri: plaidIosRedirectUri } : {}),
         transactions: { daysRequested: 730 },
         userId,
       });

@@ -246,6 +246,13 @@ test("production Plaid accepts only an explicit production credential pair and k
     assert.ok(!enabled.mcp.includes(key));
     assert.ok(!enabled.postgres.includes(key));
   }
+  assert.ok(!enabled.api.includes("PLAID_IOS_REDIRECT_URI"));
+  const redirect = environmentFiles(
+    { ...source, ...configured, PLAID_IOS_REDIRECT_URI: "https://nohmi.example/plaid/return" },
+    password,
+  );
+  assert.ok(redirect.api.includes("PLAID_IOS_REDIRECT_URI=https://nohmi.example/plaid/return\n"));
+  assert.ok(!redirect.mcp.includes("PLAID_IOS_REDIRECT_URI"));
   for (const invalid of [
     { ...credentials, PLAID_ENV: "sandbox" },
     { ...credentials, PLAID_ENV: "development" },

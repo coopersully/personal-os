@@ -551,6 +551,7 @@ export async function writeKnowledgeReceipt(
   principal: Principal,
   input: { mutationKey: string; requestHash: string; action: string },
   record: KnowledgeRecordSnapshot,
+  before: KnowledgeRecordSnapshot | null = null,
 ) {
   const receipt = {
     id: randomUUID(),
@@ -561,17 +562,21 @@ export async function writeKnowledgeReceipt(
     actorId: principal.actorId,
   };
   await tx.insert(knowledgeReceipts).values(receipt);
-  await writeKnowledgeAudit(tx, principal, input, record, receipt.id);
+  await writeKnowledgeAudit(tx, principal, input, record, receipt.id, before);
   return receipt;
 }
 
-/** Audit carries revision, status and source IDs only, never knowledge values. */
+/**
+ * Audit carries revision, status and source IDs only, never knowledge values. A change to an
+ * existing record also records the revision and status it replaced; a creation has no before.
+ */
 export async function writeKnowledgeAudit(
   tx: KnowledgeTransaction,
   principal: Principal,
   input: { mutationKey: string; action: string },
   record: KnowledgeRecordSnapshot,
   receiptId: string,
+  before: Pick<KnowledgeRecordSnapshot, "revision" | "status"> | null = null,
 ) {
   await tx.insert(auditEvents).values(
     auditValues({
@@ -580,7 +585,7 @@ export async function writeKnowledgeAudit(
       entityId: record.id,
       principal,
       requestId: input.mutationKey,
-      before: null,
+      before: before ? { revision: before.revision, status: before.status } : null,
       after: {
         revision: record.revision,
         status: record.status,

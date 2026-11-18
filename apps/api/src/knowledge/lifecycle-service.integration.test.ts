@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import {
   accessTokens,
+  auditEvents,
   createDatabaseClient,
   type DatabaseClient,
   goals,
@@ -576,6 +577,53 @@ describe("knowledge lifecycle", () => {
     ).toMatchObject({ record: { status: "archived" } });
     const current = await save(human, input("Wednesday"));
     expect(current.record.status).toBe("active");
+  });
+
+  it("treats an uppercase spelling of the record itself as a supersession cycle", async () => {
+    const { human } = await fixture();
+    const saved = await save(human, input("Tuesday"));
+    await expect(
+      lifecycle().mutate(human, {
+        action: "supersede",
+        recordId: saved.recordId,
+        expectedRevision: 1,
+        replacementId: saved.recordId.toUpperCase(),
+        mutationKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    const replacement = await save(human, input("Wednesday"));
+    expect(
+      await lifecycle().mutate(human, {
+        action: "supersede",
+        recordId: saved.recordId,
+        expectedRevision: 1,
+        replacementId: replacement.recordId.toUpperCase(),
+        mutationKey: randomUUID(),
+      }),
+    ).toMatchObject({ record: { status: "superseded", supersededBy: replacement.recordId } });
+  });
+
+  it("audits the revision and status an update replaced, never values", async () => {
+    const { human } = await fixture();
+    const saved = await save(human, input("Tuesday"));
+    const mutationKey = randomUUID();
+    await lifecycle().mutate(human, {
+      action: "archive",
+      recordId: saved.recordId,
+      expectedRevision: 1,
+      mutationKey,
+    });
+    const audits = await database.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.entityId, saved.recordId));
+    expect(audits.find(({ action }) => action === "knowledge.created")?.before).toBeNull();
+    const archived = audits.find(({ action }) => action === "knowledge.archive");
+    expect(archived).toMatchObject({
+      before: { revision: 1, status: "active" },
+      after: { revision: 2, status: "archived" },
+    });
+    expect(JSON.stringify(archived)).not.toContain("Tuesday");
   });
 
   it("projects legacy origin on read and preserves the raw revision when adding a sidecar", async () => {

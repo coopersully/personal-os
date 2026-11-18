@@ -64,11 +64,13 @@ async function validateSupersession(
   recordId: string,
   replacementId: string,
 ) {
-  const visited = new Set([recordId]);
+  // UUIDs compare by identity: an uppercase spelling of the record itself is still a cycle.
+  const visited = new Set([recordId.toLowerCase()]);
   let next: string | null = replacementId;
   while (next) {
-    if (visited.has(next)) throw new AppError("conflict", "Supersession cannot form a cycle.");
-    visited.add(next);
+    if (visited.has(next.toLowerCase()))
+      throw new AppError("conflict", "Supersession cannot form a cycle.");
+    visited.add(next.toLowerCase());
     const revision = await ownedKnowledgeRevision(tx, principal, next);
     next = revision.metadata.supersededBy;
   }
@@ -168,7 +170,7 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
     write.metadata.acceptance = ownerKnowledgeAcceptance(principal, proposal.snapshot.sources, at);
     write.metadata.disputedBy = null;
     write.record = { ...write.record, ownerHeld: true, lastConfirmedAt: at };
-    const superseded: RevisionWrite[] = [];
+    const superseded: { write: RevisionWrite; before: KnowledgeRecordSnapshot }[] = [];
     for (const id of originalIds) {
       const original = await ownedKnowledgeRevision(tx, principal, id, true);
       // Another proposal already replaced it; activating this one too would leave two.
@@ -181,7 +183,7 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
       const retired = nextRevision(original, derivations);
       retired.snapshot.status = "superseded";
       retired.metadata.supersededBy = proposal.snapshot.id;
-      superseded.push(retired);
+      superseded.push({ write: retired, before: original.snapshot });
     }
     return superseded;
   }
@@ -229,7 +231,7 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
         const at = now();
         const derivations = await knowledgeRevisionDerivations(tx, principal.userId, current);
         let write = nextRevision(current, derivations);
-        let related: RevisionWrite[] = [];
+        let related: { write: RevisionWrite; before: KnowledgeRecordSnapshot }[] = [];
         switch (input.action) {
           case "revise":
             write = await prepareKnowledgeRevision({
@@ -291,7 +293,7 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
               break;
             }
             write.snapshot.status = "superseded";
-            write.metadata.supersededBy = input.replacementId;
+            write.metadata.supersededBy = replacement.snapshot.id;
             break;
           }
           case "restrict":
@@ -349,10 +351,19 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
           principal,
           { ...input, action: input.action, requestHash },
           write.snapshot,
+          // A proposal is a new record; every other action changes this one.
+          write.snapshot.id === snapshot.id ? snapshot : null,
         );
         for (const other of related) {
-          await writeKnowledgeRevision(tx, principal, other, at);
-          await writeKnowledgeAudit(tx, principal, input, other.snapshot, receipt.id);
+          await writeKnowledgeRevision(tx, principal, other.write, at);
+          await writeKnowledgeAudit(
+            tx,
+            principal,
+            input,
+            other.write.snapshot,
+            receipt.id,
+            other.before,
+          );
         }
         const result = await presentKnowledgeReceipt(tx, access, principal, receipt);
         await bumpKnowledgeEpoch(tx, principal.userId);

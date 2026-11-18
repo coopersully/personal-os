@@ -6327,38 +6327,39 @@ describe.sequential("ilo API", () => {
       return Response.json({ error_message: "Unexpected Plaid call" }, { status: 400 });
     });
     vi.stubGlobal("fetch", plaidFetch);
-    const plaidApp = createApp({
-      config: {
-        allowedOrigins: ["https://app.example.com"],
-        apiBaseUrl: "https://api.example.com",
-        apiShutdownTimeoutMs: 105_000,
-        appBaseUrl: "https://app.example.com",
-        databaseUrl: container.getConnectionUri(),
-        emailFrom: "",
-        encryptionKey: Buffer.alloc(32, 1).toString("base64"),
-        googleClientId: "",
-        googleClientSecret: "",
-        googleRedirectUri: "https://api.example.com/v1/connectors/google/callback",
-        logLevel: "info",
-        plaidClientId: "client",
-        plaidEnvironment: "sandbox",
-        plaidSecret: "secret",
-        port: 8787,
-        production: false,
-        resendApiKey: "",
-        sessionCookieName: "personal_os_session",
-        sessionTtlDays: 30,
-        xClientId: "",
-        xClientSecret: "",
-        xRedirectUri: "https://api.example.com/v1/x-bookmarks/callback",
-      },
+    const plaidConfig = {
+      allowedOrigins: ["https://app.example.com"],
+      apiBaseUrl: "https://api.example.com",
+      apiShutdownTimeoutMs: 105_000,
+      appBaseUrl: "https://app.example.com",
+      databaseUrl: container.getConnectionUri(),
+      emailFrom: "",
+      encryptionKey: Buffer.alloc(32, 1).toString("base64"),
+      googleClientId: "",
+      googleClientSecret: "",
+      googleRedirectUri: "https://api.example.com/v1/connectors/google/callback",
+      logLevel: "info",
+      plaidClientId: "client",
+      plaidEnvironment: "sandbox",
+      plaidSecret: "secret",
+      port: 8787,
+      production: false,
+      resendApiKey: "",
+      sessionCookieName: "personal_os_session",
+      sessionTtlDays: 30,
+      xClientId: "",
+      xClientSecret: "",
+      xRedirectUri: "https://api.example.com/v1/x-bookmarks/callback",
+    } satisfies Parameters<typeof createApp>[0]["config"];
+    const plaidDependencies = {
       db: database.db,
       icloud: icloudConnector,
       log: logs,
       now: () => new Date("2026-07-13T12:00:00.000Z"),
-    });
-    const plaidRequest = (path: string, body?: unknown) =>
-      plaidApp.request(path, {
+    };
+    const plaidApp = createApp({ config: plaidConfig, ...plaidDependencies });
+    const plaidRequest = (path: string, body?: unknown, app = plaidApp) =>
+      app.request(path, {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         headers: {
           authorization: `Session ${sessionToken}`,
@@ -6367,6 +6368,36 @@ describe.sequential("ilo API", () => {
         method: "POST",
       });
     expect((await plaidRequest("/v1/finances/plaid/link-token")).status).toBe(200);
+    const linkTokenBody = () => {
+      const call = plaidFetch.mock.calls.at(-1) as unknown as [RequestInfo | URL, RequestInit];
+      expect(String(call[0])).toContain("/link/token/create");
+      return JSON.parse(String(call[1].body)) as Record<string, unknown>;
+    };
+    const webLinkBody = linkTokenBody();
+    expect(webLinkBody).not.toHaveProperty("redirect_uri");
+    // With no redirect configured, the iPhone app's request to Plaid is exactly the web one.
+    expect((await plaidRequest("/v1/finances/plaid/link-token", { client: "ios" })).status).toBe(
+      200,
+    );
+    expect(linkTokenBody()).toEqual(webLinkBody);
+    expect(
+      (await plaidRequest("/v1/finances/plaid/link-token", { client: "android" })).status,
+    ).toBe(400);
+    const redirectApp = createApp({
+      config: { ...plaidConfig, plaidIosRedirectUri: "https://app.example.com/plaid/return" },
+      ...plaidDependencies,
+    });
+    expect(
+      (await plaidRequest("/v1/finances/plaid/link-token", undefined, redirectApp)).status,
+    ).toBe(200);
+    expect(linkTokenBody()).toEqual(webLinkBody);
+    expect(
+      (await plaidRequest("/v1/finances/plaid/link-token", { client: "ios" }, redirectApp)).status,
+    ).toBe(200);
+    expect(linkTokenBody()).toEqual({
+      ...webLinkBody,
+      redirect_uri: "https://app.example.com/plaid/return",
+    });
     const plaidExchange = await plaidRequest("/v1/finances/plaid/exchange", {
       institution: "Integration Bank",
       publicToken: "public-token",

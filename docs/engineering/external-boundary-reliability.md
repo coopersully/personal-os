@@ -149,6 +149,47 @@ idempotent replay. Production-equivalent evidence must separately prove runtime 
 outbound HTTPS reachability, Link configuration, callback correctness, and successful transition
 from a handoff to connected accounts. Green mock tests do not prove any of those runtime facts.
 
+### iPhone Plaid Link
+
+The iPhone app presents Plaid's native Link (`react-native-plaid-link-sdk`, which vendors
+`LinkKit.xcframework`) for a link token issued by the existing human-session routes
+`POST /v1/finances/plaid/link-token`, `/v1/finances/plaid/exchange` and
+`/v1/finances/accounts/:id/reconnect`. The app holds no Plaid client identity or secret. Bank
+credentials go from Plaid's screens to Plaid over its own HTTPS/443 transport; nohmi receives only
+the public token, institution and account names and masks. Link runs for as long as the person
+needs, so it is outside the API's 15-second request bound; each API call on either side of it is
+an ordinary bounded request.
+
+The commit point of a new connection is the exchange response. The public token is single-use and
+the exchange route takes no idempotency key, so the app never repeats an exchange whose outcome is
+unknown; an Item created by a lost response appears when accounts are next read. Reconnect
+completion is idempotent by key and may be retried. Cancel, a Plaid error and a module that cannot
+load each end in a stated "nothing connected" or "nothing changed" result.
+
+Plaid requires a `redirect_uri` on the link token for institutions that sign in through OAuth on
+iOS, in update mode too. The iPhone app names itself (`client: "ios"`) when it asks for a token,
+and the API adds the optional `PLAID_IOS_REDIRECT_URI` to that token only. The setting must be an
+HTTPS URL without credentials, query or fragment; startup fails otherwise. Unset, or for any other
+caller, the request to Plaid is byte-for-byte what it was, so web is unaffected. The intended value
+is `https://<production web origin>/plaid/return`, the path COO-233 reserves. The Mac mini stack
+forwards the variable; the retained ECS task definition does not.
+
+The setting is Declared only. Three things outside this boundary record must be true before it is
+set in production, or Plaid will reject the token or return to a page instead of the app: the same
+URI is in the Plaid dashboard's allowed redirect URIs; that origin serves an
+`apple-app-site-association` file covering `/plaid/return` for `app.personal-os.mobile`; and the
+app is built with the matching Associated Domains entitlement (the last two belong to COO-233).
+The app drops the returning link without reading or logging it (COO-233); whether Link then
+resumes by itself has not been checked on a device. Nothing serves `/plaid/return` on the web, so
+if iOS does not hand the link to the app the person lands on the web shell; that is a known gap.
+Until all of this is in place OAuth institutions are not expected to complete on iPhone. That is a
+declared gap, not a verified failure mode.
+
+Component tests replace the native module and prove the app's handling of success, cancel, provider
+error, refusal and unknown outcomes. They do not prove that the pod links, that Link presents, that
+a token issued by the deployed API is accepted by the SDK, or that any institution completes. Those
+need a native build, a sandbox institution in the simulator and a real institution on a phone.
+
 ## Ritual optional-step follow-ups
 
 The ritual API owns acceptance of optional follow-ups. A human-session completion action authorizes

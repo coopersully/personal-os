@@ -344,7 +344,7 @@ identity component in account rows and details.
 ### Finance account management
 
 Accounts has a floating plus that opens the manual account form; connecting a bank is a separate
-flow. Account details keep ownership and planning as direct rows and put Edit account, Sync
+flow (see Finance bank connection). Account details keep ownership and planning as direct rows and put Edit account, Sync
 account, Review duplicate and the destructive Stop tracking account in the top-right action menu.
 Offer Sync only for a connected account, and neither Sync nor Stop tracking once tracking has
 stopped. A connected account's balance stays read-only; only a manual account edits its balance.
@@ -366,6 +366,27 @@ connected and current, reads both identities, freshness and the overlapping and 
 counts, then confirms. Resolution is bound to the reviewed comparison revision; a changed
 comparison stops nothing and reloads. Stop tracking and duplicate resolution each keep a native
 confirmation that names the account and what is preserved.
+
+### Finance bank connection
+
+On iPhone, Connect a bank sits under the Accounts list and Reconnect account appears on the page
+of a connected account whose bank sign-in has lapsed. Neither is offered once tracking has
+stopped, or outside the iPhone build. Both present Plaid's native Link over the app; bank
+credentials are typed into Plaid's screens and never reach nohmi. The app asks the API for a link
+token as the iPhone app (for one account when reconnecting, which puts Link in update mode), and
+sends back only the public token, the institution and the chosen account names and masks.
+
+One toast follows the attempt: opening, then connecting or verifying, then the outcome the API
+confirmed. Closing Link is a neutral notice that nothing was connected or changed. A Plaid or bank
+error says the sign-in did not finish; Plaid's error text and codes are not shown or sent anywhere.
+A new connection counts the accounts the API returned. A public token is exchanged once, so an
+exchange with an unknown outcome is never sent again and the person is told to check Accounts. A
+reconnect verifies with an idempotency key that is kept while the outcome is unknown and renewed
+after a definitive refusal, whose reason from the server is shown. The key is held per person and
+account outside the screen, and the toast reaches its outcome even if the person leaves the screen
+first. Accounts are re-read after every attempt. The result is dropped only if the signed-in
+person changed. Names sent with the exchange are trimmed to the API's limits so a linked bank is
+not refused for its label.
 
 ### Finance transaction management
 

@@ -1132,9 +1132,17 @@ export function createFinanceApi(request: FinanceRequest) {
         body: JSON.stringify({ idempotencyKey }),
       });
     },
-    async getPlaidLinkToken(accountId?: string): Promise<string> {
+    /** `client` names a native app whose bank sign-in needs a return address on the token. */
+    async getPlaidLinkToken(accountId?: string, client?: "ios"): Promise<string> {
       const response = await request<{ linkToken: string }>("/v1/finances/plaid/link-token", {
-        ...(accountId ? { body: JSON.stringify({ accountId }) } : {}),
+        ...(accountId || client
+          ? {
+              body: JSON.stringify({
+                ...(accountId ? { accountId } : {}),
+                ...(client ? { client } : {}),
+              }),
+            }
+          : {}),
         method: "POST",
       });
       return response.linkToken;

@@ -661,6 +661,103 @@ it("reports a stale revision when saving an edit and keeps the draft", async () 
   expectNoInlineResult();
 });
 
+// Correcting a manual transaction's date
+
+const dateLabel = "Date (ISO date/time)";
+const synced = { ...transaction, accountId: linked.id };
+
+it("corrects the date of a manual transaction against the revision it was opened with", async () => {
+  h.params = { id: transaction.id };
+  h.api.updateFinanceTransaction.mockResolvedValue({ ...transaction, date: "2026-11-02" });
+  mount(<FinanceTransactionEditor />);
+  expect(await screen.findByLabelText(dateLabel)).toHaveProperty("value", "2026-11-10");
+  expect(screen.getByRole("button", { name: "Save changes" })).toHaveProperty("disabled", true);
+  type(dateLabel, "");
+  expect(screen.getByRole("button", { name: "Save changes" })).toHaveProperty("disabled", true);
+  type(dateLabel, "2026-11-02");
+  press("Save changes");
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Transaction updated", { id: "feedback" }),
+  );
+  expect(h.api.updateFinanceTransaction).toHaveBeenCalledExactlyOnceWith(transaction.id, {
+    date: "2026-11-02",
+    expectedTransactionUpdatedAt: transaction.updatedAt,
+  });
+  expect(h.loading).toHaveBeenCalledExactlyOnceWith("Saving transaction…");
+  expect(h.back).toHaveBeenCalledOnce();
+  expectNoInlineResult();
+});
+
+it("keeps the date of a synced transaction read-only", async () => {
+  h.api.getFinanceTransaction.mockResolvedValue({ data: synced });
+  h.params = { id: synced.id };
+  const view = mount(<FinanceTransactionEditor />);
+  await screen.findByRole("button", { name: /^Category/ });
+  await waitFor(() => expect(h.api.listFinanceAccounts).toHaveBeenCalled());
+  await act(async () => undefined);
+  expect(screen.queryByLabelText(dateLabel)).toBeNull();
+  view.unmount();
+  mount(<FinanceTransactionScreen />);
+  await screen.findByText("Everyday checking");
+  expect(screen.queryByRole("button", { name: /^Date/ })).toBeNull();
+  expect(screen.getByText("Date")).toBeTruthy();
+});
+
+it("opens the date for editing from a manual transaction", async () => {
+  h.params = { id: transaction.id };
+  mount(<FinanceTransactionScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: /^Date/ }));
+  expect(h.push).toHaveBeenCalledWith({
+    pathname: "/finance-transaction-edit",
+    params: { id: transaction.id, field: "date" },
+  });
+});
+
+it("says why a date change was rejected, and when it could not be confirmed", async () => {
+  h.params = { id: transaction.id };
+  mount(<FinanceTransactionEditor />);
+  await screen.findByLabelText(dateLabel);
+  type(dateLabel, "2026-11-02");
+
+  h.api.updateFinanceTransaction.mockRejectedValueOnce(rejection(409));
+  press("Save changes");
+  await waitFor(() =>
+    expect(h.error).toHaveBeenLastCalledWith(
+      "This transaction changed elsewhere. Close and reopen it to review the latest version; your draft is still here.",
+      { id: "feedback" },
+    ),
+  );
+
+  h.api.updateFinanceTransaction.mockRejectedValueOnce(
+    new ApiClientError({
+      code: "invalid_request",
+      message: "Dates on synced transactions can't be changed.",
+      status: 400,
+    }),
+  );
+  press("Save changes");
+  await waitFor(() =>
+    expect(h.error).toHaveBeenLastCalledWith(
+      "Couldn’t save this transaction. Dates on synced transactions can't be changed.",
+      { id: "feedback" },
+    ),
+  );
+
+  h.api.updateFinanceTransaction.mockRejectedValueOnce(rejection(503));
+  press("Save changes");
+  await waitFor(() =>
+    expect(h.error).toHaveBeenLastCalledWith(
+      "Couldn’t confirm the save. Your draft is still here. Check the transaction before retrying.",
+      { id: "feedback" },
+    ),
+  );
+  expect(h.api.updateFinanceTransaction).toHaveBeenCalledTimes(3);
+  expect(h.back).not.toHaveBeenCalled();
+  expect(h.success).not.toHaveBeenCalled();
+  expect(screen.getByLabelText(dateLabel)).toHaveProperty("value", "2026-11-02");
+  expectNoInlineResult();
+});
+
 // Removing a manual transaction
 
 it("offers Remove only for a transaction in a manual account", async () => {

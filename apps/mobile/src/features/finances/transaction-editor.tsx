@@ -8,18 +8,30 @@ import { toast } from "sonner-native";
 import { AppToaster } from "../../components/app-toaster";
 import { editorDismissOptions } from "../../components/editor-header";
 import { EntityPicker } from "../../components/forms/entity-picker";
+import { PaddedSurfaceRows } from "../../components/forms/form-rows";
 import { FormSave, useFormKeyboardOffset } from "../../components/forms/form-save";
+import { SettingsAccentProvider } from "../../components/settings-accent";
 import { useTheme } from "../../theme";
+import { DateField } from "../tasks/date-field";
 import { CategoryCreate } from "./category-create";
 import { categoryIcon, categoryLabel } from "./category-presentation";
 import { useFinance, useFinanceRead } from "./data";
-import { appliedTransaction } from "./mutations";
+import { appliedTransaction, confirmedRejection } from "./mutations";
 import { activeAllocations } from "./splits";
 import { TransactionCreateForm } from "./transaction-new";
 import { TransactionSplitForm } from "./transaction-splits";
 import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Section } from "./ui";
 
-function TransactionForm({ record, field }: { record: FinanceTransaction; field?: string }) {
+function TransactionForm({
+  record,
+  field,
+  manualAccount,
+}: {
+  record: FinanceTransaction;
+  field?: string;
+  /** Only a manually entered transaction's date can be corrected; a synced date is evidence. */
+  manualAccount: boolean;
+}) {
   const { api, owner } = useFinance();
   const client = useQueryClient();
   const t = useTheme();
@@ -28,6 +40,7 @@ function TransactionForm({ record, field }: { record: FinanceTransaction; field?
   const [snapshot] = useState(record);
   const [notes, setNotes] = useState(record.notes ?? "");
   const [category, setCategory] = useState(record.category);
+  const [date, setDate] = useState<string | null>(record.date);
   const [edited, setEdited] = useState(false);
   // Sending a category replaces every part with one, so a split is changed only in its editor.
   const parts = activeAllocations(snapshot).length;
@@ -58,7 +71,8 @@ function TransactionForm({ record, field }: { record: FinanceTransaction; field?
     const noteValue = notes.trim() || null;
     const changedCategory = !split && category !== snapshot.category;
     const changedNotes = noteValue !== snapshot.notes;
-    if (!changedCategory && !changedNotes) {
+    const changedDate = manualAccount && date !== null && date !== snapshot.date;
+    if (!changedCategory && !changedNotes && !changedDate) {
       toast.info("No changes to save");
       router.back();
       return;
@@ -70,6 +84,7 @@ function TransactionForm({ record, field }: { record: FinanceTransaction; field?
       const result = await api.updateFinanceTransaction(snapshot.id, {
         ...(changedCategory ? { category } : {}),
         ...(changedNotes ? { notes: noteValue } : {}),
+        ...(changedDate ? { date } : {}),
         expectedTransactionUpdatedAt: snapshot.updatedAt,
       });
       if (!active.current || currentOwner.current !== owner) {
@@ -102,7 +117,9 @@ function TransactionForm({ record, field }: { record: FinanceTransaction; field?
       toast.error(
         error instanceof ApiClientError && error.status === 409
           ? "This transaction changed elsewhere. Close and reopen it to review the latest version; your draft is still here."
-          : "Couldn’t confirm the save. Your draft is still here. Check the transaction before retrying.",
+          : confirmedRejection(error)
+            ? `Couldn’t save this transaction. ${error.message}`
+            : "Couldn’t confirm the save. Your draft is still here. Check the transaction before retrying.",
         { id },
       );
     } finally {
@@ -189,6 +206,24 @@ function TransactionForm({ record, field }: { record: FinanceTransaction; field?
             </>
           )}
         </Card>
+        {manualAccount && (
+          <Card rows>
+            <PaddedSurfaceRows>
+              <SettingsAccentProvider workspace="finances">
+                <DateField
+                  label="Date"
+                  dateOnly
+                  value={date}
+                  onChange={(value) => {
+                    if (pending || submitted) return;
+                    setDate(value ? value.slice(0, 10) : null);
+                    setEdited(true);
+                  }}
+                />
+              </SettingsAccentProvider>
+            </PaddedSurfaceRows>
+          </Card>
+        )}
         <Section title="Notes">
           <Card>
             <TextInput
@@ -218,7 +253,7 @@ function TransactionForm({ record, field }: { record: FinanceTransaction; field?
       <FormSave
         workspace="finances"
         keyboardOffset={keyboardOffset}
-        disabled={!edited || pending || submitted}
+        disabled={!edited || pending || submitted || (manualAccount && !date)}
         onPress={() => void save()}
       />
     </View>
@@ -235,6 +270,11 @@ export function FinanceTransactionEditor() {
     (api) => api.getFinanceTransaction(id as string),
     !!id,
   );
+  const accounts = useFinanceRead(["accounts"], (api) => api.listFinanceAccounts(), !!id);
+  const record = query.data?.data;
+  const manualAccount =
+    !!record &&
+    accounts.data?.accounts.find((item) => item.id === record.accountId)?.provider === "manual";
   return (
     <View style={{ flex: 1 }}>
       {id ? (
@@ -243,7 +283,12 @@ export function FinanceTransactionEditor() {
             field === "splits" ? (
               <TransactionSplitForm key={id} record={query.data.data} />
             ) : (
-              <TransactionForm key={id} record={query.data.data} field={field} />
+              <TransactionForm
+                key={id}
+                record={query.data.data}
+                field={field}
+                manualAccount={manualAccount}
+              />
             )
           ) : null}
         </ReadState>

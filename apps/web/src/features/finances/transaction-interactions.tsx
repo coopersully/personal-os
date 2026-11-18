@@ -20,6 +20,7 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
 
@@ -136,5 +137,81 @@ export function TransactionContextEditor({
         </FeedbackForm>
       </ResponsiveDialogContent>
     </ResponsiveDialog>
+  );
+}
+
+/**
+ * Corrects the date of a manually entered transaction. A synced date is provider
+ * evidence, so a synced transaction gets no input at all.
+ */
+export function TransactionDateEditor({
+  transaction,
+  manual,
+  onSaved,
+}: {
+  transaction: FinanceTransaction;
+  manual: boolean;
+  /** The transaction this was opened with is stale once its date is saved. */
+  onSaved?: () => void;
+}) {
+  const [date, setDate] = useState(transaction.date);
+  const client = useQueryClient();
+  // A date change is guarded by the observed revision, but an unknown outcome is never retried.
+  const save = useFeedbackMutation({
+    feedback: {
+      action: "save the transaction date",
+      pending: "Saving date…",
+      success: "Date updated",
+      form: true,
+    },
+    mutationFn: async () => {
+      const result = await api.updateFinanceTransaction(transaction.id, {
+        date,
+        expectedTransactionUpdatedAt: transaction.updatedAt,
+      });
+      if ("status" in result && result.status !== "applied")
+        throw new Error(
+          result.status === "pending_review"
+            ? "This change is awaiting review."
+            : "This change needs more information.",
+        );
+      return result;
+    },
+    onSuccess: async () => {
+      await client.invalidateQueries({
+        predicate: (query) => String(query.queryKey[0]).startsWith("finance-"),
+      });
+      onSaved?.();
+    },
+  });
+  if (!manual) return null;
+  return (
+    <FeedbackForm
+      feedback={save.feedback}
+      className="flex flex-wrap items-end gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (date && date !== transaction.date && !save.isPending) save.mutate();
+      }}
+    >
+      <Field>
+        <FieldLabel htmlFor="transaction-date">Date</FieldLabel>
+        <Input
+          id="transaction-date"
+          name="date"
+          type="date"
+          required
+          value={date}
+          onChange={(event) => setDate(event.target.value)}
+        />
+      </Field>
+      <ActionButton
+        type="submit"
+        variant="outline"
+        disabled={save.isPending || !date || date === transaction.date}
+      >
+        Save date
+      </ActionButton>
+    </FeedbackForm>
   );
 }

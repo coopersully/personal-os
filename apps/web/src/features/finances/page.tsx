@@ -1,4 +1,5 @@
 import type {
+  FinanceAccount,
   FinanceBudgetPacePeriod,
   FinanceBudgetStatus,
   FinanceCategory,
@@ -133,7 +134,11 @@ import { FinanceEntitySelector } from "./entity-selector";
 import { useFinancePresentationParams } from "./presentation-preferences";
 import { FinanceTransactionChecks } from "./transaction-checks";
 import { groupTransactions } from "./transaction-groups";
-import { TransactionContextEditor, TransactionContextMenu } from "./transaction-interactions";
+import {
+  TransactionContextEditor,
+  TransactionContextMenu,
+  TransactionDateEditor,
+} from "./transaction-interactions";
 import { FinanceTransactionItem } from "./transaction-item";
 
 export { FinanceBudgetBucketManager } from "./bucket-manager.js";
@@ -1107,6 +1112,7 @@ export function FinancesPage() {
                     currentTransactionCursor,
                     transactionSort,
                   ])}
+                  accounts={finance.accounts}
                   categories={categories.data ?? []}
                   categoryReadState={
                     categories.isPending ? "loading" : categories.isError ? "unavailable" : "ready"
@@ -2832,6 +2838,7 @@ function FinanceLedgerHealthCard({ health }: { health: FinanceLedgerHealth }) {
 }
 
 function FinanceTransactionsTable({
+  accounts,
   pageIndex,
   pageSize,
   onPageSizeChange,
@@ -2851,6 +2858,7 @@ function FinanceTransactionsTable({
   sort,
   transactions,
 }: {
+  accounts: FinanceAccount[];
   pageIndex: number;
   pageSize: number;
   onPageSizeChange: (size: number) => void;
@@ -3151,6 +3159,15 @@ function FinanceTransactionsTable({
                   onBreakdown={onBreakdown}
                   onCategorize={onCategorize}
                   hideActions
+                />
+                <TransactionDateEditor
+                  key={selectedTransaction.id}
+                  transaction={selectedTransaction}
+                  manual={
+                    accounts.find((account) => account.id === selectedTransaction.accountId)
+                      ?.provider === "manual"
+                  }
+                  onSaved={() => setSelectedTransaction(null)}
                 />
                 <div className="flex flex-wrap gap-2">
                   <ShadcnButton

@@ -152,6 +152,16 @@ export function FinanceTransactionScreen() {
                 title="Date"
                 value={formatLocalDate(item.date)}
                 icon="calendar"
+                accessibilityHint={account?.provider === "manual" ? "Change the date" : undefined}
+                onPress={
+                  account?.provider === "manual"
+                    ? () =>
+                        router.push({
+                          pathname: "/finance-transaction-edit",
+                          params: { id: item.id, field: "date" },
+                        })
+                    : undefined
+                }
               />
               <ReadState query={accounts}>
                 <FinanceRow

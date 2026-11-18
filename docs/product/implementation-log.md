@@ -1564,3 +1564,17 @@ whether a proposed time is free while creating or editing.
   shown on iPhone.
 - This is a local candidate covered by focused tests. The simulator check and a block written to
   a real Google or iCloud calendar are outstanding. It is not a production or TestFlight release.
+
+## 2026-11-17 — Native Mail snooze and selection (local candidate)
+
+- COO-241 — On iPhone, a conversation can be snoozed until a common time or any chosen day and
+  time, Mailboxes lists Snoozed conversations, and a snooze can be ended from there. Touching and
+  holding a conversation starts a selection of up to 50 that can be marked read or unread,
+  archived, snoozed or, under Snoozed, unsnoozed together. Only existing API routes are used.
+- A selection's action confirms each conversation separately. A partial failure says how many
+  changed, keeps the unconfirmed conversations selected and offers Undo only for confirmed changes.
+- Limits that need an API change: there is no route to end a snooze, so ending one records a
+  snooze that has already passed; thread summaries do not carry when a snooze ends, so Snoozed
+  shows no return time and an ended snooze cannot be undone.
+- Focused Mail tests, mobile type checking and lint passed. This is not a production or
+  TestFlight release.

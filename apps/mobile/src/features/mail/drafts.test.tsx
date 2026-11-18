@@ -970,9 +970,8 @@ it("offers no reply before the conversation has loaded", async () => {
   render(wrap(<InboxRoute />));
   fireEvent.click(await screen.findByRole("button", { name: /^Maya Chen/ }));
   const reader = await screen.findByRole("dialog");
-  // Only the read-state action is there, so it is a single button rather than a menu.
-  expect(within(reader).getByRole("button", { name: "Mark as unread" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Conversation actions" })).toBeNull();
+  fireEvent.click(within(reader).getByRole("button", { name: "Conversation actions" }));
+  expect(screen.getByRole("button", { name: "Mark as unread" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Forward" })).toBeNull();
 });

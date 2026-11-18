@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AppState } from "react-native";
 import { toast } from "sonner-native";
 import { useAuth } from "../auth/context";
-import { MAIL_PAGE_SIZE, type MailScope, nextMailPage } from "./logic";
+import { MAIL_PAGE_SIZE, type MailScope, nextMailPage, scopeTarget } from "./logic";
 
 /** Mail reads own their feedback, so the shared read-error toast stays out of the way. */
 const meta = { scopedReadFeedback: true };
@@ -43,7 +43,7 @@ export function useMailThreads(scope: MailScope, search: string) {
     const timer = setTimeout(() => setQuery(typed), 250);
     return () => clearTimeout(timer);
   }, [typed]);
-  const target = scope.kind === "inbox" ? "inbox" : scope.mailboxId;
+  const target = scopeTarget(scope);
   const threads = useInfiniteQuery({
     queryKey: ["mail", owner, "summaries", target, query],
     meta,
@@ -53,7 +53,9 @@ export function useMailThreads(scope: MailScope, search: string) {
       api.listMailThreadSummaries({
         ...(scope.kind === "inbox"
           ? { mailboxRole: "inbox" as const }
-          : { mailboxId: scope.mailboxId }),
+          : scope.kind === "snoozed"
+            ? { snoozed: true }
+            : { mailboxId: scope.mailboxId }),
         limit: MAIL_PAGE_SIZE,
         ...(query ? { query } : {}),
         ...pageParam,

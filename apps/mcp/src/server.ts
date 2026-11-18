@@ -55,7 +55,7 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
     {
       maxToolInputElements: 10_000,
       instructions:
-        "Call get_ilo_context first. Inspect authoritative state before proposing changes, use preview tools before consequential commits, and verify mutations from returned state or activity. nohmi's API remains the authority for access and policy.",
+        "Call get_ilo_context first; with memory access it includes the memory core. Inspect authoritative state before proposing changes, use preview tools before consequential commits, and verify mutations from returned state or activity. nohmi's API remains the authority for access and policy.",
     },
   );
   const tools = createPersonalOsToolSurface(server, {

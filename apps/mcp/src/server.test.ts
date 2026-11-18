@@ -2878,7 +2878,10 @@ describe("Personal OS MCP server", () => {
         readOnlyHint: true,
       },
     });
-    expect(tools.tools.find((tool) => tool.name === "maintain_mail")).toMatchObject({
+    const maintainMail = tools.tools.find((tool) => tool.name === "maintain_mail");
+    expect(maintainMail?.description).toMatch(/memory section/);
+    expect(maintainMail?.description).not.toMatch(/has no memory/);
+    expect(maintainMail).toMatchObject({
       _meta: {
         "ilo/domain": "mail",
         "ilo/policy": "approved_rule",

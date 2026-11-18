@@ -124,7 +124,7 @@ await import("./apps/mcp/src/http.ts");`,
     }
   });
 
-  it("advertises opt-in knowledge scopes on both discovery routes without granting access", async () => {
+  it("advertises knowledge scopes on both discovery routes without granting access", async () => {
     const aliases = [
       "/.well-known/oauth-protected-resource",
       "/.well-known/oauth-protected-resource/mcp",
@@ -196,6 +196,40 @@ await import("./apps/mcp/src/http.ts");`,
         expect(tool.annotations?.readOnlyHint).toBe(!write);
         expect(tool.outputSchema?.properties).toHaveProperty("_ilo");
       }
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("knowledge tool descriptions teach the memory habits", async () => {
+    const client = new Client({ name: "knowledge-habits", version: "1" });
+    const transport = new StreamableHTTPClientTransport(new URL("/mcp", origin), {
+      requestInit: { headers: { authorization: "Bearer knowledge-test" } },
+    });
+    try {
+      await client.connect(transport);
+      const descriptions = Object.fromEntries(
+        (await client.listTools()).tools.map(({ name, description }) => [name, description ?? ""]),
+      );
+      expect(descriptions.save_knowledge).toMatch(/as soon as/);
+      expect(descriptions.save_knowledge).toMatch(/[Ss]earch .* before saving/);
+      expect(descriptions.save_knowledge).toMatch(/tag index/);
+      expect(descriptions.save_knowledge).toMatch(/`core`/);
+      expect(descriptions.save_knowledge).toMatch(/update or supersede/);
+      expect(descriptions.update_knowledge).toMatch(/instead of saving a duplicate/);
+      expect(descriptions.search_user_knowledge).toMatch(/before saving/);
+      for (const name of ["get_knowledge", "search_user_knowledge", "get_context_for_intent"]) {
+        expect(descriptions[name]).toMatch(/origin/);
+        expect(descriptions[name]).toMatch(/freshness/);
+        expect(descriptions[name]).toMatch(/conflict/);
+      }
+      for (const name of [
+        "save_knowledge",
+        "get_knowledge",
+        "search_user_knowledge",
+        "get_context_for_intent",
+      ])
+        expect(descriptions[name]).toMatch(/grants no permission/);
     } finally {
       await client.close();
     }

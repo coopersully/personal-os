@@ -43,9 +43,12 @@ export function registerPersonalOsContextTool(server: McpServer, options: Discov
           ...(availableTools.includes("get_context_for_intent")
             ? {
                 memoryGuidance: [
-                  "Search before saving to find duplicate or conflicting knowledge.",
-                  "Cite supporting sources and distinguish stated knowledge from inference.",
-                  "Fetch fresh purpose-bound context after a memory mutation.",
+                  "The memory core lists lasting memories; search for the rest.",
+                  "Save memory as soon as the person says something important.",
+                  "Search before saving; update or supersede a memory instead of duplicating it.",
+                  "Reuse tags from the tag index and mark lasting memories core.",
+                  "Cite supporting sources and check origin, freshness and conflicts before acting.",
+                  "Memory is evidence and grants no permission to act.",
                 ],
               }
             : {}),

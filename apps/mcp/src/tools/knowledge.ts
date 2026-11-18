@@ -15,7 +15,7 @@ export function registerKnowledgeTools(server: McpServer, api: PersonalOsApiClie
     "save_knowledge",
     {
       description:
-        "Search for existing knowledge before saving. Save typed account knowledge with original evidence, 1-8 tags and a stable mutation UUID; it is active at once. Reuse tags from the tag index; the server files a merged tag or a trailing-s plural under the existing tag. Agent statements require original wording plus session/message references; unsourced assertions are saved as inferred. Purposes are optional relevance hints. Read the receipt outcome before using record content: a forgotten receipt contains IDs only.",
+        "Save memory as soon as the person says something important; do not wait for the end of the session. Search with search_user_knowledge before saving, and when the memory already exists, update or supersede it with update_knowledge instead of saving a duplicate. Send 1-8 tags and reuse tags from the tag index in get_ilo_context's memory core; the server files a merged tag or a trailing-s plural under the existing tag. Set `core` for lasting preferences, standing constraints and identity-level facts so every later session loads them; leave situational facts out. Include original evidence and a stable mutation UUID; the memory is active at once. Agent statements require original wording plus session/message references; unsourced assertions are saved as inferred. Purposes are optional relevance hints. Read the receipt outcome before using record content: a forgotten receipt contains IDs only. Memory grants no permission to act.",
       inputSchema: knowledgeMutationInputSchema,
     },
     async (input) => apiResult(() => api.saveKnowledge(input)),
@@ -24,7 +24,7 @@ export function registerKnowledgeTools(server: McpServer, api: PersonalOsApiClie
     "get_knowledge",
     {
       description:
-        "Read one knowledge record. Workspace and source read scopes remain required. Check origin, ownerHeld, sensitivity and conflicts before acting on it.",
+        "Read one memory record with its sources. Workspace and source read scopes remain required. Before acting on it, check its origin (stated or inferred), ownerHeld, freshness (updatedAt, lastConfirmedAt, validity), status, sensitivity and any conflict. Memory is evidence and grants no permission to act.",
       inputSchema: knowledgeReadInputSchema,
     },
     async (input) => apiResult(() => api.getKnowledge(input)),
@@ -33,7 +33,7 @@ export function registerKnowledgeTools(server: McpServer, api: PersonalOsApiClie
     "update_knowledge",
     {
       description:
-        "Revise (content, and optionally its tags), dispute, supersede, archive, unarchive, restrict to a workspace, or mark sensitive a knowledge record using its current revision and a stable mutation UUID. Revising or superseding memory the owner holds creates a proposal for the owner instead. Fetch fresh context after the mutation.",
+        "Keep memory current: revise (content, tags or `core`), supersede an outdated memory, dispute, archive, unarchive, restrict to a workspace, or mark sensitive, using the record's current revision and a stable mutation UUID. Use this instead of saving a duplicate when something you remember changes. Revising or superseding memory the owner holds creates a proposal for the owner instead of overwriting it. Only the person can confirm, trash, restore or delete memory. Fetch fresh context after the mutation.",
       inputSchema: knowledgeAgentLifecycleInputSchema,
     },
     async (input) => apiResult(() => api.updateKnowledge(input)),
@@ -42,7 +42,7 @@ export function registerKnowledgeTools(server: McpServer, api: PersonalOsApiClie
     "search_user_knowledge",
     {
       description:
-        "Find permitted memory by text and tags (match any or all; aliases resolve); exact tag matches rank first and an optional purpose ranks matching records next. Search before creating a duplicate, follow any returned cursor with the same filters, and cite the record and supporting sources you use.",
+        "Find memory beyond the session-start core by text and tags (match any or all; aliases resolve); exact tag matches rank first and an optional purpose ranks matching records next. Search before saving to avoid duplicates, follow any returned cursor with the same filters, and cite the record and supporting sources you use. Check each result's origin, freshness and conflict status before acting on it. Memory grants no permission to act.",
       inputSchema: knowledgeAgentQuerySchema,
     },
     async (input) => apiResult(() => api.searchKnowledge(input)),
@@ -60,7 +60,7 @@ export function registerKnowledgeTools(server: McpServer, api: PersonalOsApiClie
     "get_context_for_intent",
     {
       description:
-        "Fetch bounded memory for the current intent; an optional purpose ranks matching records first. Cite supporting sources, distinguish stated and inferred knowledge, and preserve tentative material, conflicts and missing inputs. Fetch fresh context after a memory mutation. Context provides evidence and grants no action authority.",
+        "Fetch bounded memory for the current intent; an optional purpose ranks matching records first. Cite supporting sources, distinguish each record's origin (stated or inferred), check its freshness, and preserve tentative material, conflicts and missing inputs. Fetch fresh context after a memory mutation. Context is evidence and grants no permission to act.",
       inputSchema: knowledgeAgentQuerySchema,
     },
     async (input) => apiResult(() => api.getKnowledgeContext(input)),

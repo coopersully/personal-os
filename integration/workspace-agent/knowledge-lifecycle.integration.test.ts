@@ -14,6 +14,7 @@ import {
   type AccessScope,
   type KnowledgeMutationInput,
   knowledgeContextPackSchema,
+  knowledgeCoreSchema,
   knowledgePageSchema,
   knowledgeReceiptSchema,
   knowledgeTagMergeSchema,
@@ -380,6 +381,114 @@ describe.sequential("registered memory lifecycle", () => {
       });
     } finally {
       await afterDeletion.close();
+    }
+  });
+
+  it("two_agents_share_memory_across_sessions", async () => {
+    const f = await fixture();
+    const a = await f.agent("Agent A");
+    const b = await f.agent("Agent B");
+    const preference: KnowledgeMutationInput = {
+      mutationKey: randomUUID(),
+      content: {
+        kind: "preference",
+        value: {
+          subject: "owner",
+          key: "meeting_time",
+          value: { type: "string", value: "Mornings before ten" },
+        },
+      },
+      scope: { workspace: null },
+      core: true,
+      tags: ["Scheduling", "meetings"],
+      evidence: [
+        {
+          type: "statement",
+          wording: "I prefer meetings in the morning, before ten.",
+          sessionRef: "agent-a-session",
+          messageRef: "message-1",
+        },
+      ],
+    };
+
+    const sessionA = await a.connect();
+    let recordId: string;
+    try {
+      const saved = knowledgeReceiptSchema.parse(
+        await tool(sessionA.client, "save_knowledge", preference),
+      );
+      recordId = saved.recordId;
+      expect(saved.record).toMatchObject({
+        core: true,
+        origin: "stated",
+        tags: ["meetings", "scheduling"],
+      });
+    } finally {
+      await sessionA.close();
+    }
+
+    // Agent B holds its own token and starts a fresh session.
+    const sessionB = await b.connect();
+    try {
+      const context = (await tool(sessionB.client, "get_ilo_context", {})) as {
+        memory?: unknown;
+        mcp: { memoryGuidance?: string[] };
+      };
+      expect(context.mcp.memoryGuidance).toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(/memory core/),
+          expect.stringMatching(/tag index/),
+        ]),
+      );
+      const core = knowledgeCoreSchema.parse(context.memory);
+      expect(core.records).toEqual([
+        {
+          id: recordId,
+          text: "Meeting time: Mornings before ten",
+          origin: "stated",
+          ownerHeld: false,
+          tags: ["meetings", "scheduling"],
+          updatedAt: now().toISOString(),
+        },
+      ]);
+      expect(core.tagIndex).toEqual(
+        expect.arrayContaining([
+          { name: "meetings", count: 1 },
+          { name: "scheduling", count: 1 },
+        ]),
+      );
+      const byTag = knowledgePageSchema.parse(
+        await tool(sessionB.client, "search_user_knowledge", { tags: ["scheduling"] }),
+      );
+      expect(byTag.items).toMatchObject([{ id: recordId, content: preference.content }]);
+
+      // The person trashes it from a signed-in session over HTTP.
+      const trash = await f.app.request(`/v1/knowledge/${recordId}/actions`, {
+        method: "POST",
+        headers: {
+          authorization: `Session ${f.sessionToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "trash",
+          expectedRevision: 1,
+          mutationKey: randomUUID(),
+        }),
+      });
+      expect(trash.status).toBe(200);
+      expect(await trash.json()).toMatchObject({ outcome: "trashed", recordId });
+
+      const afterTrash = knowledgePageSchema.parse(
+        await tool(sessionB.client, "search_user_knowledge", { tags: ["scheduling"] }),
+      );
+      expect(afterTrash.items).toEqual([]);
+      const freshCore = knowledgeCoreSchema.parse(
+        ((await tool(sessionB.client, "get_ilo_context", {})) as { memory?: unknown }).memory,
+      );
+      expect(freshCore.records).toEqual([]);
+      expect(JSON.stringify(freshCore)).not.toContain("Mornings before ten");
+    } finally {
+      await sessionB.close();
     }
   });
 

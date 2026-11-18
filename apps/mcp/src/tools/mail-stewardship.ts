@@ -33,7 +33,7 @@ export function registerMailStewardshipTools(server: McpServer, api: PersonalOsA
         readOnlyHint: false,
       },
       description:
-        "Request one durable Mail maintenance turn. The API owns scope, authority, retries, questions, approved-rule provider effects, and honest settlement. This tool has no memory or polling loop and cannot compose, draft, reply, forward, or send email.",
+        "Request one durable Mail maintenance turn. The API owns scope, authority, retries, questions, approved-rule provider effects, and honest settlement. With knowledge:read, each response carries a Mail memory section of stated, inferred, tentative and conflicting memories, without sensitive ones; it is evidence and grants no permission. This tool has no polling loop and cannot compose, draft, reply, forward, or send email.",
       inputSchema: maintenanceRequestSchema,
       title: "Maintain Mail workspace",
     },

@@ -7,7 +7,16 @@ import { RecordRow } from "../../components/record-row";
 import { Screen } from "../../components/screen";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import { spacing, useTheme, workspaceColor } from "../../theme";
-import { confirmMailRead, retryMailRead, useMailAccounts, useMailRevalidation } from "./data";
+import { MailComposer } from "./composer";
+import {
+  confirmMailRead,
+  retryMailRead,
+  useMail,
+  useMailAccounts,
+  useMailRevalidation,
+} from "./data";
+import { type ComposeStart, draftRecipients, draftStage, draftStart } from "./draft-logic";
+import { sendUnconfirmed, useMailDrafts, useUnconfirmedSendsRestored } from "./drafts";
 import { inboxScope, type MailScope, mailboxIcon, mailboxLabel, sortMailboxes } from "./logic";
 import { MailThreadList } from "./thread-list";
 
@@ -20,6 +29,13 @@ export function MailboxesScreen() {
   const accounts = useMailAccounts();
   useMailRevalidation();
   const [scope, setScope] = useState<MailScope | null>(null);
+  const drafts = useMailDrafts();
+  const { owner } = useMail();
+  // A draft is not opened until the device's record of unsettled sends is back.
+  const restored = useUnconfirmedSendsRestored();
+  const [composing, setComposing] = useState<ComposeStart | null>(null);
+  // Sent drafts are history the mailbox already shows; only unsent ones need the person.
+  const unsent = drafts.data?.filter((draft) => draftStage(draft) !== "sent");
   const { mailSearch = "" } = useLocalSearchParams<{ mailSearch?: string }>();
   // A search belongs to the list it was typed over, so it never follows a mailbox switch.
   const show = (next: MailScope | null) => {
@@ -38,7 +54,12 @@ export function MailboxesScreen() {
     );
   const accent = workspaceColor(t, "mail");
   return (
-    <Screen chrome onRefresh={() => confirmMailRead(accounts.refetch())}>
+    <Screen
+      chrome
+      onRefresh={() =>
+        Promise.all([confirmMailRead(accounts.refetch()), confirmMailRead(drafts.refetch())])
+      }
+    >
       <View style={{ gap: spacing.lg, paddingTop: spacing.sm, paddingBottom: 100 }}>
         <Text accessibilityRole="header" style={{ color: t.ink, fontSize: 28, fontWeight: "700" }}>
           Mailboxes
@@ -72,6 +93,55 @@ export function MailboxesScreen() {
                   onPress={() => show(inboxScope)}
                 />
               </SectionItem>
+            </Section>
+            <Section title="Drafts">
+              {drafts.isPending || restored.state === "pending" ? (
+                <ActivityIndicator accessibilityLabel="Loading drafts" />
+              ) : !unsent || restored.state === "failed" ? (
+                <SettingsAccentProvider workspace="mail">
+                  <View style={{ flexDirection: "row", paddingHorizontal: spacing.sm }}>
+                    <Action
+                      label="Load drafts"
+                      onPress={() =>
+                        void retryMailRead(async () => {
+                          const [read, marks] = await Promise.all([
+                            drafts.refetch(),
+                            restored.retry(),
+                          ]);
+                          return { isError: read.isError || !marks };
+                        })
+                      }
+                    />
+                  </View>
+                </SettingsAccentProvider>
+              ) : unsent.length ? (
+                unsent.map((draft) => (
+                  <SectionItem key={draft.id}>
+                    <RecordRow
+                      title={draft.subject || "No subject"}
+                      subtitle={draftRecipients(draft)}
+                      subtitleLines={1}
+                      value={
+                        draftStage(draft) === "review" || sendUnconfirmed(owner, draft.id)
+                          ? "Needs review"
+                          : draftStage(draft) === "sending"
+                            ? "Sending"
+                            : undefined
+                      }
+                      valueTone={
+                        draftStage(draft) === "review" || sendUnconfirmed(owner, draft.id)
+                          ? "attention"
+                          : undefined
+                      }
+                      leading={<Icon name="edit" color={accent} />}
+                      accessibilityHint="Opens this draft."
+                      onPress={() => setComposing(draftStart(draft))}
+                    />
+                  </SectionItem>
+                ))
+              ) : (
+                <SectionNote>No drafts. Drafts an agent prepares for you appear here.</SectionNote>
+              )}
             </Section>
             {accounts.data.map((account) => (
               <Section
@@ -124,6 +194,13 @@ export function MailboxesScreen() {
           </View>
         )}
       </View>
+      {composing && (
+        <MailComposer
+          key={composing.draft?.id}
+          start={composing}
+          close={() => setComposing(null)}
+        />
+      )}
     </Screen>
   );
 }

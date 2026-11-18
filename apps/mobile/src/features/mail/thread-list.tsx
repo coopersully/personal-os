@@ -9,6 +9,7 @@ import { PageRefreshControl } from "../../components/page-refresh";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import { useWorkspaceHeaderInset } from "../../components/workspace-header-inset";
 import { spacing, useTheme } from "../../theme";
+import { MailComposer } from "./composer";
 import {
   confirmMailRead,
   retryMailRead,
@@ -16,6 +17,7 @@ import {
   useMailRevalidation,
   useMailThreads,
 } from "./data";
+import { newStart } from "./draft-logic";
 import { type MailScope, mergeMailPages, scopeTitle, withMailChanges } from "./logic";
 import { MailReader } from "./reader";
 import { ThreadRow } from "./thread-row";
@@ -31,6 +33,8 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
   useMailRevalidation();
   const triage = useMailTriage();
   const [opened, setOpen] = useState<MailThreadSummary | null>(null);
+  const [writing, setWriting] = useState(false);
+  const sender = accounts.data?.[0]?.accountId;
   const rows = withMailChanges(
     mergeMailPages(threads.data?.pages),
     triage.changes,
@@ -78,6 +82,11 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
                 {title}
               </Text>
               {searching && <ActivityIndicator accessibilityLabel="Searching mail" />}
+              {sender && (
+                <SettingsAccentProvider workspace="mail">
+                  <Action label="New message" onPress={() => setWriting(true)} />
+                </SettingsAccentProvider>
+              )}
             </View>
             {scope.kind === "mailbox" && (
               <Text style={{ color: t.secondary, fontSize: 13, marginTop: spacing.xs }}>
@@ -155,8 +164,12 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
           key={open.id}
           thread={open}
           actions={triage.actions(open, () => setOpen(null))}
+          compose
           close={() => setOpen(null)}
         />
+      )}
+      {writing && sender && (
+        <MailComposer start={newStart(sender)} close={() => setWriting(false)} />
       )}
     </View>
   );

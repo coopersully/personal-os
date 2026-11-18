@@ -18,8 +18,14 @@ import { and, asc, eq, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { bumpKnowledgeEpoch, type KnowledgeTransaction, lockKnowledgeOwner } from "./access.js";
 import { knowledgeDerivedClosure } from "./derivation-closure.js";
+import { knowledgeFailureFields } from "./workflow-memory.js";
 
 const maxPurgeBatch = 100;
+
+/** The scheduler's failure line: the error's name, code and stack frames, never its message. */
+export function knowledgePurgeFailureLine(error: unknown) {
+  return `[personal-os] Memory Trash purge pass failed: ${JSON.stringify(knowledgeFailureFields(error))}\n`;
+}
 
 /**
  * Erase trashed records, and every record derived from them in any trash group, down to a

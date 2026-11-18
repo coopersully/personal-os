@@ -6,6 +6,7 @@ import { localDateAt, localDateToIso } from "@personal-os/domain";
 import { createApp, type PersonalOsApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { financeReconciliationDiagnostic } from "./finance-reconciliation-errors.js";
+import { knowledgePurgeFailureLine } from "./knowledge/purge-service.js";
 import { qaFixtureClockEnabled, refreshQaFinanceFixtures } from "./qa-fixture-clock.js";
 import {
   closeNodeHttpServer,
@@ -176,8 +177,8 @@ async function dispatchTextingRecovery(): Promise<void> {
 }
 
 async function dispatchKnowledgePurge(): Promise<void> {
-  await app.runKnowledgePurge().catch(() => {
-    process.stderr.write("[personal-os] Memory Trash purge pass failed.\n");
+  await app.runKnowledgePurge().catch((error: unknown) => {
+    process.stderr.write(knowledgePurgeFailureLine(error));
     throw new Error("Memory Trash purge pass failed.");
   });
 }

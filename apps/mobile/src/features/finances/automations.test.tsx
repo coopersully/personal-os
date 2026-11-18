@@ -754,8 +754,84 @@ it("does not mistake a registration that was already listed for the unconfirmed 
   );
   expect(h.success).not.toHaveBeenCalled();
   expect(h.back).not.toHaveBeenCalled();
-  // The list was read again and holds nothing new, so registering is open again.
-  await waitFor(() => expect(button("Register expected schedule").disabled).toBe(false));
+  // One read that holds nothing new does not prove the request failed: registering stays
+  // closed until the person reads the list once more.
+  const check = await screen.findByRole("button", { name: /Check automations/ });
+  expect(button("Register expected schedule").disabled).toBe(true);
+  expect(h.error).toHaveBeenCalledTimes(1);
+  const reads = h.api.listAutomationHostSchedules.mock.calls.length;
+  fireEvent.click(check);
+  await waitFor(() =>
+    expect(h.info).toHaveBeenCalledWith(
+      "That registration isn’t listed. You can register it again.",
+      expect.any(Object),
+    ),
+  );
+  expect(h.api.listAutomationHostSchedules.mock.calls.length).toBeGreaterThan(reads);
+  expect(button("Register expected schedule").disabled).toBe(false);
+  expect(h.api.createAutomationHostSchedule).toHaveBeenCalledTimes(1);
+  expectNoInlineResult();
+});
+
+it.each([
+  [
+    "another interval",
+    {
+      trigger: {
+        type: "recurring",
+        recurrence: { type: "interval", everyMinutes: 60, timeZone: ZONE },
+      },
+    },
+  ],
+  [
+    "another time zone",
+    {
+      trigger: {
+        type: "recurring",
+        recurrence: { type: "interval", everyMinutes: 1440, timeZone: "Europe/Paris" },
+      },
+    },
+  ],
+])("does not take a new registration with %s for the unconfirmed one", async (_, change) => {
+  await form();
+  pick(/^Authorized connection,/, "Desk Mac");
+  h.api.createAutomationHostSchedule.mockRejectedValueOnce(rejection(504));
+  h.api.listAutomationHostSchedules.mockResolvedValue([
+    status("setup_pending", {
+      schedule: { id: "schedule-new", label: "Finance maintenance", ...change },
+    }),
+  ]);
+  press("Register expected schedule");
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(
+      "Couldn’t confirm the automation was saved. Check its state before trying again.",
+      expect.any(Object),
+    ),
+  );
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.back).not.toHaveBeenCalled();
+  expect(h.api.createAutomationHostSchedule).toHaveBeenCalledTimes(1);
+});
+
+it("recognises an unconfirmed daily registration whatever order its times were typed in", async () => {
+  await form();
+  pick(/^Authorized connection,/, "Desk Mac");
+  pick(/^Host,/, /daily local times/);
+  type("Daily local times", "20:00, 08:00");
+  h.api.createAutomationHostSchedule.mockRejectedValueOnce(rejection(504));
+  h.api.listAutomationHostSchedules.mockResolvedValue([
+    status("setup_pending", {
+      schedule: { id: "schedule-new", label: "Finance maintenance", ...claudeScheduled },
+    }),
+  ]);
+  press("Register expected schedule");
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith(
+      "Automation registered. Set it up in your host.",
+      expect.any(Object),
+    ),
+  );
+  expect(h.back).toHaveBeenCalledTimes(1);
 });
 
 it("keeps registering closed after an unconfirmed result until the list has been read again", async () => {

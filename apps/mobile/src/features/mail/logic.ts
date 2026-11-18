@@ -198,6 +198,20 @@ export function snoozeChoices(now: Date, timeZone: string) {
   ] as const;
 }
 
+/**
+ * The time zone Mail reads days in: the stored planning time zone, or UTC when there is none or
+ * the device's `Intl` does not accept it, so no date formatting here can throw on it.
+ */
+export function planningZone(stored: string | null | undefined) {
+  if (!stored) return "UTC";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: stored });
+    return stored;
+  } catch {
+    return "UTC";
+  }
+}
+
 /** The planning time zone's calendar day at a moment, as the date picker holds it. */
 export function pickerDay(date: Date, timeZone: string) {
   return localDateToIso(localDateAt(date, timeZone));

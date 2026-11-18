@@ -192,6 +192,30 @@ type DeclaredSchedule = AutomationHostScheduleCreateInput extends infer Input
     : never
   : never;
 
+/** Whether a listed trigger declares the cadence and time zone a submitted one asked for. */
+function sameTrigger(
+  listed: HostStatus["schedule"]["trigger"],
+  asked: DeclaredSchedule["trigger"],
+) {
+  if (asked.type === "event")
+    return (
+      listed.type === "event" &&
+      listed.expectedMaximumLatencyMinutes === asked.expectedMaximumLatencyMinutes
+    );
+  if (asked.type === "scheduled")
+    return (
+      listed.type === "scheduled" &&
+      listed.timeZone === asked.timeZone &&
+      // The server stores the times sorted.
+      [...listed.localTimes].sort().join() === [...asked.localTimes].sort().join()
+    );
+  return (
+    listed.type === "recurring" &&
+    listed.recurrence.everyMinutes === asked.recurrence.everyMinutes &&
+    listed.recurrence.timeZone === asked.recurrence.timeZone
+  );
+}
+
 /** Whole minutes from 1 to `max`; `null` for anything else. */
 function wholeMinutes(text: string, max: number): number | null {
   if (!/^\d+$/.test(text.trim())) return null;
@@ -228,8 +252,8 @@ export function FinanceAutomationRegistrationScreen() {
     api.listAutomationHostSchedules(),
   );
   /**
-   * After an unconfirmed registration whose list could not be read: recognises that registration
-   * in a later read. Registering stays closed while this is set.
+   * After an unconfirmed registration the list did not show or could not be read: recognises
+   * that registration in a later read. Registering stays closed while this is set.
    */
   const [unchecked, setUnchecked] = useState<{
     landed: (list: HostStatus[]) => boolean;
@@ -297,12 +321,14 @@ export function FinanceAutomationRegistrationScreen() {
           schedule.label === input.label &&
           schedule.tenantAuthorizationConnectionId === input.tenantAuthorizationConnectionId &&
           schedule.hostSurface === input.hostSurface &&
-          schedule.trigger.type === input.trigger.type,
+          sameTrigger(schedule.trigger, input.trigger),
       );
     void perform(() => api.createAutomationHostSchedule(input), registered, landed).then(
       (outcome) => {
         if (outcome === "saved") router.back();
-        else if (outcome === "unchecked") setUnchecked({ landed });
+        // A read that does not show the request is no proof it failed: it may still be landing.
+        // Registering stays closed until the person reads the list again.
+        else if (outcome === "unchecked" || outcome === "unknown") setUnchecked({ landed });
       },
     );
   }

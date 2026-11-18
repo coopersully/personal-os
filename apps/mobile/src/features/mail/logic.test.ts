@@ -15,6 +15,7 @@ import {
   nextMailPage,
   pickedSnooze,
   pickerDay,
+  planningZone,
   scopeTarget,
   scopeTitle,
   senderName,
@@ -312,4 +313,16 @@ it("gives a menu a new key when an action or its icon changes", () => {
     actionsKey([read, { id: "archive", icon: "archive" }, snooze]),
   );
   expect(actionsKey([read])).not.toBe(actionsKey([{ id: "unread", icon: "mail" }]));
+});
+
+it("reads Mail in UTC when the stored planning time zone is not one the device accepts", () => {
+  expect(planningZone("Asia/Tokyo")).toBe("Asia/Tokyo");
+  expect(planningZone("UTC")).toBe("UTC");
+  for (const stored of ["Invalid/Zone", "", undefined, null]) {
+    const zone = planningZone(stored);
+    expect(zone).toBe("UTC");
+    const now = new Date("2026-11-18T21:30:00.000Z");
+    expect(() => snoozeChoices(now, zone)).not.toThrow();
+    expect(() => snoozeTime(now, now, zone)).not.toThrow();
+  }
 });

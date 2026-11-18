@@ -440,7 +440,9 @@ export function FinanceSpendingScreen() {
       ? spendingRange(period, today, saved.weekStartsOn, dates ?? undefined)
       : null;
   // Transactions keeps its list on the last usable range; only the fields show the correction.
-  const listed = range ?? (problem && today ? (usable ?? { from: today, through: today }) : null);
+  // Without the saved preferences nothing is listed, so their loading or retry stays in view.
+  const listed =
+    range ?? (problem && today && saved ? (usable ?? { from: today, through: today }) : null);
   const scope: FinanceSpendingScope | null =
     range && saved && timezone
       ? {

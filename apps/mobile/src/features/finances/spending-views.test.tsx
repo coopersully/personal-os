@@ -658,6 +658,29 @@ it("does not read spending before the saved preferences are known, or after they
   expect(lastScope().basis).toBe("full_outflow");
 });
 
+it("keeps the preference read in view in Transactions while a custom range is unusable", async () => {
+  h.params = { period: "custom", mode: "Transactions" };
+  h.api.listFinanceTransactions.mockResolvedValue({ items: [], nextCursor: null });
+  h.api.getFinanceCategories.mockResolvedValue([]);
+  h.api.getWorkspaceSettings.mockRejectedValue(new Error("offline"));
+  mount(<FinanceSpendingScreen />);
+  await screen.findByRole("button", { name: "Retry loading" });
+  fireEvent.change(screen.getByLabelText(/^Through/), { target: { value: "" } });
+  expect(screen.getByText("Choose a start and an end date.")).toBeVisible();
+  // Without the saved preferences there is no range to list, only the read to retry.
+  expect(screen.getByRole("button", { name: "Retry loading" })).toBeVisible();
+  expect(screen.queryByText(/until these dates are corrected/)).toBeNull();
+  expect(h.api.listFinanceTransactions).not.toHaveBeenCalled();
+  settings();
+  press("Retry loading");
+  // Once they load, the last usable range is listed while the fields are corrected.
+  await screen.findByText("Showing Nov 18 until these dates are corrected.");
+  await screen.findByText("No transactions in this view.");
+  expect(h.api.listFinanceTransactions).toHaveBeenLastCalledWith(
+    expect.objectContaining({ from: "2026-11-18", to: "2026-11-18" }),
+  );
+});
+
 it("asks for the account timezone instead of guessing a period", () => {
   h.timezone = undefined;
   mount(<FinanceSpendingScreen />);

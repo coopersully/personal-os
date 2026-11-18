@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AppState } from "react-native";
 import { toast } from "sonner-native";
 import { useAuth } from "../auth/context";
-import { MAIL_PAGE_SIZE, type MailScope, nextMailPage, scopeTarget } from "./logic";
+import { MAIL_PAGE_SIZE, type MailScope, nextMailPage, planningZone, scopeTarget } from "./logic";
 
 /** Mail reads own their feedback, so the shared read-error toast stays out of the way. */
 const meta = { scopedReadFeedback: true };
@@ -34,7 +34,7 @@ export function useMail() {
   return {
     api: session.api(),
     owner: state.user?.id,
-    timeZone: state.user?.planningTimezone ?? "UTC",
+    timeZone: planningZone(state.user?.planningTimezone),
   };
 }
 

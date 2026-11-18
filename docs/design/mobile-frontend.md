@@ -827,9 +827,10 @@ not be confirmed and is never retried.
 
 Register is offered only once the existing registrations have been read. After a registration whose
 outcome is unknown, the registrations are read again and compared with the ones the form opened
-with: a new one with the form's name, connection, host and trigger type is reported as registered
-and closes the form; when none is listed the toast says it could not be confirmed and Register is
-available again. If that read fails, Register stays disabled and a Check automations row reads the
+with: a new one with the form's name, connection, host and full trigger (cadence and time zone) is
+reported as registered and closes the form; when none is listed the toast says it could not be
+confirmed. One read that does not show the request is not proof it failed, so whether none is
+listed or that read fails, Register stays disabled and a Check automations row reads the
 list again under its own toast, which reports the registration as found, says it is not listed and
 can be registered again, or says the list could not be read. The screen says "Fire tokens, host prompts and run recovery are managed on the web"; none
 of those are available on iPhone.

@@ -5,7 +5,7 @@ import { SettingsAccentProvider } from "../../components/settings-accent";
 import { radius, spacing, useTheme, workspaceColor } from "../../theme";
 import { DateField } from "../tasks/date-field";
 import { categoryIcon } from "./category-presentation";
-import { formatMoney } from "./presentation";
+import { formatLocalDate, formatMoney } from "./presentation";
 import {
   binLabel,
   type SpendingBin,
@@ -32,11 +32,14 @@ export function CustomRange({
   from,
   through,
   problem,
+  shown,
   onChange,
 }: {
   from: string;
   through: string;
   problem: string | null;
+  /** The range a list still shows while these fields hold one that cannot be read. */
+  shown?: { from: string; through: string } | null;
   onChange: (from: string, through: string) => void;
 }) {
   return (
@@ -54,6 +57,15 @@ export function CustomRange({
         onChange={(value) => onChange(from, value?.slice(0, 10) ?? "")}
       />
       {problem && <Copy secondary>{problem}</Copy>}
+      {problem && shown && (
+        <Copy secondary>
+          {`Showing ${
+            shown.from === shown.through
+              ? formatLocalDate(shown.from)
+              : `${formatLocalDate(shown.from)} – ${formatLocalDate(shown.through)}`
+          } until these dates are corrected.`}
+        </Copy>
+      )}
     </SettingsAccentProvider>
   );
 }

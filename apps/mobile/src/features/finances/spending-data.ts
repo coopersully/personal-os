@@ -8,6 +8,8 @@ export type SpendingPreferences = {
   subtractRefunds: boolean;
   includeUncategorized: boolean;
   period: SpendingPeriod;
+  /** The saved starting view. Bubbles is not built on iPhone, so it opens as the list. */
+  view: "list" | "trends" | "rhythm";
   weekStartsOn: WeekStart;
 };
 
@@ -29,6 +31,7 @@ export function useSpendingPreferences() {
       subtractRefunds: saved.financeSpendingSubtractRefunds,
       includeUncategorized: saved.financeSpendingIncludeUncategorized,
       period: saved.financeSpendingPeriod,
+      view: saved.financeSpendingView === "bubbles" ? "list" : saved.financeSpendingView,
       weekStartsOn: calendar.preferences.weekStartsOn,
     };
   });

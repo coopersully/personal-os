@@ -701,9 +701,60 @@ it("holds an unusable custom range beside its fields without reading or guessing
   expect(screen.queryByText(/coverage/)).toBeNull();
   expect(h.api.getFinanceSpending).toHaveBeenCalledTimes(1);
   expect(h.error).not.toHaveBeenCalled();
-  // Transactions has no period to list either.
-  press("Transactions");
-  expect(h.api.listFinanceTransactions).not.toHaveBeenCalled();
+});
+
+it("keeps listing the last usable custom range while the fields hold an unusable one", async () => {
+  h.params = { period: "custom", mode: "Transactions" };
+  h.api.listFinanceTransactions.mockResolvedValue({ items: [], nextCursor: null });
+  h.api.getFinanceCategories.mockResolvedValue([]);
+  mount(<FinanceSpendingScreen />);
+  await screen.findByText("No transactions in this view.");
+  fireEvent.change(screen.getByLabelText(/^From/), { target: { value: "2026-11-02" } });
+  await waitFor(() =>
+    expect(h.api.listFinanceTransactions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ from: "2026-11-02", to: "2026-11-18" }),
+    ),
+  );
+  const reads = h.api.listFinanceTransactions.mock.calls.length;
+  for (const [field, value, problem] of [
+    [/^Through/, "2026-11-01", "The start date must be on or before the end date."],
+    [/^Through/, "", "Choose a start and an end date."],
+  ] as const) {
+    fireEvent.change(screen.getByLabelText(field), { target: { value } });
+    // The correction sits at the fields, with the range the list still shows.
+    expect(screen.getByText(problem)).toBeVisible();
+    expect(
+      screen.getByText("Showing Nov 2 – Nov 18 until these dates are corrected."),
+    ).toBeVisible();
+    expect(screen.getByText("No transactions in this view.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Select transactions" })).toBeVisible();
+  }
+  expect(h.api.listFinanceTransactions).toHaveBeenCalledTimes(reads);
+  fireEvent.change(screen.getByLabelText(/^Through/), { target: { value: "2026-11-09" } });
+  await waitFor(() =>
+    expect(h.api.listFinanceTransactions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ from: "2026-11-02", to: "2026-11-09" }),
+    ),
+  );
+  expect(screen.queryByText(/until these dates are corrected/)).toBeNull();
+  expect(h.error).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["trends", "Trends"],
+  ["rhythm", "Rhythm"],
+  ["list", "List"],
+  // Bubbles is not built on iPhone.
+  ["bubbles", "List"],
+] as const)("starts on the saved %s view as %s", async (saved, label) => {
+  settings({ financeSpendingView: saved });
+  mount(<FinanceSpendingScreen />);
+  await screen.findByText(/coverage/);
+  expect(screen.getByRole("button", { name: label })).toHaveAttribute("aria-pressed", "true");
+  // A view chosen here lasts for the visit.
+  const other = label === "Rhythm" ? "List" : "Rhythm";
+  press(other);
+  expect(screen.getByRole("button", { name: other })).toHaveAttribute("aria-pressed", "true");
 });
 
 it("opens on the period a link names and falls back to the saved one for an unknown name", async () => {
@@ -1380,22 +1431,28 @@ it("does not mark messages read while the transcript is not on screen", async ()
   expect(h.api.markFinanceConversationRendered).not.toHaveBeenCalled();
 });
 
-it("never marks past unread messages that have not been loaded, or without a known read mark", async () => {
-  // Read through 2, but the loaded page starts at 40: messages 3 to 39 were never shown.
+it("marks through the latest message however far behind the read mark is", async () => {
+  // Read through 2 and only the latest page is loaded: showing it still clears the badge.
   h.api.getFinanceConversationUnread.mockResolvedValue(unread("40", "2"));
   h.api.getFinanceConversationHistory.mockResolvedValue({
     messages: [message("40"), message("41")],
     nextCursor: "older",
   });
-  const first = mount(<Conversation />);
-  await screen.findByText("Message 41");
-  await waitFor(() => expect(h.api.getFinanceConversationUnread).toHaveBeenCalled());
-  expect(h.api.markFinanceConversationRendered).not.toHaveBeenCalled();
-  first.unmount();
+  mount(<Conversation />);
+  await waitFor(() => expect(h.api.markFinanceConversationRendered).toHaveBeenCalledWith("41"));
+  expect(h.api.markFinanceConversationRendered).toHaveBeenCalledTimes(1);
+});
+
+it("never marks without a known read mark, or around a message it cannot place", async () => {
+  h.api.getFinanceConversationHistory.mockResolvedValue({
+    messages: [message("40"), message("41")],
+    nextCursor: "older",
+  });
   // Already read through the newest message: nothing to record.
   h.api.getFinanceConversationUnread.mockResolvedValue(unread("0", "41"));
   const second = mount(<Conversation />);
   await screen.findByText("Message 41");
+  await waitFor(() => expect(h.api.getFinanceConversationUnread).toHaveBeenCalled());
   expect(h.api.markFinanceConversationRendered).not.toHaveBeenCalled();
   second.unmount();
   h.api.getFinanceConversationUnread.mockRejectedValue(new Error("offline"));

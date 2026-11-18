@@ -4,7 +4,7 @@ import { BudgetPlanEditor } from "./budget-plan-editor";
 import { BudgetScope } from "./budget-qualification";
 import { budgetMonth } from "./budget-write";
 import { useFinance, useFinanceRead } from "./data";
-import { periodScope } from "./presentation";
+import { spendingMonth } from "./spending-math";
 import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Section } from "./ui";
 
 const route = "/finance-budget-plan" as const;
@@ -14,7 +14,7 @@ export function BudgetPlanDestinations() {
   const { timezone } = useFinance();
   const query = useFinanceRead(["budget"], (api) => api.getFinanceBudget());
   const plan = query.data?.data;
-  const month = timezone ? periodScope("month", timezone).from.slice(0, 7) : plan?.effectiveFrom;
+  const month = timezone ? spendingMonth(timezone) : plan?.effectiveFrom;
   return (
     <Section title="Manage plan">
       <ReadState query={query}>
@@ -64,9 +64,7 @@ export function BudgetPlanDestinations() {
 export function FinanceBudgetPlanScreen() {
   const params = useLocalSearchParams<{ view?: string; id?: string; month?: string }>();
   const { owner, timezone } = useFinance();
-  const month =
-    budgetMonth(params.month) ??
-    (timezone ? periodScope("month", timezone).from.slice(0, 7) : undefined);
+  const month = budgetMonth(params.month) ?? (timezone ? spendingMonth(timezone) : undefined);
   if (params.view === "edit") return <BudgetPlanEditor key={owner} />;
   if (params.view === "buckets" && month) return <BudgetBuckets month={month} />;
   if (params.view === "bucket" && month)

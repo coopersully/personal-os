@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { workspacePages } from "../../navigation/workspace-pages";
-import { currencyForTotals, formatMoney, periodScope } from "./presentation";
+import { currencyForTotals, formatMoney } from "./presentation";
+import { spendingMonth, spendingRange, spendingToday } from "./spending-math";
 
 describe("mobile Finance presentation", () => {
   it("keeps missing balances unavailable and defaults legacy currency to USD", () => {
@@ -19,12 +20,13 @@ describe("mobile Finance presentation", () => {
   });
   it("uses the account timezone for calendar periods including year boundaries", () => {
     const at = new Date("2026-01-01T01:00:00Z");
-    expect(periodScope("month", "America/New_York", at)).toMatchObject({
+    const today = spendingToday("America/New_York", at);
+    expect(spendingMonth("America/New_York", at)).toBe("2025-12");
+    expect(spendingRange("month", today, "monday")).toEqual({
       from: "2025-12-01",
       through: "2025-12-31",
-      timezone: "America/New_York",
     });
-    expect(periodScope("week", "America/New_York", at)).toMatchObject({
+    expect(spendingRange("week", today, "monday")).toEqual({
       from: "2025-12-29",
       through: "2026-01-04",
     });

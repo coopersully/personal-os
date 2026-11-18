@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import {
   accessTokens,
+  auditEvents,
   createDatabaseClient,
   type DatabaseClient,
   executionPolicySettings,
@@ -351,6 +352,20 @@ describe("agent-managed memory authority", () => {
       replacementId: replacement.id,
     });
     expect(proposed).toMatchObject({ id: replacement.id, status: "proposed", revision: 2 });
+    // The replacement's audit row records the revision and status the proposal replaced (M11).
+    const [audit] = await database.db
+      .select({ before: auditEvents.before, after: auditEvents.after })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.entityId, replacement.id),
+          eq(auditEvents.action, "knowledge.supersede"),
+        ),
+      );
+    expect(audit).toMatchObject({
+      before: { revision: 1, status: "active" },
+      after: { revision: 2, status: "proposed" },
+    });
     expect(await f.get(f.owner, original.id)).toMatchObject({
       status: "active",
       revision: 1,

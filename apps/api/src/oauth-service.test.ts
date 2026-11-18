@@ -224,6 +224,21 @@ describe("OAuth authorized clients", () => {
     );
   });
 
+  it("rejects saving memory without reading it, as personal access tokens do", () => {
+    const service = createOAuthService({ db: {} as Database, ...serviceOptions });
+
+    expect(() => service.parseScopes("tasks:read knowledge:write")).toThrow(
+      expect.objectContaining({
+        code: "invalid_request",
+        message: "The knowledge:write scope requires knowledge:read.",
+      }),
+    );
+    expect(service.parseScopes("knowledge:write knowledge:read")).toEqual([
+      "knowledge:write",
+      "knowledge:read",
+    ]);
+  });
+
   it("default_oauth_scopes_include_memory", () => {
     const service = createOAuthService({ db: {} as Database, ...serviceOptions });
     const defaults = service.parseScopes(undefined);

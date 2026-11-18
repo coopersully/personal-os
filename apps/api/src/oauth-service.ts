@@ -362,6 +362,9 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
       const scopes = value?.split(" ").filter(Boolean) ?? [...defaultScopes];
       if (!scopes.length || scopes.some((scope) => !allScopes.has(scope as AccessScope)))
         throw new AppError("invalid_request", "One or more requested scopes are not supported.");
+      // Matches the personal access token rule: memory an agent cannot read, it cannot save.
+      if (scopes.includes("knowledge:write") && !scopes.includes("knowledge:read"))
+        throw new AppError("invalid_request", "The knowledge:write scope requires knowledge:read.");
       return [...new Set(scopes)] as AccessScope[];
     },
   };

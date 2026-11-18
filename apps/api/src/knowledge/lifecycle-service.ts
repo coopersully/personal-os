@@ -246,6 +246,10 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
         const at = now();
         const derivations = await knowledgeRevisionDerivations(tx, principal.userId, current);
         let write = nextRevision(current, derivations);
+        // What the written record was before this action, for its audit row: this record, or the
+        // agent's replacement a supersession turns into a proposal. A revision proposal is a new
+        // record and has no before.
+        let before: KnowledgeRecordSnapshot = snapshot;
         let related: { write: RevisionWrite; before: KnowledgeRecordSnapshot }[] = [];
         switch (input.action) {
           case "revise":
@@ -305,6 +309,7 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
             await validateSupersession(tx, principal, snapshot.id, input.replacementId);
             if (agent && heldByOwner(current)) {
               write = await proposeReplacement(tx, principal, current, replacement);
+              before = replacement.snapshot;
               break;
             }
             write.snapshot.status = "superseded";
@@ -366,8 +371,7 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
           principal,
           { ...input, action: input.action, requestHash },
           write.snapshot,
-          // A proposal is a new record; every other action changes this one.
-          write.snapshot.id === snapshot.id ? snapshot : null,
+          write.snapshot.id === before.id ? before : null,
         );
         for (const other of related) {
           await writeKnowledgeRevision(tx, principal, other.write, at);

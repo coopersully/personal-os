@@ -79,6 +79,7 @@ const h = vi.hoisted(() => ({
     listTaskWorkspace: vi.fn(),
     listFinanceAccounts: vi.fn(),
     getFinanceSpending: vi.fn(),
+    getWorkspaceSettings: vi.fn(),
     listFinanceActivity: vi.fn(),
     listFinanceTransactions: vi.fn(),
     listFinanceSpendingTransactions: vi.fn(),
@@ -336,6 +337,12 @@ beforeEach(() => {
     },
   });
   h.api.getFinanceSpending.mockResolvedValue(spending);
+  // The week starts on Monday here, as these tests' fixed dates assume.
+  h.api.getWorkspaceSettings.mockImplementation(async (workspace: string) => ({
+    workspace,
+    revision: 1,
+    preferences: workspace === "calendar" ? { weekStartsOn: "monday" } : {},
+  }));
   h.api.listFinanceActivity.mockResolvedValue({ entries: [], nextCursor: null });
   h.api.listFinanceTransactions.mockResolvedValue({ items: [transaction], nextCursor: null });
   h.api.listFinanceSpendingTransactions.mockResolvedValue({

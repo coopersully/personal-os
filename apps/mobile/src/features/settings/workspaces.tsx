@@ -135,7 +135,7 @@ const preferenceGroups = [
   },
   { title: "Event defaults on other devices", keys: ["defaultEventDurationMinutes"] },
   {
-    title: "Spending defaults on other devices",
+    title: "Spending defaults",
     keys: [
       "financeSpendingBasis",
       "financeSpendingPeriod",
@@ -143,6 +143,7 @@ const preferenceGroups = [
       "financeSpendingIncludeUncategorized",
       "financeSpendingSubtractRefunds",
     ],
+    help: "These apply to Spending on iPhone, web and desktop.",
   },
   {
     title: "Transaction defaults on other devices",

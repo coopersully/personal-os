@@ -1364,6 +1364,28 @@ describe("domain schemas", () => {
     ).toBe(false);
     expect(() => updateFinanceTransactionInputSchema.parse({ learnMerchant: false })).toThrow();
     expect(
+      updateFinanceTransactionInputSchema.parse({
+        date: "2026-11-02",
+        expectedTransactionUpdatedAt: start,
+      }),
+    ).toEqual({ date: "2026-11-02", expectedTransactionUpdatedAt: start });
+    expect(updateFinanceTransactionInputSchema.safeParse({}).error?.issues[0]?.message).toBe(
+      "Provide a category, note or date.",
+    );
+    expect(
+      updateFinanceTransactionInputSchema.safeParse({ date: "2026-11-02" }).error?.issues,
+    ).toEqual([
+      expect.objectContaining({
+        message: "A date change needs the transaction's current revision.",
+      }),
+    ]);
+    expect(
+      updateFinanceTransactionInputSchema.safeParse({
+        date: "11/02/2026",
+        expectedTransactionUpdatedAt: start,
+      }).success,
+    ).toBe(false);
+    expect(
       createAccessTokenInputSchema.parse({ name: "Agent", scopes: ["audit:read", "audit:read"] })
         .scopes,
     ).toEqual(["audit:read"]);

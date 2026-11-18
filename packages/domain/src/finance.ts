@@ -1416,6 +1416,7 @@ export const updateFinanceTransactionInputSchema = z
   .object({
     category: categorySchema.nullable().optional(),
     confidence: z.number().min(0).max(1).optional(),
+    date: z.iso.date().optional(),
     expectedTransactionUpdatedAt: isoDateTimeSchema.optional(),
     learnMerchant: z.boolean().optional(),
     notes: z.string().trim().max(4_000).nullable().optional(),
@@ -1423,8 +1424,13 @@ export const updateFinanceTransactionInputSchema = z
     suggestionBasis: z.enum(["merchant_rule", "transaction_evidence"]).optional(),
   })
   .refine(
-    (value) => value.category !== undefined || value.notes !== undefined,
-    "Provide a category or note.",
+    (value) =>
+      value.category !== undefined || value.notes !== undefined || value.date !== undefined,
+    "Provide a category, note or date.",
+  )
+  .refine(
+    (value) => value.date === undefined || value.expectedTransactionUpdatedAt !== undefined,
+    "A date change needs the transaction's current revision.",
   );
 export type UpdateFinanceTransactionInput = z.infer<typeof updateFinanceTransactionInputSchema>;
 

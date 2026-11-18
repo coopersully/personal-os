@@ -342,6 +342,52 @@ describe("Finance MCP workflows", () => {
     ]);
   });
 
+  it("forwards a manual transaction date correction and refuses one without a revision", async () => {
+    const updateFinanceTransactionCanonical = vi.fn(async () => ({
+      ...base,
+      data: {},
+      outcome: "completed",
+    }));
+    const server = new McpServer({ name: "finance-transaction-date", version: "1" });
+    registerFinanceTools(server, {
+      updateFinanceTransactionCanonical,
+    } as unknown as PersonalOsApiClient);
+    const client = new Client({ name: "test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const tools = await client.listTools();
+      expect(
+        tools.tools.find((tool) => tool.name === "update_finance_transaction")?.description,
+      ).toContain("category, note, or the date of a manually entered transaction");
+      const refused = await client.callTool({
+        arguments: { date: "2026-11-02", idempotencyKey: "date-1", transactionId: id },
+        name: "update_finance_transaction",
+      });
+      expect(refused.isError).toBe(true);
+      expect(updateFinanceTransactionCanonical).not.toHaveBeenCalled();
+
+      const response = await client.callTool({
+        arguments: {
+          date: "2026-11-02",
+          expectedTransactionUpdatedAt: "2026-11-01T12:00:00.000Z",
+          idempotencyKey: "date-1",
+          transactionId: id,
+        },
+        name: "update_finance_transaction",
+      });
+      expect(response.isError).not.toBe(true);
+      expect(updateFinanceTransactionCanonical).toHaveBeenCalledWith(id, {
+        date: "2026-11-02",
+        expectedTransactionUpdatedAt: "2026-11-01T12:00:00.000Z",
+        idempotencyKey: "date-1",
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it("rejects an incomplete budget bucket update before calling the API", async () => {
     const api = {
       updateFinanceBudgetBucket: vi.fn(),

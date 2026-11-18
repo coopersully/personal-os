@@ -10336,6 +10336,29 @@ export function createFinanceService({
       const write = async (tx: FinanceActionWriteExecutor) => {
         await lockReimbursementTopology(tx, context.principal.userId);
         const before = await ownedTransaction(context.principal.userId, id, tx);
+        if (input.date !== undefined) {
+          // A date is ledger evidence: only a manually entered transaction's date
+          // may change, and only against the revision the editor displayed.
+          if (input.expectedTransactionUpdatedAt === undefined)
+            throw new AppError(
+              "invalid_request",
+              "A date change needs the transaction's current revision.",
+            );
+          if (context.principal.actorType === "agent" && input.category !== undefined)
+            throw new AppError(
+              "invalid_request",
+              "Change a transaction's date separately from an agent categorization.",
+            );
+          const [source] = await tx
+            .select({ provider: financeAccounts.provider })
+            .from(financeAccounts)
+            .where(eq(financeAccounts.id, before.accountId))
+            .limit(1);
+          if (source?.provider !== "manual")
+            throw new AppError("invalid_request", "Dates on synced transactions can't be changed.");
+          if (before.updatedAt.toISOString() !== input.expectedTransactionUpdatedAt)
+            throw new AppError("conflict", "The transaction changed; reload it before editing.");
+        }
         if (context.financeReviewedExecution) {
           await requireWorkspaceExecution(tx, context.principal, "finances", now());
           if (
@@ -10414,7 +10437,7 @@ export function createFinanceService({
           .limit(1);
         if (!current) throw new AppError("not_found", "The transaction was not found.");
         if (
-          context.financeReviewedExecution &&
+          (context.financeReviewedExecution || input.date !== undefined) &&
           input.expectedTransactionUpdatedAt !== undefined &&
           current.updatedAt.toISOString() !== input.expectedTransactionUpdatedAt
         )
@@ -10436,12 +10459,19 @@ export function createFinanceService({
             .orderBy(financeCategories.id)
             .for("update");
         }
+        // The request names the date `date`; the column is `transactionDate`.
+        const { date, ...fields } = input;
+        const dateChange =
+          date === undefined || date === current.transactionDate
+            ? null
+            : { after: date, before: current.transactionDate };
         const updated = requireDatabaseRecord(
           (
             await tx
               .update(financeTransactions)
               .set({
-                ...input,
+                ...fields,
+                transactionDate: date,
                 categoryConfidence:
                   input.category === undefined
                     ? undefined
@@ -10504,10 +10534,26 @@ export function createFinanceService({
                 : "finance.transaction_categorized",
             after:
               input.category === undefined
-                ? { changedFields: ["notes"] }
-                : transactionAuditSnapshot(transaction(updated)),
+                ? {
+                    changedFields: [
+                      ...(input.notes === undefined ? [] : ["notes"]),
+                      ...(dateChange ? ["date"] : []),
+                    ],
+                    ...(dateChange ? { date: dateChange.after } : {}),
+                  }
+                : {
+                    ...transactionAuditSnapshot(transaction(updated)),
+                    ...(dateChange ? { date: dateChange.after } : {}),
+                  },
             before:
-              input.category === undefined ? null : transactionAuditSnapshot(transaction(current)),
+              input.category === undefined
+                ? dateChange
+                  ? { date: dateChange.before }
+                  : null
+                : {
+                    ...transactionAuditSnapshot(transaction(current)),
+                    ...(dateChange ? { date: dateChange.before } : {}),
+                  },
             entityId: updated.id,
             entityType: "finance_transaction",
             ...context,
@@ -10562,6 +10608,7 @@ export function createFinanceService({
               });
           }
         }
+        if (dateChange) await refreshCashflowIntelligence(context.principal.userId, tx);
         return enrichTransaction(updated, tx);
       };
       return executor ? write(executor) : db.transaction(write);

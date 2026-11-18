@@ -1301,10 +1301,15 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           return missing("Provide the transaction ID to update.", [expectedAnswer("id", "string")]);
         if (!input)
           return missing(
-            "Provide a valid transaction category or note change.",
+            "Provide a valid transaction category, note or date change.",
             "category" in rawInput
               ? [expectedAnswer("category", "string")]
-              : [expectedAnswer("notes", "string")],
+              : "date" in rawInput
+                ? [
+                    expectedAnswer("date", "string"),
+                    expectedAnswer("expectedTransactionUpdatedAt", "string"),
+                  ]
+                : [expectedAnswer("notes", "string")],
           );
         // Keep the same account-before-transaction order as account deletion.
         // This preliminary read never decides the action; it only determines
@@ -1429,7 +1434,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               summary:
                 input.category !== undefined
                   ? `Set ${item.merchant} category to ${String(input.category)}.`
-                  : `Update note for ${item.merchant}.`,
+                  : input.date !== undefined
+                    ? `Change the date of ${item.merchant} to ${String(input.date)}.`
+                    : `Update note for ${item.merchant}.`,
             },
           ],
           [transactionSource(item, account)],

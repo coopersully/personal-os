@@ -3184,6 +3184,188 @@ describe.sequential("finance service", () => {
     ).toBe(false);
   });
 
+  it("corrects the date of a manual transaction only, against its current revision", async () => {
+    const { service, context, agentContext, userId, account, shopping } =
+      await manualFinanceFixture("date");
+    const manual = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 9,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Dated Shop",
+        notes: null,
+      },
+      context,
+    );
+    const storedDate = async (id: string) =>
+      (
+        await database.db
+          .select({ transactionDate: financeTransactions.transactionDate })
+          .from(financeTransactions)
+          .where(eq(financeTransactions.id, id))
+      )[0]?.transactionDate;
+    const revision = async (id: string) => {
+      const [row] = await database.db
+        .select({ updatedAt: financeTransactions.updatedAt })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, id));
+      if (!row) throw new Error("Transaction revision was not found.");
+      return row.updatedAt.toISOString();
+    };
+
+    await expect(
+      service.updateTransaction(
+        manual.id,
+        { date: "2026-07-02", expectedTransactionUpdatedAt: "2020-01-01T00:00:00.000Z" },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      message: "The transaction changed; reload it before editing.",
+      status: 409,
+    });
+    await expect(
+      service.updateTransaction(manual.id, { date: "2026-07-02" }, context),
+    ).rejects.toMatchObject({ code: "invalid_request", status: 400 });
+    await expect(storedDate(manual.id)).resolves.toBe("2026-07-19");
+
+    const dateContext = { ...context, requestId: "manual-finance-date-change" };
+    const redated = await service.updateTransaction(
+      manual.id,
+      { date: "2026-07-02", expectedTransactionUpdatedAt: manual.updatedAt },
+      dateContext,
+    );
+    expect(redated).toMatchObject({ date: "2026-07-02", id: manual.id, notes: null });
+    await expect(storedDate(manual.id)).resolves.toBe("2026-07-02");
+    await expect(
+      database.db
+        .select({
+          action: auditEvents.action,
+          after: auditEvents.after,
+          before: auditEvents.before,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, dateContext.requestId)),
+    ).resolves.toEqual([
+      {
+        action: "finance.transaction_updated",
+        after: { changedFields: ["date"], date: "2026-07-02" },
+        before: { date: "2026-07-19" },
+      },
+    ]);
+
+    await expect(
+      service.updateTransaction(
+        manual.id,
+        {
+          category: "Shopping",
+          confidence: 0.99,
+          date: "2026-07-03",
+          expectedTransactionUpdatedAt: await revision(manual.id),
+          rationale: "Agent evidence.",
+        },
+        { ...agentContext, financePreparedAction: true },
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      message: "Change a transaction's date separately from an agent categorization.",
+    });
+    const combinedContext = { ...context, requestId: "manual-finance-date-and-category" };
+    const recategorized = await service.updateTransaction(
+      manual.id,
+      {
+        category: "Shopping",
+        date: "2026-07-03",
+        expectedTransactionUpdatedAt: await revision(manual.id),
+        notes: "Receipt dated the third",
+      },
+      combinedContext,
+    );
+    expect(recategorized).toMatchObject({
+      category: "Shopping",
+      date: "2026-07-03",
+      notes: "Receipt dated the third",
+    });
+    await expect(
+      database.db
+        .select({
+          action: auditEvents.action,
+          after: auditEvents.after,
+          before: auditEvents.before,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, combinedContext.requestId)),
+    ).resolves.toEqual([
+      {
+        action: "finance.transaction_categorized",
+        after: expect.objectContaining({ categoryId: shopping.id, date: "2026-07-03" }),
+        before: expect.objectContaining({ categoryId: null, date: "2026-07-02" }),
+      },
+    ]);
+    // A save that leaves the date as it was records only the fields that changed.
+    const unchangedContext = { ...context, requestId: "manual-finance-date-unchanged" };
+    await service.updateTransaction(
+      manual.id,
+      {
+        date: "2026-07-03",
+        expectedTransactionUpdatedAt: await revision(manual.id),
+        notes: "Kept",
+      },
+      unchangedContext,
+    );
+    await expect(
+      database.db
+        .select({ after: auditEvents.after, before: auditEvents.before })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, unchangedContext.requestId)),
+    ).resolves.toEqual([{ after: { changedFields: ["notes"] }, before: null }]);
+
+    const [plaidAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Synced Bank",
+        name: "Synced checking",
+        provider: "plaid",
+        status: "connected",
+        userId,
+      })
+      .returning();
+    if (!plaidAccount) throw new Error("Synced account was not created.");
+    const [synced] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: plaidAccount.id,
+        amount: 1_200,
+        direction: "expense",
+        merchant: "Synced Shop",
+        transactionDate: "2026-07-19",
+        userId,
+      })
+      .returning();
+    if (!synced) throw new Error("Synced transaction was not created.");
+    await expect(
+      service.updateTransaction(
+        synced.id,
+        { date: "2026-07-02", expectedTransactionUpdatedAt: synced.updatedAt.toISOString() },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      message: "Dates on synced transactions can't be changed.",
+      status: 400,
+    });
+    await expect(storedDate(synced.id)).resolves.toBe("2026-07-19");
+    await expect(
+      database.db
+        .select({ updatedAt: financeTransactions.updatedAt })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, synced.id)),
+    ).resolves.toEqual([{ updatedAt: synced.updatedAt }]);
+  });
+
   it("preserves the manual ledger through learning, import, budgets and guidance-fenced deletion", async () => {
     const { service, context, userId, account, shopping } = await manualFinanceFixture("ledger");
     const review = await service.createTransaction(

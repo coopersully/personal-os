@@ -98,11 +98,10 @@ export function MailReader({
           alwaysBounceVertical
           refreshControl={
             <PageRefreshControl
-              onRefresh={() => {
-                // The findings report their own failure; the pull answers for the messages.
-                void found.refetch();
-                return confirmMailRead(messages.refetch());
-              }}
+              // The pull answers for both reads, so a failure of either is one toast.
+              onRefresh={() =>
+                Promise.all([confirmMailRead(messages.refetch()), confirmMailRead(found.reread())])
+              }
             />
           }
           contentContainerStyle={{ padding: spacing.page, gap: spacing.xl }}

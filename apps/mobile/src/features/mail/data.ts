@@ -108,20 +108,40 @@ export function useMailAttention(enabled = true) {
   });
 }
 
+/** When a findings read was made for an action that reports its own outcome, by cached query. */
+const ownedReads = new WeakMap<object, { from: number; to: number }[]>();
+
 /**
  * What the steward recorded about one conversation. It quotes the conversation, so like the
- * messages it is held only while the reader is open.
+ * messages it is held only while the reader is open. `failedAt` is set while a failed read is
+ * still unreported; `reread` reads again for an action that reports the outcome itself (an
+ * answer, a pull), so a failure there never raises a second toast.
  */
 export function useMailStewardship(threadId: string) {
   const { api, owner } = useMail();
-  return useQuery({
-    queryKey: ["mail", owner, "stewardship", threadId],
+  const client = useQueryClient();
+  const queryKey = ["mail", owner, "stewardship", threadId];
+  const query = useQuery({
+    queryKey,
     meta,
     enabled: !!owner,
     queryFn: () => api.getMailThreadStewardship(threadId),
     gcTime: 0,
     staleTime: 0,
   });
+  const cached = client.getQueryCache().find({ queryKey, exact: true });
+  const reread = async () => {
+    const owned = { from: Date.now(), to: Number.POSITIVE_INFINITY };
+    if (cached) ownedReads.set(cached, [...(ownedReads.get(cached) ?? []), owned]);
+    try {
+      return await query.refetch();
+    } finally {
+      owned.to = Date.now();
+    }
+  };
+  const at = query.errorUpdatedAt;
+  const owned = cached && ownedReads.get(cached)?.some(({ from, to }) => at >= from && at <= to);
+  return { ...query, reread, failedAt: query.isError && !owned ? at : 0 };
 }
 
 /**

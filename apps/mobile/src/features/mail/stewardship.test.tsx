@@ -9,7 +9,7 @@ import type {
 } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { PropsWithChildren } from "react";
+import type { PropsWithChildren, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import InboxRoute from "../../app/(workspaces)/mail/index";
 import { snoozedScope } from "./logic";
@@ -59,6 +59,16 @@ vi.mock("react-native", async () => {
       h.endReached = onEndReached;
       return native.FlatList(props);
     },
+    // The shared scroll double drops its refresh control; keep it so a pull can be tested.
+    ScrollView: ({
+      refreshControl,
+      children,
+    }: PropsWithChildren<{ refreshControl?: ReactNode }>) => (
+      <div>
+        {refreshControl}
+        {children}
+      </div>
+    ),
     AppState: {
       addEventListener: (_event: string, listener: (status: string) => void) => {
         h.foreground = listener;
@@ -613,4 +623,121 @@ it("keeps the conversation readable and raises one toast when the findings canno
   expect(within(reader).queryByRole("heading", { name: "What nohmi found" })).toBeNull();
   expect(within(reader).queryByText("This conversation isn’t available")).toBeNull();
   expectNoInlineResult();
+});
+
+it("drops a choice the reloaded question no longer offers, so nothing unseen can be sent", async () => {
+  h.stewardship.mockResolvedValueOnce(found());
+  h.stewardship.mockResolvedValue(
+    found({
+      questions: [
+        question("q1", {
+          version: 5,
+          options: [
+            { label: "Reply today", value: "today" },
+            { label: "I’ll reply", value: "me" },
+          ],
+        }),
+      ],
+    }),
+  );
+  h.answer.mockRejectedValue(rejection(409));
+  const reader = await openReader();
+
+  fireEvent.click(await within(reader).findByRole("radio", { name: "I’ll reply" }));
+  fireEvent.click(within(reader).getByRole("button", { name: "Send answer" }));
+
+  await within(reader).findByRole("radio", { name: "Reply today" });
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledOnce());
+  // The earlier choice is not carried onto the changed question, even where a value survives.
+  expect(within(reader).queryByRole("radio", { checked: true })).toBeNull();
+  const send = within(reader).getByRole("button", { name: "Send answer" });
+  expect(send).toHaveProperty("disabled", true);
+  fireEvent.click(send);
+  expect(h.answer).toHaveBeenCalledOnce();
+
+  // A fresh choice is sent against the version now shown.
+  h.answer.mockResolvedValue({});
+  fireEvent.click(within(reader).getByRole("radio", { name: "Reply today" }));
+  await waitFor(() => expect(send).toHaveProperty("disabled", false));
+  fireEvent.click(send);
+  await waitFor(() =>
+    expect(h.answer).toHaveBeenLastCalledWith("q1", {
+      answer: "today",
+      expectedVersion: 5,
+      generalize: false,
+    }),
+  );
+});
+
+it("treats a choice missing from the current options as no choice", async () => {
+  h.stewardship.mockResolvedValueOnce(found());
+  h.stewardship.mockResolvedValue(
+    found({
+      questions: [question("q1", { options: [{ label: "Reply today", value: "today" }] })],
+    }),
+  );
+  // An unknown outcome keeps the choice, yet the question can still come back changed.
+  h.answer.mockRejectedValue(rejection(503));
+  const reader = await openReader();
+
+  fireEvent.click(await within(reader).findByRole("radio", { name: "I’ll reply" }));
+  fireEvent.click(within(reader).getByRole("button", { name: "Send answer" }));
+
+  await within(reader).findByRole("radio", { name: "Reply today", checked: false });
+  const send = within(reader).getByRole("button", { name: "Send answer" });
+  await waitFor(() => expect(h.stewardship).toHaveBeenCalledTimes(2));
+  expect(send).toHaveProperty("disabled", true);
+  fireEvent.click(send);
+  expect(h.answer).toHaveBeenCalledOnce();
+});
+
+it("raises no second toast when the read after an answer fails", async () => {
+  h.stewardship.mockResolvedValueOnce(found());
+  h.stewardship.mockRejectedValue(new Error("offline"));
+  h.answer.mockResolvedValueOnce({}).mockRejectedValueOnce(rejection(503));
+  const reader = await openReader();
+
+  fireEvent.click(await within(reader).findByRole("radio", { name: "I’ll reply" }));
+  fireEvent.click(within(reader).getByRole("button", { name: "Send answer" }));
+  await waitFor(() => expect(h.stewardship).toHaveBeenCalledTimes(2));
+  const send = within(reader).getByRole("button", { name: "Send answer" });
+  await waitFor(() => expect(send).toHaveProperty("disabled", false));
+  expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("Answer sent", { id: "mail-answer-q1" });
+  expect(h.toast.error).not.toHaveBeenCalled();
+
+  fireEvent.click(send);
+  await waitFor(() => expect(h.stewardship).toHaveBeenCalledTimes(3));
+  await waitFor(() => expect(send).toHaveProperty("disabled", false));
+  expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(
+    "Couldn’t confirm the answer was sent. Check the question once it reloads before trying again.",
+    { id: "mail-answer-q1" },
+  );
+  expectNoInlineResult();
+});
+
+it("raises one toast for a pull that fails to read both the messages and the findings", async () => {
+  h.stewardship.mockResolvedValueOnce(found());
+  const reader = await openReader();
+  await within(reader).findByRole("heading", { name: "What nohmi found" });
+  h.messages.mockRejectedValue(new Error("offline"));
+  h.stewardship.mockRejectedValue(new Error("offline"));
+
+  fireEvent.click(within(reader).getByRole("button", { name: "Refresh list" }));
+
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn’t refresh. Pull down to try again.",
+    ),
+  );
+  await waitFor(() => expect(h.stewardship).toHaveBeenCalledTimes(2));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(h.toast.error).toHaveBeenCalledOnce();
+
+  // A pull where only the findings fail is still reported, once.
+  h.messages.mockResolvedValue([message("m1")]);
+  fireEvent.click(within(reader).getByRole("button", { name: "Refresh list" }));
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(2));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(h.toast.error).toHaveBeenCalledTimes(2);
+  expect(h.toast.error).toHaveBeenLastCalledWith("Couldn’t refresh. Pull down to try again.");
 });

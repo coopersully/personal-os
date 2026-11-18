@@ -1,3 +1,4 @@
+import { ApiClientError } from "@personal-os/api-client";
 import type { MailStewardshipQuestion } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -30,7 +31,7 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
   const [chosen, setChosen] = useState<Record<string, string>>({});
   const [sending, setSending] = useState(false);
   const busy = useRef(false);
-  const failedAt = found.isError ? found.errorUpdatedAt : 0;
+  const { failedAt } = found;
   useEffect(() => {
     // The conversation stays readable without this, so the failure is a toast and nothing more.
     if (failedAt)
@@ -39,8 +40,13 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
       });
   }, [failedAt, threadId]);
 
+  /** The chosen option, while the question still offers it; a choice it dropped is no choice. */
+  const choice = (question: MailStewardshipQuestion) =>
+    question.options.find((option) => option.value === chosen[question.id])?.value;
+  const forget = (id: string) => setChosen(({ [id]: _, ...rest }) => rest);
+
   async function send(question: MailStewardshipQuestion) {
-    const answer = chosen[question.id];
+    const answer = choice(question);
     if (!answer || busy.current) return;
     busy.current = true;
     setSending(true);
@@ -58,11 +64,15 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
     } catch (error) {
       // An unknown outcome is never sent again here: the read below shows what was recorded.
       if (current()) toast.error(answerFailure(error), { id });
+      // A question that changed or went away is chosen afresh, never answered from memory.
+      if (error instanceof ApiClientError && (error.status === 409 || error.status === 404))
+        forget(question.id);
     }
     if (current()) {
       void client.invalidateQueries({ queryKey: ["mail", owner, "attention"] });
       // Sending stays off until the question is read again, so an answered one is not re-sent.
-      await found.refetch();
+      // The toast above already answered for this action, so this read reports nothing itself.
+      await found.reread();
     } else toast.dismiss(id);
     busy.current = false;
     setSending(false);
@@ -103,7 +113,7 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
             {question.options.length > 0 && (
               <>
                 <InlineOptions
-                  value={chosen[question.id] ?? null}
+                  value={choice(question) ?? null}
                   options={question.options}
                   onChange={(value) =>
                     setChosen((current) => ({ ...current, [question.id]: value }))
@@ -112,7 +122,7 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
                 <Actions inset={false}>
                   <Action
                     label="Send answer"
-                    disabled={sending || !chosen[question.id]}
+                    disabled={sending || !choice(question)}
                     onPress={() => void send(question)}
                   />
                 </Actions>

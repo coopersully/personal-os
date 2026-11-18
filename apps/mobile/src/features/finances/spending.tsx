@@ -392,8 +392,8 @@ export function Transactions({
 }
 const periodLabels = {
   today: "Today",
-  week: "This week",
-  month: "This month",
+  week: "Week",
+  month: "Month",
   custom: "Custom",
 } as const satisfies Record<SpendingPeriod, string>;
 const periods = Object.keys(periodLabels) as SpendingPeriod[];
@@ -561,7 +561,11 @@ export function FinanceSpendingScreen() {
                 <>
                   <Metric
                     accent
-                    label={`${formatLocalDate(request.scope.from)} – ${formatLocalDate(request.scope.through)}`}
+                    label={
+                      request.scope.from === request.scope.through
+                        ? formatLocalDate(request.scope.from)
+                        : `${formatLocalDate(request.scope.from)} – ${formatLocalDate(request.scope.through)}`
+                    }
                     value={formatMoney(query.data.snapshot.netCents / 100, "USD")}
                     hint={spendingBasisLine(saved)}
                   >

@@ -605,10 +605,7 @@ it("reads spending on the saved basis, pending, refund and uncategorized choices
       includeUncategorized: false,
     },
   ]);
-  expect(screen.getByRole("button", { name: "This month" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  expect(screen.getByRole("button", { name: "Month" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByText("Uncategorized spending left out: $12.50")).toBeVisible();
 });
 
@@ -630,7 +627,7 @@ it("uses the product defaults when nothing was saved, with the week from the sav
   expect(requested()).toEqual([
     { scope: scopeOf("2026-11-15", "2026-11-21"), grouping: "auto", includeUncategorized: true },
   ]);
-  expect(screen.getByRole("button", { name: "This week" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Week" })).toHaveAttribute("aria-pressed", "true");
   first.unmount();
   settings({}, "monday");
   mount(<FinanceSpendingScreen />);
@@ -674,9 +671,9 @@ it("reads today, this week, this month and a custom range", async () => {
   press("Today");
   await waitFor(() => expect(lastScope()).toEqual(scopeOf("2026-11-18", "2026-11-18")));
   expect(h.setParams).toHaveBeenLastCalledWith({ period: "today" });
-  press("This month");
+  press("Month");
   await waitFor(() => expect(lastScope()).toEqual(scopeOf("2026-11-01", "2026-11-30")));
-  press("This week");
+  press("Week");
   await waitFor(() => expect(lastScope()).toEqual(scopeOf("2026-11-15", "2026-11-21")));
   expect(screen.queryByLabelText(/^From/)).toBeNull();
   press("Custom");
@@ -889,7 +886,7 @@ it("lays a week's rhythm out under its weekdays and opens the chosen day", async
   press("Rhythm");
   expect(screen.getByText("Daily rhythm · a stronger colour is more spending")).toBeVisible();
   expect(screen.getAllByTestId("rhythm-row")).toHaveLength(1);
-  expect(screen.getByText("Choose a block to see its spending.")).toBeVisible();
+  expect(screen.getByText("Choose a day to see its spending.")).toBeVisible();
   const day = screen.getByRole("button", { name: "Nov 17: $2.00, Spending" });
   fireEvent.click(day);
   expect(day).toHaveAttribute("aria-pressed", "true");
@@ -946,7 +943,7 @@ it("shows a single day by the hour without claiming an hour selects transactions
   mount(<FinanceSpendingScreen />);
   await screen.findByRole("button", { name: /Groceries/ });
   press("Rhythm");
-  expect(screen.getByText("Choose an hour to see it.")).toBeVisible();
+  expect(screen.getByText("Choose an hour to see its spending.")).toBeVisible();
   fireEvent.click(
     screen.getByRole("button", {
       name: "8 AM: $9.00, $9.00 recorded · Incomplete hourly coverage",
@@ -1047,7 +1044,7 @@ it("closes open evidence when the view or the period changes", async () => {
   press("List");
   press(/Groceries/);
   await screen.findByRole("button", { name: "All categories" });
-  press("This month");
+  press("Month");
   await waitFor(() => expect(screen.queryByRole("button", { name: "All categories" })).toBeNull());
 });
 
@@ -1205,12 +1202,20 @@ it("describes a notification delivery without inventing changes for it", async (
 it("loads further evidence through one toast and rejects a page that does not continue it", async () => {
   await openActivity(
     entry({
-      changes: [change("change-1", null, { category: "Groceries" })],
+      changes: [
+        {
+          ...change("change-1", null, { category: "Groceries", needsReview: false }),
+          action: "finance.transaction.classified",
+        },
+      ],
       evidence: { totalChanges: 3, loadedChanges: 1, nextCursor: "next-1" },
     }),
   );
   expect(screen.getByText("1 of 3 audited changes loaded · evidence incomplete")).toBeVisible();
   expect(screen.getByText(/Category: not recorded → Groceries/)).toBeVisible();
+  // Audit identifiers are written as words, and yes or no instead of true or false.
+  expect(screen.getByText(/Transaction · Classified/)).toBeVisible();
+  expect(screen.getByText(/Needs review: not recorded → no/)).toBeVisible();
   // A page for other evidence is refused whole.
   h.api.getFinanceActivityEvidence.mockResolvedValueOnce({
     entryId: ENTRY,
@@ -1254,7 +1259,7 @@ it("drops loaded evidence when access to it is refused and stays silent after le
   );
   h.api.getFinanceActivityEvidence.mockResolvedValueOnce({
     entryId: ENTRY,
-    changes: [change("change-2", { notes: "a" }, { notes: "b" })],
+    changes: [change("change-2", { notes: null }, { notes: "b" })],
     recordRefs: [],
     offset: 1,
     totalChanges: 3,
@@ -1262,6 +1267,7 @@ it("drops loaded evidence when access to it is refused and stays silent after le
   });
   press("Load more evidence");
   await screen.findByText("2 of 3 audited changes loaded · evidence incomplete");
+  expect(screen.getByText(/Notes: none → b/)).toBeVisible();
   h.api.getFinanceActivityEvidence.mockRejectedValueOnce(
     new ApiClientError({ code: "not_found", message: "Gone", status: 404 }),
   );
@@ -1270,7 +1276,7 @@ it("drops loaded evidence when access to it is refused and stays silent after le
   expect(h.api.getFinanceActivityEvidence).toHaveBeenLastCalledWith(ENTRY, { cursor: "next-2" });
   // Evidence the account may no longer read is not kept on screen.
   expect(screen.getByText("1 of 3 audited changes loaded · evidence incomplete")).toBeVisible();
-  expect(screen.queryByText(/Notes: a → b/)).toBeNull();
+  expect(screen.queryByText(/Notes: none → b/)).toBeNull();
   // A result that arrives after the evidence was closed announces nothing.
   let settle: (value: unknown) => void = () => undefined;
   h.api.getFinanceActivityEvidence.mockReturnValueOnce(

@@ -1172,9 +1172,9 @@ it("resets the spending drill-down when changing period and opens full transacti
   });
   fireEvent.click(screen.getByRole("button", { name: /All categories/ }));
   expect(screen.queryByText(/Spending contribution:/)).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "This month" }));
+  fireEvent.click(screen.getByRole("button", { name: "Month" }));
   expect(h.setParams).toHaveBeenLastCalledWith({ period: "month" });
-  fireEvent.click(screen.getByRole("button", { name: "This week" }));
+  fireEvent.click(screen.getByRole("button", { name: "Week" }));
   expect(h.setParams).toHaveBeenLastCalledWith({ period: "week" });
 });
 it("preserves actionable source and planning state across account groups", async () => {
@@ -3723,7 +3723,7 @@ it("retains transaction search and status while a new period's summary is pendin
     ),
   );
   const previousFrom = h.api.listFinanceTransactions.mock.calls.at(-1)?.[0].from;
-  fireEvent.click(screen.getByRole("button", { name: "This month" }));
+  fireEvent.click(screen.getByRole("button", { name: "Month" }));
   await waitFor(() =>
     expect(h.api.listFinanceTransactions).toHaveBeenLastCalledWith(
       expect.objectContaining({ search: "coffee", pending: true }),

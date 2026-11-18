@@ -41,9 +41,20 @@ const when = (value: string) =>
 const shown = (value: unknown) =>
   value === undefined
     ? "not recorded"
-    : typeof value === "string"
-      ? value
-      : (JSON.stringify(value) ?? "not recorded");
+    : value === null
+      ? "none"
+      : typeof value === "boolean"
+        ? value
+          ? "yes"
+          : "no"
+        : typeof value === "string"
+          ? value
+          : (JSON.stringify(value) ?? "not recorded");
+/** Audit names are code identifiers (`needsReview`, `finance.transaction.classified`). */
+const words = (value: string) =>
+  financeLabel(
+    (value.split(".").at(-1) ?? value).replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase(),
+  );
 
 /** The fields a change touched, as written before and after. Unchanged fields are left out. */
 function differences(
@@ -205,11 +216,11 @@ export function ActivityEvidence({
                 return (
                   <Copy key={change.id}>
                     {[
-                      `${financeLabel(change.recordRef.kind)}${change.action ? ` · ${financeLabel(change.action)}` : ""}`,
+                      `${financeLabel(change.recordRef.kind)}${change.action ? ` · ${words(change.action)}` : ""}`,
                       ...(fields.length
                         ? fields.map(
                             (field) =>
-                              `${financeLabel(field.key)}: ${shown(field.before)} → ${shown(field.after)}`,
+                              `${words(field.key)}: ${shown(field.before)} → ${shown(field.after)}`,
                           )
                         : [
                             change.before === null && change.after === null

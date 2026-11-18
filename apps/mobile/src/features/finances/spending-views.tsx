@@ -109,10 +109,12 @@ function Bars({ bins }: { bins: readonly SpendingBin[] }) {
           testID="trend-bar"
           accessible
           accessibilityLabel={`${binLabel(bin)}: ${money(bin.netCents)}, ${spendingBinStatus(bin)}`}
-          style={{ flex: 1, height: 96, justifyContent: "flex-end" }}
+          style={{ flex: 1, height: 96, justifyContent: "flex-end", alignItems: "center" }}
         >
           <View
             style={{
+              width: "100%",
+              maxWidth: 40,
               height: bin.future ? 2 : Math.max(3, (Math.abs(bin.netCents) / scale) * 96),
               borderRadius: 4,
               backgroundColor: bin.netCents < 0 ? t.information : workspaceColor(t, "finances"),
@@ -281,6 +283,7 @@ function rhythmBlocks(dashboard: FinanceSpendingDashboard, weekStartsOn: WeekSta
 }
 
 const weekdays = ["S", "M", "T", "W", "T", "F", "S"];
+const unit = { Daily: "day", Weekly: "week", Monthly: "month", Yearly: "year" } as const;
 
 export function SpendingRhythm({
   dashboard,
@@ -398,7 +401,7 @@ export function SpendingRhythm({
         </Card>
       ) : (
         <Copy secondary>
-          {grain === "Hourly" ? "Choose an hour to see it." : "Choose a block to see its spending."}
+          Choose {grain === "Hourly" ? "an hour" : `a ${unit[grain]}`} to see its spending.
         </Copy>
       )}
     </>

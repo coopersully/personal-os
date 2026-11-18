@@ -694,7 +694,7 @@ defaults. The iPhone applies these defaults and does not change them; they are e
 settings, whose "Spending defaults" group says they apply on iPhone, web and desktop. The saved
 view, grouping and selected accounts remain web and desktop layout choices.
 
-The period control offers Today, This week, This month and Custom. A visit opens on the saved
+The period control offers Today, Week, Month and Custom. A visit opens on the saved
 default period unless a link names one; choosing another period lasts for the visit and is not
 saved. The week follows the account's "Week starts on" choice. Custom shows From and Through date
 fields and starts as today; a range that is incomplete, reversed or longer than the API's ten-year

@@ -612,6 +612,8 @@ const mocks = vi.hoisted(() => ({
   listReminders: vi.fn(),
   listTasks: vi.fn(),
   listTaskWorkspace: vi.fn(),
+  listKnowledgeTags: vi.fn(),
+  searchKnowledge: vi.fn(),
   listTaskLists: vi.fn(),
   listTaskProjects: vi.fn(),
   moveTask: vi.fn(),
@@ -3234,6 +3236,20 @@ describe("Personal OS web app", () => {
     const sidebar = await screen.findByRole("complementary", {
       name: "Account utility navigation",
     });
+    mocks.searchKnowledge.mockResolvedValue({
+      schemaVersion: 1,
+      state: "available",
+      epoch: 1,
+      items: [],
+      nextCursor: null,
+    });
+    mocks.listKnowledgeTags.mockResolvedValue({ tags: [], aliases: [] });
+    const memory = within(sidebar).getByRole("link", { name: "Memory" });
+    expect(memory).toHaveAttribute("href", "/settings?section=memory");
+    expect(memory.querySelector("svg")).not.toBeNull();
+    await browser.click(memory);
+    expect(await screen.findByRole("tab", { name: "Trash" })).toBeInTheDocument();
+    expect(await screen.findByText("No matching memory")).toBeInTheDocument();
     await browser.click(within(sidebar).getByRole("link", { name: "Goals & Motives" }));
     expect(await screen.findByText("Active Outcomes")).toBeInTheDocument();
     expect(within(rail).getByRole("link", { name: "Settings" })).toHaveAttribute(
@@ -3360,6 +3376,10 @@ describe("Personal OS web app", () => {
     expect(
       screen.getByRole("link", { name: /^Goals & Motives/ }).querySelector("svg"),
     ).not.toBeNull();
+    expect(screen.getByRole("link", { name: /^Memory/ })).toHaveAttribute(
+      "href",
+      "/settings?section=memory",
+    );
     expect(screen.queryByRole("button", { name: "Test account" })).not.toBeInTheDocument();
     expect(screen.queryByText("Change password")).not.toBeInTheDocument();
     expect(screen.queryByText("Log out")).not.toBeInTheDocument();

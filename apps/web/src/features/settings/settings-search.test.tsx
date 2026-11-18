@@ -12,6 +12,7 @@ import {
   ResponsiveDialogTrigger,
 } from "@/components/responsive-dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { memorySettingsSection } from "./manifest.js";
 import { SettingsSearch } from "./settings-search.js";
 
 function Location() {
@@ -24,7 +25,13 @@ function setup(interruptible = false) {
         <SettingsSearch
           groups={[
             { label: "Account", items: [{ id: "profile", label: "Account", icon: UserIcon }] },
-            { label: "Personal", items: [{ id: "rituals", label: "Rituals", icon: SparklesIcon }] },
+            {
+              label: "Personal",
+              items: [
+                memorySettingsSection,
+                { id: "rituals", label: "Rituals", icon: SparklesIcon },
+              ],
+            },
             {
               label: "Experience",
               items: [{ id: "appearance", label: "Appearance", icon: PaintBrushIcon }],
@@ -103,6 +110,21 @@ describe("Settings search", () => {
     expect(screen.getByLabelText("Location")).toHaveTextContent("?page=profile");
     await user.click(screen.getByRole("searchbox", { name: "Search settings" }));
     expect(screen.getByRole("searchbox")).toHaveValue("");
+  });
+  it("finds Memory by its tags, conflicts and Trash", async () => {
+    const user = setup();
+    await user.click(screen.getByRole("searchbox", { name: "Search settings" }));
+    for (const term of ["trash", "tags", "conflicts"]) {
+      await user.clear(screen.getByRole("searchbox"));
+      await user.type(screen.getByRole("searchbox"), term);
+      const results = screen.getByRole("navigation", { name: "Settings search results" });
+      expect(within(results).getByRole("link", { name: /^Memory Review/ })).toHaveAttribute(
+        "href",
+        "/settings?section=memory",
+      );
+    }
+    await user.click(screen.getByRole("link", { name: /^Memory Review/ }));
+    expect(screen.getByLabelText("Location")).toHaveTextContent("?section=memory");
   });
   it("returns individual fields with a canonical field destination", async () => {
     const user = setup();

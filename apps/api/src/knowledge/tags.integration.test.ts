@@ -155,6 +155,27 @@ describe("memory tags", () => {
     expect((await f.save(fact("Home", ["Project", "Projects"]))).tags).toEqual(["projects"]);
     // A tag that only looks similar in other ways is a new tag.
     expect((await f.save(fact("Pet", ["family"]))).tags).toEqual(["family"]);
+    // The rule holds whichever spelling came first.
+    await f.save(fact("Advice", ["tipss"]));
+    expect((await f.save(fact("Hint", ["tips"]))).tags).toEqual(["tipss"]);
+  });
+
+  it("replays_tag_mutations_across_uuid_case", async () => {
+    const f = await fixture();
+    await f.save(fact("Rent", ["money"]));
+    const mutationKey = randomUUID();
+    const merge = (key: string) =>
+      f.tags.merge(f.owner, { from: "money", into: "finances", mutationKey: key });
+    const merged = await merge(mutationKey);
+    expect(await merge(mutationKey.toUpperCase())).toEqual(merged);
+    const undoKey = randomUUID();
+    const undo = (key: string, mergeId = merged.mergeId) =>
+      f.tags.unmerge(f.owner, { mergeId, mutationKey: key });
+    const undone = await undo(undoKey.toUpperCase());
+    expect(await undo(undoKey.toUpperCase(), merged.mergeId.toUpperCase())).toEqual(undone);
+    await expect(
+      f.tags.merge(f.owner, { from: "rent", into: "finances", mutationKey }),
+    ).rejects.toMatchObject({ status: 409 });
   });
 
   it("merge_retags_and_aliases", async () => {

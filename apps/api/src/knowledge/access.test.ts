@@ -1,3 +1,4 @@
+import { accessTokens, users } from "@personal-os/database";
 import type { Principal } from "../types.js";
 import { createKnowledgeAccess, type KnowledgeTransaction } from "./access.js";
 
@@ -9,14 +10,24 @@ const agent: Principal = {
   scopes: new Set(["knowledge:read", "finances:read"]),
 };
 
-/** A transaction whose token reads return the current `token` and are counted. */
+/**
+ * A transaction whose token reads return the current `token` and are counted. Row locks are
+ * recorded in order, so the account-before-token order is visible.
+ */
 function transaction(token: () => Record<string, unknown> | undefined) {
   const reads = { count: 0 };
+  const locks: string[] = [];
   const tx = {
     select: () => ({
-      from: () => ({
+      from: (table: unknown) => ({
         where: () => ({
-          for: async () => {
+          for: async (mode: string) => {
+            if (table === users) {
+              locks.push(`users:${mode}`);
+              return [{ id: agent.userId }];
+            }
+            if (table !== accessTokens) throw new Error("Unexpected table.");
+            locks.push(`access_tokens:${mode}`);
             reads.count += 1;
             const row = token();
             return row ? [row] : [];
@@ -25,7 +36,7 @@ function transaction(token: () => Record<string, unknown> | undefined) {
       }),
     }),
   } as unknown as KnowledgeTransaction;
-  return { tx, reads };
+  return { tx, reads, locks };
 }
 
 describe("knowledge credential authorization", () => {
@@ -41,11 +52,25 @@ describe("knowledge credential authorization", () => {
     for (let i = 0; i < 5; i++) await access.authorize(tx, agent, ["knowledge:read"]);
     await access.authorize(tx, agent, ["finances:read"]);
     expect(reads.count).toBe(1);
-    // A scope the token never held is still refused from the shared row.
-    await expect(access.authorize(tx, agent, ["mail:read"])).rejects.toMatchObject({
+    // A scope the principal holds but the stored token does not is refused from the shared row.
+    const broader: Principal = { ...agent, scopes: new Set([...agent.scopes, "mail:read"]) };
+    await expect(access.authorize(tx, broader, ["mail:read"])).rejects.toMatchObject({
       status: 403,
     });
     expect(reads.count).toBe(1);
+  });
+
+  it("locks the account row before the token row", async () => {
+    const access = createKnowledgeAccess(() => at);
+    const { tx, locks } = transaction(() => ({
+      scopes: ["knowledge:read"],
+      revokedAt: null,
+      expiresAt: null,
+      authorizationConnectionId: null,
+    }));
+    await access.authorize(tx, agent, ["knowledge:read"]);
+    await access.authorize(tx, agent, ["knowledge:read"]);
+    expect(locks).toEqual(["users:key share", "access_tokens:share"]);
   });
 
   it("reads narrowing and revocation afresh in the next transaction", async () => {

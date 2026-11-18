@@ -87,10 +87,12 @@ async function findKnownTag(
   return findTag(tx, userId, name);
 }
 
-/** The only similarity rule: a name that differs from a known owner tag by a trailing `s`. */
-function pluralVariant(name: string) {
-  if (name.endsWith("s")) return name.length > 1 ? name.slice(0, -1) : null;
-  return `${name}s`;
+/**
+ * The only similarity rule: a name that differs from a known owner tag by one trailing `s`, in
+ * either direction, so `tips` finds `tip` and `tipss` alike. Dropping an `s` is tried first.
+ */
+function pluralVariants(name: string) {
+  return [...(name.endsWith("s") && name.length > 1 ? [name.slice(0, -1)] : []), `${name}s`];
 }
 
 /**
@@ -113,9 +115,10 @@ async function resolveTag(
     );
   const known = await findKnownTag(tx, userId, name, followAlias);
   if (known) return known;
-  const variant = pluralVariant(name);
-  const similar = variant ? await findKnownTag(tx, userId, variant, followAlias) : undefined;
-  if (similar) return similar;
+  for (const variant of pluralVariants(name)) {
+    const similar = await findKnownTag(tx, userId, variant, followAlias);
+    if (similar) return similar;
+  }
   if (!create) return { id: null, name };
   await tx.insert(knowledgeTags).values({ userId, name }).onConflictDoNothing();
   const created = await findTag(tx, userId, name);

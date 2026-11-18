@@ -551,6 +551,33 @@ describe("knowledge lifecycle", () => {
     expect(retagged).toMatchObject({ record: { validUntil: "2026-11-20T00:00:00.000Z" } });
   });
 
+  it("reads supported memory past its validity as expired everywhere", async () => {
+    const { human, agent } = await fixture();
+    const request = input("Tuesday", {
+      validity: { validFrom: "2026-11-01T00:00:00Z", validUntil: "2026-11-11T00:00:00Z" },
+    });
+    const saved = await save(human, request);
+    expect(saved.record.status).toBe("expired");
+    expect(await records().get(agent, { id: saved.recordId })).toMatchObject({
+      status: "expired",
+    });
+    expect(await records().create(human, request)).toMatchObject({
+      outcome: "readable",
+      record: { status: "expired" },
+    });
+    // Explicit statuses stay as they are.
+    expect(
+      await lifecycle().mutate(human, {
+        action: "archive",
+        recordId: saved.recordId,
+        expectedRevision: 1,
+        mutationKey: randomUUID(),
+      }),
+    ).toMatchObject({ record: { status: "archived" } });
+    const current = await save(human, input("Wednesday"));
+    expect(current.record.status).toBe("active");
+  });
+
   it("projects legacy origin on read and preserves the raw revision when adding a sidecar", async () => {
     const { human, agent } = await fixture();
     const saved = await save(agent, input("Tuesday", { evidence: [] }));

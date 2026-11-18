@@ -828,6 +828,14 @@ async function liveAgentToken(tx: KnowledgeTransaction, principal: Principal): P
   const key = `${principal.userId}:${principal.actorId}`;
   let tokens = liveTokens.get(tx);
   if (tokens?.has(key)) return tokens.get(key);
+  // Take the account row before the token, as the human path does, so account deletion (which
+  // removes the account and then its tokens) never waits on this token while a later knowledge
+  // insert waits on the account.
+  await tx
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, principal.userId))
+    .for("key share");
   const [token] = await tx
     .select()
     .from(accessTokens)
@@ -1186,12 +1194,17 @@ export function createKnowledgeAccess(now: () => Date) {
       replacement && (await isDisclosable(tx, principal, replacement, retrieval, checked))
         ? replacement.snapshot.id
         : null;
+    const pending = snapshot.status === "active" || snapshot.status === "proposed";
     return {
       ...snapshot,
-      status:
-        !evidenceAvailable && (snapshot.status === "active" || snapshot.status === "proposed")
+      // Unsupported memory reads as disputed; supported memory past its validity, as expired.
+      status: !pending
+        ? snapshot.status
+        : !evidenceAvailable
           ? "disputed"
-          : snapshot.status,
+          : snapshot.validUntil && Date.parse(snapshot.validUntil) <= now().getTime()
+            ? "expired"
+            : snapshot.status,
       sources,
       relatedRecordIds,
       evidenceAvailable,
@@ -1275,12 +1288,6 @@ export function createKnowledgeAccess(now: () => Date) {
       true,
       checked,
     );
-    if (
-      record.validUntil &&
-      Date.parse(record.validUntil) <= now().getTime() &&
-      (record.status === "active" || record.status === "proposed")
-    )
-      record.status = "expired";
     return {
       state: "available",
       record,

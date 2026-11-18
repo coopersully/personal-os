@@ -452,6 +452,29 @@ describe("purpose-bound memory retrieval", () => {
     ).toBe(false);
   });
 
+  it("warns in the accepted view only about memory that could qualify for it", async () => {
+    const f = await fixture();
+    const goalId = randomUUID();
+    await database.db
+      .insert(goals)
+      .values({ id: goalId, userId: f.owner.userId, title: "Future goal" });
+    await f.save(
+      fact("unused", {
+        content: { kind: "goal", value: { goalId } },
+        validity: { validFrom: "2027-01-01T00:00:00Z", validUntil: null },
+      }),
+    );
+    await database.db.delete(goals).where(eq(goals.id, goalId));
+    expect(await f.search.search(f.agent, planning)).toMatchObject({
+      items: [],
+      state: "unavailable",
+    });
+    expect(await f.search.search(f.agent, { ...planning, reviewView: "accepted" })).toMatchObject({
+      items: [],
+      state: "available",
+    });
+  });
+
   it("distinguishes missing eligible evidence from empty search without returning its body", async () => {
     const f = await fixture();
     const empty = await f.search.search(f.agent, planning);

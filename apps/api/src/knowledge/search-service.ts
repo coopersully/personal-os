@@ -228,6 +228,9 @@ export async function selectKnowledgeCandidates(
           ? status === snapshot.status || status === "disputed"
           : !hiddenByDefault(snapshot.status)) &&
         (!query.origin || query.origin === metadata.origin) &&
+        // Only memory that is current and active could qualify for the accepted view.
+        (query.reviewView !== "accepted" ||
+          (snapshot.status === "active" && revisionIsCurrent(snapshot, at))) &&
         query.hasConflict !== true
       )
         unavailable = true;

@@ -56,13 +56,19 @@ export const knowledgeTagsInputSchema = z
   .transform((tags) => [...new Set(tags)]);
 
 /** Files tag `from` under tag `into`; `from` becomes an alias of `into`. */
+/** PostgreSQL returns UUIDs in lowercase; a retry in another case is the same key. */
+const mutationUuid = z.uuid().transform((id) => id.toLowerCase());
 export const knowledgeTagMergeInputSchema = z
-  .object({ from: knowledgeTagNameSchema, into: knowledgeTagNameSchema, mutationKey: z.uuid() })
+  .object({
+    from: knowledgeTagNameSchema,
+    into: knowledgeTagNameSchema,
+    mutationKey: mutationUuid,
+  })
   .strict();
 export type KnowledgeTagMergeInput = z.input<typeof knowledgeTagMergeInputSchema>;
 /** Person-only: restores `from` on the records the merge retagged and removes its alias. */
 export const knowledgeTagUnmergeInputSchema = z
-  .object({ mergeId: z.uuid(), mutationKey: z.uuid() })
+  .object({ mergeId: mutationUuid, mutationKey: mutationUuid })
   .strict();
 export type KnowledgeTagUnmergeInput = z.input<typeof knowledgeTagUnmergeInputSchema>;
 /** A merge as stored; `undoneAt` is set once the person undoes it. */

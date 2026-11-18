@@ -9,19 +9,22 @@ export function FilterChip({
   selected,
   color,
   onPress,
+  disabled = false,
 }: {
   label: string;
   icon?: IconName;
   selected: boolean;
   color: string;
   onPress: () => void;
+  disabled?: boolean;
 }) {
   const t = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ selected }}
+      accessibilityState={{ selected, disabled }}
+      disabled={disabled}
       onPress={onPress}
       style={{
         minHeight: 44,
@@ -33,6 +36,7 @@ export function FilterChip({
         backgroundColor: selected ? `${color}22` : t.surface,
         borderWidth: 1,
         borderColor: selected ? color : "transparent",
+        opacity: disabled ? 0.4 : 1,
       }}
     >
       {icon && (

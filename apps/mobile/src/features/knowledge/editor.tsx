@@ -84,15 +84,26 @@ function Permissions({
           value={value.sensitivity}
           choices={["standard", "sensitive"]}
           labels={visibilityLabels}
-          onChange={(sensitivity) => change({ ...value, sensitivity })}
+          onChange={(sensitivity) =>
+            // Sensitive memory never loads at session start, so it is never core.
+            change({
+              ...value,
+              sensitivity,
+              core: sensitivity === "sensitive" ? false : value.core,
+            })
+          }
           disabled={disabled}
         />
         <ToggleRow
           label="Core memory"
-          detail="Agents load it at the start of every session."
+          detail={
+            value.sensitivity === "sensitive"
+              ? "Sensitive memories never load at session start."
+              : "Agents load it at the start of every session."
+          }
           value={value.core}
           onChange={(core) => change({ ...value, core })}
-          disabled={disabled}
+          disabled={disabled || value.sensitivity === "sensitive"}
         />
       </Section>
       <Section title="Uses (leave all off for every use)">
@@ -120,6 +131,7 @@ function Permissions({
 export function MemoryEditor({
   mode,
   record,
+  initial,
   disabled,
   onDirty,
   onSave,
@@ -128,6 +140,8 @@ export function MemoryEditor({
 }: {
   mode: "add" | EditMode;
   record?: KnowledgeRecord;
+  /** Content to start editing from instead of the record's, such as an agent's proposal. */
+  initial?: KnowledgeRecord["content"];
   disabled: boolean;
   onDirty: () => void;
   onSave: (input: KnowledgeLifecycleInput | KnowledgeMutationInput) => void;
@@ -135,12 +149,13 @@ export function MemoryEditor({
   layout: (fields: React.ReactNode, save: React.ReactNode) => React.ReactNode;
 }) {
   const original = record && memoryContent(record);
-  const [kind, setKind] = useState<Kind>(original?.kind ?? "fact");
-  const [draft, setDraft] = useState(() => fieldDraft(original));
+  const start = initial ?? original;
+  const [kind, setKind] = useState<Kind>(start?.kind ?? "fact");
+  const [draft, setDraft] = useState(() => fieldDraft(start));
   const [permissions, setPermissions] = useState(emptyPermissions);
   const [replacementId, setReplacementId] = useState("");
   const [tagText, setTagText] = useState(record?.tags.join(", ") ?? "");
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirty] = useState(Boolean(initial));
   const [invalid, setInvalid] = useState(false);
   const parsed = contentDraft(kind, draft, original);
   const tags = tagsDraft(tagText, record);

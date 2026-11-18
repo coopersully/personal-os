@@ -3,6 +3,7 @@ import {
   type KnowledgeMutationResult,
   type KnowledgeRecord,
   type KnowledgeSource,
+  knowledgeTrashRetentionMs,
   knowledgeWorkspaceSchema,
 } from "@personal-os/domain";
 import { randomUUID } from "expo-crypto";
@@ -11,10 +12,13 @@ import { type RefObject, useCallback, useLayoutEffect, useState } from "react";
 import { View } from "react-native";
 import { toast } from "sonner-native";
 import { Body, Facts, Heading } from "../../components/detail-content";
-import { editorDismissOptions } from "../../components/editor-header";
+import { editorActionsOptions, editorDismissOptions } from "../../components/editor-header";
+import type { RowAction } from "../../components/row-action-button";
+import { useTheme } from "../../theme";
 import { confirmDiscard, Section, ToggleRow } from "../goals/controls";
 import { SettingsActionRow } from "../settings/settings-row";
 import {
+  detailsOf,
   type Feedback,
   type MemoryAccess,
   type MemoryApi,
@@ -24,7 +28,14 @@ import {
   useMemoryCommands,
   useMemoryResource,
 } from "./authority";
-import { MemoryBody, MemoryChoice, MemoryNote, MemoryReadState, MemoryText } from "./controls";
+import {
+  MemoryBody,
+  MemoryChoice,
+  MemoryNote,
+  MemoryReadState,
+  MemoryText,
+  plainHeader,
+} from "./controls";
 import { type EditMode, MemoryEditor } from "./editor";
 import {
   linkedMemoryIds,
@@ -47,11 +58,18 @@ type Props = {
   id: string;
   close: () => void;
   open: (id: string) => void;
-  /** Reloads the visit, then shows this memory, or the list when none is given. */
-  changed: (id?: string) => void;
+  /**
+   * Reloads the visit, then shows this memory, or the list when none is given. With `edit`, the
+   * memory opens in its editor, starting from that content.
+   */
+  changed: (id?: string, edit?: KnowledgeRecord["content"]) => void;
   retain: (id: string, feedback: Feedback) => void;
   back: BackHandler;
+  /** Opens the memory in its editor, starting from this content (an agent's proposal). */
+  edit?: KnowledgeRecord["content"];
 };
+/** A rejection explained in the person's terms; it is reported as is and never retried. */
+class Explained extends Error {}
 type ActionBody = KnowledgeLifecycleInput extends infer T
   ? T extends KnowledgeLifecycleInput
     ? Omit<T, "mutationKey">
@@ -169,7 +187,7 @@ export function MemoryDetail(props: Props) {
     );
   return (
     <MemoryBody>
-      <Stack.Screen options={{ title: "Memory details" }} />
+      <Stack.Screen options={{ title: "Memory details", ...plainHeader }} />
       <MemoryReadState
         {...detail}
         label="memory"
@@ -217,12 +235,15 @@ function RecordSession({
   changed,
   retain,
   back,
+  edit,
   refresh,
 }: Props & { record: KnowledgeRecord; refresh: () => Promise<unknown> }) {
   const id = record.id;
+  const t = useTheme();
   const commands = useMemoryCommands(access.capture, access.recover);
-  const [mode, setMode] = useState<"detail" | EditMode>("detail");
-  const [dirty, setDirty] = useState(false);
+  const [mode, setMode] = useState<"detail" | EditMode>(edit ? "edit" : "detail");
+  const [seed, setSeed] = useState(edit);
+  const [dirty, setDirty] = useState(Boolean(edit));
   const [history, setHistory] = useState(false);
   const [baseline, setBaseline] = useState(record);
   const [conflict, setConflict] = useState<KnowledgeLifecycleInput>();
@@ -232,6 +253,7 @@ function RecordSession({
 
   function exitEdit() {
     setDirty(false);
+    setSeed(undefined);
     setMode("detail");
     setConflict(undefined);
     setReviewed(undefined);
@@ -251,14 +273,19 @@ function RecordSession({
     {
       loading,
       success,
-      next = (result) => (result.outcome === "readable" ? id : undefined),
+      next = (result) => {
+        changed(result.outcome === "readable" ? id : undefined);
+      },
       stale = "This memory changed. Showing the latest version.",
+      explain,
     }: {
       loading: string;
       success: string;
-      /** The memory to show after the change, or none for the list. */
-      next?: (result: KnowledgeMutationResult) => string | undefined;
+      /** Shows what follows the change: this memory by default, or the list once it is gone. */
+      next?: (result: KnowledgeMutationResult) => void;
       stale?: string;
+      /** Names a rejection precisely, such as the memories that block a restore. */
+      explain?: (error: unknown) => Promise<string | undefined>;
     },
   ) {
     const input = { ...body, mutationKey: randomUUID() } as KnowledgeLifecycleInput;
@@ -266,9 +293,16 @@ function RecordSession({
     void commands.run({
       loading,
       failure: "Couldn’t confirm this change. Check the memory before trying again.",
-      request: () => api.updateKnowledge(input),
+      request: async () => {
+        try {
+          return await api.updateKnowledge(input);
+        } catch (error) {
+          const reason = await explain?.(error);
+          throw reason ? new Explained(reason) : error;
+        }
+      },
       complete: (result) => {
-        changed(next(result));
+        next(result);
         const leaves = body.action === "trash" || body.action === "delete_now";
         return {
           message:
@@ -276,6 +310,7 @@ function RecordSession({
         };
       },
       rejected: (error) => {
+        if (error instanceof Explained) return error.message;
         const status = statusOf(error);
         if (status === 409 && editing) {
           // Keep the draft: the person reviews the latest revision before saving again.
@@ -292,6 +327,34 @@ function RecordSession({
       },
       retain,
     });
+  }
+
+  /** Restore refuses while a memory this one came from is in Trash or deleted, or once Trash
+   * retention has ended. Each says so; nothing changed, so nothing reloads. */
+  async function restoreConflict(error: unknown) {
+    if (statusOf(error) !== 409) return;
+    const { blockedBy, trashGroupId } = detailsOf(error);
+    if (Array.isArray(blockedBy) && blockedBy.length) {
+      const blockers = await Promise.all(
+        blockedBy.map((blocker) =>
+          api.getKnowledge({ id: String(blocker) }).then(
+            (result) =>
+              "state" in result ? null : `“${memorySummary(memoryContent(result)).title}”`,
+            () => "a memory you can’t open",
+          ),
+        ),
+      );
+      if (blockers.includes(null))
+        return "A memory this one came from was deleted, so it can’t be restored.";
+      return `Restore ${blockers.join(", ")} first. This memory came from ${
+        blockers.length === 1 ? "it" : "them"
+      }.`;
+    }
+    if (typeof trashGroupId === "string")
+      return "This memory moved to Trash with another memory. Restore that one instead.";
+    const trashedAt = baseline.trashedAt;
+    if (trashedAt && Date.now() - Date.parse(trashedAt) > knowledgeTrashRetentionMs)
+      return "This memory has been in Trash too long to restore.";
   }
 
   function reviewLatest() {
@@ -343,12 +406,14 @@ function RecordSession({
         <Stack.Screen
           options={{
             title: mode === "edit" ? "Edit memory" : "Replace memory",
+            ...plainHeader,
             ...editorDismissOptions({ label: dirty ? "Cancel" : "Close", onPress: leave }),
           }}
         />
         <MemoryEditor
           mode={mode}
           record={baseline}
+          initial={seed}
           disabled={disabled}
           onDirty={() => setDirty(true)}
           onSave={(input) => {
@@ -362,6 +427,11 @@ function RecordSession({
           onInvalid={() => toast.error("Check the memory fields and try again.")}
           layout={(fields, save) => (
             <MemoryBody save={save}>
+              {seed && (
+                <MemoryNote>
+                  The agent’s wording is filled in. Your version stays as it was until you save.
+                </MemoryNote>
+              )}
               {recovery}
               {fields}
             </MemoryBody>
@@ -375,14 +445,104 @@ function RecordSession({
   const proposal = !trashedAt && baseline.status === "proposed";
   const live = !trashedAt && !proposal && baseline.status !== "superseded";
   const archived = baseline.status === "archived";
+  const disputed = baseline.status === "disputed";
   const links = linked.value ?? [];
+  const original = baseline.conflictRecordIds[0];
+  // Core memory loads at session start for agents: never a sensitive or blocked memory. A
+  // revise also settles a dispute, so a disputed memory is confirmed or edited first.
+  const coreLock = disputed
+    ? "Settle the dispute first: confirm or edit this memory."
+    : baseline.core
+      ? undefined
+      : baseline.agentAccess === "blocked"
+        ? "Agents can’t use this memory, so it never loads at session start."
+        : baseline.sensitivity === "sensitive"
+          ? "Sensitive memories never load at session start."
+          : undefined;
+  const actions: RowAction[] = [];
+  if (live) {
+    actions.push({
+      id: "edit",
+      label: "Edit memory",
+      icon: "edit",
+      onPress: () => setMode("edit"),
+      disabled,
+    });
+    if (!archived && (!baseline.ownerHeld || disputed))
+      actions.push({
+        id: "confirm",
+        label: "Confirm memory",
+        icon: "check",
+        onPress: () =>
+          update(
+            { action: "confirm", ...identity },
+            { loading: "Confirming memory…", success: "Memory confirmed." },
+          ),
+        disabled,
+      });
+    if (baseline.status === "active")
+      actions.push({
+        id: "dispute",
+        label: "Dispute memory",
+        icon: "cancel",
+        onPress: () =>
+          update(
+            { action: "dispute", ...identity },
+            { loading: "Disputing memory…", success: "Memory disputed." },
+          ),
+        disabled,
+      });
+    if (!archived)
+      actions.push({
+        id: "replace",
+        label: "Replace with another memory",
+        icon: "views",
+        onPress: () => setMode("supersede"),
+        disabled,
+      });
+    actions.push({
+      id: "archive",
+      label: archived ? "Unarchive memory" : "Archive memory",
+      icon: "archive",
+      onPress: () =>
+        update(
+          archived ? { action: "unarchive", ...identity } : { action: "archive", ...identity },
+          {
+            loading: archived ? "Unarchiving memory…" : "Archiving memory…",
+            success: archived ? "Memory unarchived." : "Memory archived.",
+          },
+        ),
+      disabled,
+    });
+  }
+  if (!trashedAt && !proposal)
+    actions.push({
+      id: "trash",
+      label: "Move to Trash",
+      icon: "trash",
+      destructive: true,
+      onPress: () =>
+        confirmTrash(
+          summary.title,
+          linked.value
+            ? links.map((link) => link.title)
+            : linkedMemoryIds(baseline).map((linkedId) => `Memory ${linkedId}`),
+          () =>
+            update(
+              { action: "trash", ...identity },
+              { loading: "Moving to Trash…", success: "Moved to Trash.", next: () => changed() },
+            ),
+        ),
+      disabled,
+    });
   return (
-    <MemoryBody onRefresh={refresh}>
+    // A refresh remounts this memory, so it waits for a running action to report first.
+    <MemoryBody onRefresh={() => (commands.busy ? Promise.resolve() : refresh())}>
       <Stack.Screen
         options={{
           title: "Memory details",
-          headerLeft: undefined,
-          unstable_headerLeftItems: undefined,
+          ...plainHeader,
+          ...editorActionsOptions("Memory actions", actions, t),
         }}
       />
       <View>
@@ -398,6 +558,7 @@ function RecordSession({
         <TrashedMemory
           record={baseline}
           trashedAt={trashedAt}
+          groupId={baseline.trashGroupId ?? id}
           disabled={commands.busy}
           open={open}
           restore={() =>
@@ -406,6 +567,7 @@ function RecordSession({
               {
                 loading: "Restoring memory…",
                 success: "Memory restored.",
+                explain: restoreConflict,
               },
             )
           }
@@ -418,7 +580,7 @@ function RecordSession({
                 {
                   loading: "Deleting memory…",
                   success: "Memory deleted.",
-                  next: () => undefined,
+                  next: () => changed(),
                   stale: "This memory changed in Trash. Review it before deleting.",
                 },
               ),
@@ -441,7 +603,7 @@ function RecordSession({
                 {
                   loading: "Keeping your version…",
                   success: "Kept your version.",
-                  next: () => baseline.conflictRecordIds[0],
+                  next: () => changed(original),
                 },
               )
             }
@@ -453,23 +615,29 @@ function RecordSession({
             onPress={() =>
               update(
                 { action: "resolve_conflict", ...identity, keep: "proposed" },
-                {
-                  loading: "Taking the agent’s version…",
-                  success: "Took the agent’s version.",
-                },
+                { loading: "Taking the agent’s version…", success: "Took the agent’s version." },
               )
             }
             disabled={disabled}
           />
-          {baseline.conflictRecordIds.map((conflictId) => (
+          {original && (
             <SettingsActionRow
-              key={conflictId}
-              label="Open your version to edit it"
+              label="Edit and keep mine"
               icon="edit"
-              onPress={() => open(conflictId)}
-              disabled={commands.busy}
+              onPress={() =>
+                // Settles the conflict for your version, then edits it from the agent's wording.
+                update(
+                  { action: "resolve_conflict", ...identity, keep: "current" },
+                  {
+                    loading: "Keeping your version…",
+                    success: "Kept your version. Edit it with the agent’s wording.",
+                    next: () => changed(original, memoryContent(baseline)),
+                  },
+                )
+              }
+              disabled={disabled}
             />
-          ))}
+          )}
         </Section>
       )}
       {live && baseline.conflictRecordIds.length > 0 && (
@@ -498,7 +666,7 @@ function RecordSession({
         <Section title="Access">
           <ToggleRow
             label="Core memory"
-            detail="Agents load it at the start of every session."
+            detail={coreLock ?? "Agents load it at the start of every session."}
             value={baseline.core}
             onChange={(core) =>
               update(
@@ -509,7 +677,7 @@ function RecordSession({
                 },
               )
             }
-            disabled={disabled}
+            disabled={disabled || Boolean(coreLock)}
           />
           <ToggleRow
             label="Agents can use this"
@@ -560,72 +728,6 @@ function RecordSession({
           />
         </Section>
       )}
-      {live && (
-        <Section title="Review">
-          <SettingsActionRow
-            label="Edit memory"
-            icon="edit"
-            onPress={() => setMode("edit")}
-            disabled={disabled}
-          />
-          {!archived && (!baseline.ownerHeld || baseline.status === "disputed") && (
-            <SettingsActionRow
-              label="Confirm memory"
-              icon="check"
-              onPress={() =>
-                update(
-                  { action: "confirm", ...identity },
-                  {
-                    loading: "Confirming memory…",
-                    success: "Memory confirmed.",
-                  },
-                )
-              }
-              disabled={disabled}
-            />
-          )}
-          {baseline.status === "active" && (
-            <SettingsActionRow
-              label="Dispute memory"
-              icon="cancel"
-              onPress={() =>
-                update(
-                  { action: "dispute", ...identity },
-                  {
-                    loading: "Disputing memory…",
-                    success: "Memory disputed.",
-                  },
-                )
-              }
-              disabled={disabled}
-            />
-          )}
-          {!archived && (
-            <SettingsActionRow
-              label="Replace with another memory"
-              icon="views"
-              onPress={() => setMode("supersede")}
-              disabled={disabled}
-            />
-          )}
-          <SettingsActionRow
-            label={archived ? "Unarchive memory" : "Archive memory"}
-            icon="archive"
-            onPress={() =>
-              update(
-                archived
-                  ? { action: "unarchive", ...identity }
-                  : { action: "archive", ...identity },
-                {
-                  loading: archived ? "Unarchiving memory…" : "Archiving memory…",
-                  success: archived ? "Memory unarchived." : "Memory archived.",
-                },
-              )
-            }
-            disabled={disabled}
-          />
-        </Section>
-      )}
       <RecordFacts record={baseline} />
       {links.length > 0 && (
         <Section title="Linked memories">
@@ -646,31 +748,6 @@ function RecordSession({
         disabled={commands.busy}
       />
       {history && <History api={api} access={access} id={id} />}
-      {!trashedAt && !proposal && (
-        <SettingsActionRow
-          label="Move to Trash"
-          icon="trash"
-          destructive
-          onPress={() =>
-            confirmTrash(
-              summary.title,
-              linked.value
-                ? links.map((link) => link.title)
-                : linkedMemoryIds(baseline).map((linkedId) => `Memory ${linkedId}`),
-              () =>
-                update(
-                  { action: "trash", ...identity },
-                  {
-                    loading: "Moving to Trash…",
-                    success: "Moved to Trash.",
-                    next: () => undefined,
-                  },
-                ),
-            )
-          }
-          disabled={disabled}
-        />
-      )}
     </MemoryBody>
   );
 }

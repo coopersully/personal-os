@@ -207,9 +207,15 @@ export function useMemoryResource<T>(load: (signal: AbortSignal) => Promise<T | 
     active.current?.abort();
     const controller = new AbortController();
     active.current = controller;
-    const value = await load(controller.signal);
-    if (!controller.signal.aborted && value !== undefined) setState({ value, loading: false });
-    return value;
+    try {
+      const value = await load(controller.signal);
+      if (!controller.signal.aborted && value !== undefined) setState({ value, loading: false });
+      return value;
+    } catch (error) {
+      // A newer read replaced this one, so its failure is not the person's to hear about.
+      if (controller.signal.aborted) return;
+      throw error;
+    }
   }, [load]);
   useLayoutEffect(() => {
     void reload().catch(() => {});

@@ -14,7 +14,7 @@ export function trashMessage(linked: readonly string[]) {
   const derived =
     "This memory and any memory derived from it move to Trash. You can restore them for 30 days; then they're deleted for good.";
   const kept = linked.length
-    ? `\n\nLinked memories stay where they are:\n${linked.map((title) => `• ${title}`).join("\n")}`
+    ? `\n\nMemories this one links to stay where they are:\n${linked.map((title) => `• ${title}`).join("\n")}`
     : "";
   return `${derived}${kept}\n\n${trashLimits}`;
 }
@@ -44,6 +44,7 @@ export function confirmDeleteNow(title: string, remove: () => void) {
 export function TrashedMemory({
   record,
   trashedAt,
+  groupId,
   disabled,
   open,
   restore,
@@ -51,14 +52,15 @@ export function TrashedMemory({
 }: {
   record: KnowledgeRecord;
   trashedAt: string;
+  /** The trash group's root: the memory the person trashed. */
+  groupId: string;
   disabled: boolean;
   open: (id: string) => void;
   restore: () => void;
   deleteNow: () => void;
 }) {
   const purgeAt = new Date(Date.parse(trashedAt) + knowledgeTrashRetentionMs).toISOString();
-  const groupId = record.trashGroupId;
-  const root = groupId === null || groupId === record.id;
+  const root = groupId === record.id;
   return (
     <Section title="Trash">
       <MemoryNote>

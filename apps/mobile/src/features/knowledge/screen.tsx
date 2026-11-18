@@ -2,6 +2,7 @@ import {
   type KnowledgeQuery,
   type KnowledgeRecord,
   knowledgeOriginSchema,
+  knowledgeTagsMax,
   knowledgeWorkspaceSchema,
 } from "@personal-os/domain";
 import { Stack, useFocusEffect, usePreventRemove } from "expo-router";
@@ -30,7 +31,7 @@ import {
   useMutationKey,
   useVisitAuthority,
 } from "./authority";
-import { MemoryBody, MemoryChoice, MemoryReadState, MemoryText } from "./controls";
+import { MemoryBody, MemoryChoice, MemoryReadState, MemoryText, plainHeader } from "./controls";
 import { type BackHandler, MemoryDetail } from "./detail";
 import { MemoryEditor } from "./editor";
 import {
@@ -47,7 +48,7 @@ import { MemoryTags } from "./tags";
 
 type Destination =
   | { kind: "list" }
-  | { kind: "detail"; id: string }
+  | { kind: "detail"; id: string; edit?: KnowledgeRecord["content"] }
   | { kind: "add" }
   | { kind: "tags" };
 const listDestination: Destination = { kind: "list" };
@@ -216,16 +217,15 @@ function PrivateMemory({ api, access, initial, list, setList, revalidate, retain
         key={destination.id}
         {...{ api, access, open, retain, close, back }}
         id={destination.id}
-        changed={(id) => revalidate(id ? { kind: "detail", id } : listDestination)}
+        edit={destination.edit}
+        changed={(id, edit) => revalidate(id ? { kind: "detail", id, edit } : listDestination)}
       />
     );
   }
   if (destination.kind === "tags") {
     return (
       <>
-        <Stack.Screen
-          options={{ title: "Tags", headerLeft: undefined, unstable_headerLeftItems: undefined }}
-        />
+        <Stack.Screen options={{ title: "Tags", ...plainHeader }} />
         <MemoryTags {...{ api, access, retain }} changed={() => revalidate({ kind: "tags" })} />
       </>
     );
@@ -236,6 +236,7 @@ function PrivateMemory({ api, access, initial, list, setList, revalidate, retain
         <Stack.Screen
           options={{
             title: "Add memory",
+            ...plainHeader,
             ...editorDismissOptions({ label: dirty ? "Cancel" : "Close", onPress: closeAdd }),
           }}
         />
@@ -273,9 +274,7 @@ function PrivateMemory({ api, access, initial, list, setList, revalidate, retain
 
   return (
     <>
-      <Stack.Screen
-        options={{ title: "Memory", headerLeft: undefined, unstable_headerLeftItems: undefined }}
-      />
+      <Stack.Screen options={{ title: "Memory", ...plainHeader }} />
       <MemoryList
         {...{ api, access, open, list, setList }}
         onAdd={() => setDestination({ kind: "add" })}
@@ -425,12 +424,14 @@ function MemoryList({ api, access, list, setList, open, onAdd, onTags }: ListPro
                       icon="categoryTags"
                       selected={selected}
                       color={accent}
+                      // A search takes at most 8 tags; unselected chips wait until one is freed.
+                      disabled={!selected && list.tags.length >= knowledgeTagsMax}
                       onPress={() => {
                         if (pending) return;
                         change({
                           tags: selected
                             ? list.tags.filter((entry) => entry !== tag)
-                            : [...list.tags, tag].slice(-8),
+                            : [...list.tags, tag],
                         });
                       }}
                     />

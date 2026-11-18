@@ -26,6 +26,14 @@ export function MemoryText({ children }: PropsWithChildren) {
   return <Text style={{ color: t.secondary, fontSize: 16, lineHeight: 23 }}>{children}</Text>;
 }
 
+/** Header options for a page with no leading dismiss and no trailing actions of its own. */
+export const plainHeader = {
+  headerLeft: undefined,
+  unstable_headerLeftItems: undefined,
+  headerRight: undefined,
+  unstable_headerRightItems: undefined,
+};
+
 /** Text inside a grouped section, inset like its rows. */
 export function MemoryNote({ children }: PropsWithChildren) {
   return (

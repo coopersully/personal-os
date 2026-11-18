@@ -5,6 +5,7 @@ import type { KnowledgePage, KnowledgeRecord } from "@personal-os/domain";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type ReactNode, useEffect } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { RowAction } from "../../components/row-action-button";
 import { MemoryScreen } from "./screen";
 
 vi.mock("react", async () => {
@@ -42,7 +43,11 @@ vi.mock("../auth/context", () => ({
 }));
 vi.mock("expo-router", () => ({
   router: { back: vi.fn() },
-  Stack: { Screen: () => null },
+  // The header's trailing actions render so tests reach the native action menu.
+  Stack: {
+    Screen: ({ options }: { options?: { headerRight?: () => ReactNode } }) =>
+      options?.headerRight ? <header>{options.headerRight()}</header> : null,
+  },
   useFocusEffect: (effect: () => void) => useEffect(effect, [effect]),
   // The last screen to render owns native back, as the one mounted PrivateMemory does.
   usePreventRemove: (prevent: boolean, callback: (event: unknown) => void) => {
@@ -88,7 +93,19 @@ vi.mock("../../components/screen", async () => {
     ),
   };
 });
-vi.mock("../../components/editor-header", () => ({ editorDismissOptions: () => ({}) }));
+vi.mock("../../components/editor-header", async () => {
+  const { RowActions } = await vi.importActual<typeof import("../../components/row-actions")>(
+    "../../components/row-actions",
+  );
+  return {
+    editorDismissOptions: () => ({}),
+    editorActionsOptions: (label: string, actions: RowAction[]) => ({
+      headerRight: actions.length
+        ? () => <RowActions placement="header" label={label} actions={actions} />
+        : undefined,
+    }),
+  };
+});
 vi.mock("../../components/icons", () => ({ Icon: () => null }));
 vi.mock("../../components/forms/form-save", () => ({
   FloatingAdd: ({ label, onPress }: { label: string; onPress: () => void }) => (
@@ -194,6 +211,40 @@ async function openMemory(title: string | RegExp = /Communication style/) {
 function choose(label: string, option: string) {
   fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${label}, `) }));
   fireEvent.click(within(screen.getByRole("dialog")).getByRole("radio", { name: option }));
+}
+/** The header's lifecycle actions, read from its menu (or its lone button) and left closed. */
+function headerActions() {
+  const header = document.querySelector("header");
+  if (!header) return [];
+  const trigger = within(header).queryByRole("button", { name: "Memory actions" });
+  if (!trigger)
+    return within(header)
+      .getAllByRole("button")
+      .map((entry) => entry.getAttribute("aria-label"));
+  fireEvent.click(trigger);
+  const labels = within(screen.getByRole("dialog"))
+    .getAllByRole("button")
+    .map((entry) => entry.textContent)
+    .filter((label) => label);
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss actions" }));
+  return labels;
+}
+/** Runs a header action through the native ellipsis menu, or the lone header button. */
+function menu(name: string) {
+  const header = document.querySelector("header");
+  expect(header).not.toBeNull();
+  const trigger = within(header as HTMLElement).queryByRole("button", { name: "Memory actions" });
+  if (!trigger) {
+    fireEvent.click(within(header as HTMLElement).getByRole("button", { name }));
+    return;
+  }
+  fireEvent.click(trigger);
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name }));
+}
+async function offers(name: string, offered = true) {
+  await waitFor(() =>
+    offered ? expect(headerActions()).toContain(name) : expect(headerActions()).not.toContain(name),
+  );
 }
 function nativeBack() {
   act(() => h.back?.());
@@ -366,12 +417,11 @@ it("pending_proposal_offers_only_resolve_conflict", async () => {
   records.set(id, memory({ conflictRecordIds: [proposalId] }));
   setup();
   await openMemory(/Coffee/);
-  for (const name of ["Edit memory", "Confirm memory", "Dispute memory", "Move to Trash"])
-    expect(screen.queryByRole("button", { name })).toBeNull();
-  press("Open your version to edit it");
-  await screen.findByRole("button", { name: "Review the agent’s proposal" });
-  press("Review the agent’s proposal");
-  await screen.findByRole("button", { name: "Keep mine" });
+  // A pending proposal is settled only by resolving it: no header actions at all.
+  expect(headerActions()).toEqual([]);
+  expect(document.querySelector("header")).toBeNull();
+  for (const name of ["Keep mine", "Take the agent’s", "Edit and keep mine"])
+    expect(button(name)).toBeTruthy();
 });
 
 it("resolve_conflict_keep_mine_and_take_agents", async () => {
@@ -437,17 +487,18 @@ it("trash_confirmation_states_backup_and_agent_limits_and_lists_linked", async (
   await openMemory();
   await screen.findByRole("button", { name: "Sam · partner" });
   expect(button("A deleted memory")).toBeTruthy();
-  press("Move to Trash");
+  menu("Move to Trash");
   const alert = h.alerts.at(-1);
   expect(alert?.title).toBe("Move “Communication style” to Trash?");
   expect(alert?.message).toContain("Older backups may still contain this until they're deleted");
   expect(alert?.message).toContain("Agents that already read it may remember it");
+  expect(alert?.message).toContain("Memories this one links to stay where they are:");
   expect(alert?.message).toContain("• Sam · partner");
   expect(alert?.message).toContain("• A deleted memory");
   pressAlert("Cancel");
   expect(h.api.updateKnowledge).not.toHaveBeenCalled();
 
-  press("Move to Trash");
+  menu("Move to Trash");
   h.api.updateKnowledge.mockResolvedValueOnce({
     receiptId: crypto.randomUUID(),
     recordId: id,
@@ -479,8 +530,7 @@ it("restore_and_delete_now_from_trash", async () => {
   await screen.findByText(/In Trash/);
   await openMemory();
   expect(screen.getByText(/It will be deleted for good/)).toBeTruthy();
-  for (const name of ["Edit memory", "Move to Trash", "Archive memory"])
-    expect(screen.queryByRole("button", { name })).toBeNull();
+  expect(headerActions()).toEqual([]);
 
   press("Restore");
   await waitFor(() => expect(lastUpdate()).toMatchObject({ action: "restore", recordId: id }));
@@ -626,33 +676,40 @@ it("review_actions_confirm_dispute_archive_and_replace", async () => {
   records.set(id, memory(agentSaved));
   setup();
   await openMemory();
+  expect(headerActions()).toEqual([
+    "Edit memory",
+    "Confirm memory",
+    "Dispute memory",
+    "Replace with another memory",
+    "Archive memory",
+    "Move to Trash",
+  ]);
   records.set(id, memory({ revision: 2 }));
-  press("Confirm memory");
+  menu("Confirm memory");
   await waitFor(() => expect(lastUpdate()).toMatchObject({ action: "confirm" }));
   await expectToast("Confirming memory…", "success", "Memory confirmed.");
-  await waitFor(() => expect(screen.queryByRole("button", { name: "Confirm memory" })).toBeNull());
+  await offers("Confirm memory", false);
   records.set(id, memory({ revision: 3, status: "disputed" }));
-  press("Dispute memory");
+  menu("Dispute memory");
   await waitFor(() => expect(lastUpdate()).toMatchObject({ action: "dispute" }));
   await expectToast("Disputing memory…", "success", "Memory disputed.");
   // A disputed memory can be confirmed again, even when the person holds it.
-  await screen.findByRole("button", { name: "Confirm memory" });
-  expect(screen.queryByRole("button", { name: "Dispute memory" })).toBeNull();
+  await offers("Confirm memory");
+  expect(headerActions()).not.toContain("Dispute memory");
   records.set(id, memory({ revision: 4, status: "archived" }));
-  press("Archive memory");
+  menu("Archive memory");
   await waitFor(() => expect(lastUpdate()).toMatchObject({ action: "archive" }));
   await expectToast("Archiving memory…", "success", "Memory archived.");
 
-  await screen.findByRole("button", { name: "Unarchive memory" });
-  expect(screen.queryByRole("button", { name: "Replace with another memory" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Confirm memory" })).toBeNull();
+  await offers("Unarchive memory");
+  expect(headerActions()).toEqual(["Edit memory", "Unarchive memory", "Move to Trash"]);
   records.set(id, memory({ revision: 5 }));
-  press("Unarchive memory");
+  menu("Unarchive memory");
   await waitFor(() => expect(lastUpdate()).toMatchObject({ action: "unarchive" }));
   await expectToast("Unarchiving memory…", "success", "Memory unarchived.");
 
-  await screen.findByRole("button", { name: "Replace with another memory" });
-  press("Replace with another memory");
+  await offers("Replace with another memory");
+  menu("Replace with another memory");
   fireEvent.change(screen.getByRole("textbox", { name: "Replacement memory ID" }), {
     target: { value: otherId },
   });
@@ -665,10 +722,10 @@ it("review_actions_confirm_dispute_archive_and_replace", async () => {
   await expectToast("Replacing memory…", "success", "Memory replaced.");
   // A replaced memory is read-only apart from Trash.
   await screen.findByRole("button", { name: "Open replacement memory" });
-  expect(screen.queryByRole("button", { name: "Edit memory" })).toBeNull();
+  expect(headerActions()).toEqual(["Move to Trash"]);
   // With nothing linked, the Trash confirmation still states its limits.
-  press("Move to Trash");
-  expect(h.alerts.at(-1)?.message).not.toContain("Linked memories");
+  menu("Move to Trash");
+  expect(h.alerts.at(-1)?.message).not.toContain("links to");
   expect(h.alerts.at(-1)?.message).toContain("Agents that already read it may remember it");
   pressAlert("Cancel");
   press("Open replacement memory");
@@ -678,7 +735,7 @@ it("review_actions_confirm_dispute_archive_and_replace", async () => {
 it("native_owner_reviews_and_corrects", async () => {
   setup();
   await openMemory();
-  press("Edit memory");
+  menu("Edit memory");
   fireEvent.change(screen.getByRole("textbox", { name: "Value" }), { target: { value: "prose" } });
   fireEvent.change(screen.getByRole("textbox", { name: "Tags" }), {
     target: { value: "communication, writing" },
@@ -711,7 +768,7 @@ it("native_owner_reviews_and_corrects", async () => {
 it("a_stale_edit_keeps_the_draft_and_reviews_the_latest_revision", async () => {
   setup();
   await openMemory();
-  press("Edit memory");
+  menu("Edit memory");
   fireEvent.change(screen.getByRole("textbox", { name: "Value" }), { target: { value: "prose" } });
   h.api.updateKnowledge.mockRejectedValueOnce(conflict());
   press("Save changes");
@@ -730,7 +787,7 @@ it("a_stale_edit_keeps_the_draft_and_reviews_the_latest_revision", async () => {
 it("invalid_or_unchanged_edits_do_not_save", async () => {
   setup();
   await openMemory();
-  press("Edit memory");
+  menu("Edit memory");
   expect(button("Save changes")).toHaveProperty("disabled", true);
   fireEvent.change(screen.getByRole("textbox", { name: "Tags" }), { target: { value: " , " } });
   press("Save changes");
@@ -740,10 +797,10 @@ it("invalid_or_unchanged_edits_do_not_save", async () => {
   // Native back from a changed draft asks before discarding it.
   nativeBack();
   pressAlert("Discard");
-  await screen.findByRole("button", { name: "Edit memory" });
-  press("Edit memory");
+  await screen.findByRole("button", { name: "Revision history" });
+  menu("Edit memory");
   nativeBack();
-  await screen.findByRole("button", { name: "Edit memory" });
+  await screen.findByRole("button", { name: "Revision history" });
 });
 
 it("adds_a_memory", async () => {
@@ -763,9 +820,15 @@ it("adds_a_memory", async () => {
   });
   fireEvent.change(screen.getByRole("textbox", { name: "Value" }), { target: { value: "May 1" } });
   fireEvent.change(screen.getByRole("textbox", { name: "Tags" }), { target: { value: "Family" } });
+  // Sensitive memory never loads at session start, so it cannot be core.
+  fireEvent.click(screen.getByRole("switch", { name: "Core memory" }));
+  choose("Sensitivity", "Sensitive");
+  expect(screen.getByRole("switch", { name: "Core memory" })).toHaveProperty("checked", false);
+  expect(screen.getByRole("switch", { name: "Core memory" })).toHaveProperty("disabled", true);
+  expect(screen.getByText("Sensitive memories never load at session start.")).toBeTruthy();
+  choose("Sensitivity", "Standard");
   fireEvent.click(screen.getByRole("switch", { name: "Core memory" }));
   fireEvent.click(screen.getByRole("switch", { name: "Planning" }));
-  choose("Sensitivity", "Sensitive");
   press("Save changes");
   await screen.findByText("Birthday");
   expect(h.api.saveKnowledge).toHaveBeenCalledWith(
@@ -773,7 +836,7 @@ it("adds_a_memory", async () => {
       tags: ["family"],
       core: true,
       purposes: ["planning"],
-      sensitivity: "sensitive",
+      sensitivity: "standard",
       scope: { workspace: null },
     }),
   );
@@ -911,13 +974,13 @@ it("tags_that_fail_to_load_offer_a_retry", async () => {
 it("action_feedback_uses_sonner_only", async () => {
   setup();
   await openMemory();
-  press("Archive memory");
+  menu("Archive memory");
   await waitFor(() => expect(h.toast.success).toHaveBeenCalled());
   await expectToast("Archiving memory…", "success", "Memory archived.");
 
-  await screen.findByRole("button", { name: "Archive memory" });
+  await offers("Archive memory");
   h.api.updateKnowledge.mockRejectedValueOnce(new Error("offline"));
-  press("Archive memory");
+  menu("Archive memory");
   await waitFor(() => expect(h.toast.error).toHaveBeenCalled());
   const failure = "Couldn’t confirm this change. Check the memory before trying again.";
   expect(h.toast.error).toHaveBeenLastCalledWith(
@@ -928,7 +991,7 @@ it("action_feedback_uses_sonner_only", async () => {
 
   // A stale single action reloads the memory and says so through Sonner.
   h.api.updateKnowledge.mockRejectedValueOnce(conflict());
-  press("Archive memory");
+  menu("Archive memory");
   await waitFor(() =>
     expect(h.toast.error).toHaveBeenLastCalledWith(
       "This memory changed. Showing the latest version.",
@@ -936,11 +999,11 @@ it("action_feedback_uses_sonner_only", async () => {
     ),
   );
   // A memory that is gone returns to the list.
-  await screen.findByRole("button", { name: "Archive memory" });
+  await offers("Archive memory");
   h.api.updateKnowledge.mockRejectedValueOnce(
     new ApiClientError({ code: "not_found", message: "Missing", status: 404 }),
   );
-  press("Archive memory");
+  menu("Archive memory");
   await screen.findByRole("button", { name: "Share memory export" });
   // An unreadable outcome is reported as unavailable.
   await openMemory();
@@ -949,7 +1012,7 @@ it("action_feedback_uses_sonner_only", async () => {
     recordId: id,
     outcome: "forgotten",
   });
-  press("Archive memory");
+  menu("Archive memory");
   await waitFor(() =>
     expect(h.toast.success).toHaveBeenLastCalledWith(
       "This memory is unavailable.",
@@ -1017,9 +1080,9 @@ it("native_back_from_detail_keeps_list_state", async () => {
   // A write that reloads the visit keeps the list state too.
   await openMemory();
   records.set(id, base);
-  press("Unarchive memory");
+  menu("Unarchive memory");
   await waitFor(() => expect(lastUpdate()).toMatchObject({ action: "unarchive" }));
-  await screen.findByRole("button", { name: "Archive memory" });
+  await offers("Archive memory");
   nativeBack();
   await screen.findByRole("button", { name: /Communication style/ });
   expect(button("Archived").getAttribute("aria-pressed")).toBe("true");
@@ -1051,7 +1114,7 @@ it("back_navigation_and_logout_fence_pending_writes", async () => {
   const view = setup();
   for (const leave of ["back", "logout"]) {
     await openMemory();
-    press("Edit memory");
+    menu("Edit memory");
     fireEvent.change(screen.getByRole("textbox", { name: "Value" }), {
       target: { value: "prose" },
     });
@@ -1083,7 +1146,7 @@ it("native_treats_a_deleted_memory_as_unavailable", async () => {
   setup();
   fireEvent.click(await screen.findByRole("button", { name: /Communication style/ }));
   await screen.findByText(/This memory was deleted/);
-  expect(screen.queryByRole("button", { name: "Edit memory" })).toBeNull();
+  expect(headerActions()).toEqual([]);
   expect(screen.queryByText("bullets")).toBeNull();
   nativeBack();
   await screen.findByRole("button", { name: /Communication style/ });
@@ -1325,7 +1388,7 @@ it("an_undo_that_fails_for_another_reason_says_so", async () => {
 it("outcome_toasts_release_their_ids_when_they_close", async () => {
   setup();
   await openMemory();
-  press("Archive memory");
+  menu("Archive memory");
   await waitFor(() => expect(h.toast.success).toHaveBeenCalled());
   const options = h.toast.success.mock.calls.at(-1)?.[1];
   act(() => {
@@ -1338,4 +1401,211 @@ it("outcome_toasts_release_their_ids_when_they_close", async () => {
   h.owner = "";
   cleanup();
   expect(h.toast.dismiss).not.toHaveBeenCalledWith(options?.id);
+});
+
+it("edit_and_keep_mine_settles_the_conflict_then_edits_from_the_agents_wording", async () => {
+  const preference = (value: string): KnowledgeRecord["content"] => ({
+    kind: "preference",
+    value: { subject: "owner", key: "communication_style", value: { type: "string", value } },
+  });
+  records.set(id, memory({ conflictRecordIds: [proposalId] }));
+  records.set(
+    proposalId,
+    memory({
+      id: proposalId,
+      revision: 2,
+      status: "proposed",
+      ownerHeld: false,
+      origin: "inferred",
+      content: preference("numbered lists"),
+      conflictRecordIds: [id],
+    }),
+  );
+  h.api.searchKnowledge.mockImplementation(async (query: { hasConflict?: boolean }) =>
+    page(
+      [...records.values()].filter(
+        (record) => !query.hasConflict || record.conflictRecordIds.length > 0,
+      ),
+    ),
+  );
+  h.api.updateKnowledge.mockImplementation(async (input: { recordId: string; action: string }) => {
+    if (input.action === "resolve_conflict") {
+      records.set(proposalId, memory({ id: proposalId, status: "superseded" }));
+      records.set(id, memory());
+    }
+    return receipt(records.get(input.recordId) ?? base);
+  });
+  setup();
+  press("Conflicts");
+  await waitFor(() => expect(lastQuery()).toEqual({ hasConflict: true }));
+  fireEvent.click(await screen.findByRole("button", { name: /numbered lists/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit and keep mine" }));
+  await waitFor(() =>
+    expect(h.api.updateKnowledge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recordId: proposalId,
+        action: "resolve_conflict",
+        keep: "current",
+        expectedRevision: 2,
+      }),
+    ),
+  );
+  await expectToast(
+    "Keeping your version…",
+    "success",
+    "Kept your version. Edit it with the agent’s wording.",
+  );
+  // The person's memory opens in its editor, filled with the agent's wording, ready to save.
+  const value = await screen.findByRole("textbox", { name: "Value" });
+  expect(value).toHaveProperty("value", "numbered lists");
+  expect(h.api.getKnowledge).toHaveBeenLastCalledWith({ id });
+  expect(screen.getByText(/The agent’s wording is filled in/)).toBeTruthy();
+  expect(h.toast.loading).toHaveBeenCalledTimes(1);
+  press("Save changes");
+  await waitFor(() =>
+    expect(lastUpdate()).toMatchObject({
+      recordId: id,
+      action: "revise",
+      content: preference("numbered lists"),
+    }),
+  );
+  await expectToast("Saving memory…", "success", "Memory saved.");
+  // The proposal has left Conflicts.
+  await screen.findByRole("button", { name: "Revision history" });
+  nativeBack();
+  await screen.findByText(/No conflicts/);
+  expect(button("Conflicts").getAttribute("aria-pressed")).toBe("true");
+});
+
+it("restore_conflicts_say_why_and_never_retry", async () => {
+  const trashed = memory({
+    trashedAt: "2026-11-14T15:00:00.000Z",
+    trashGroupId: id,
+    trashVersion: 1,
+  });
+  records.set(id, trashed);
+  records.set(
+    linkedId,
+    memory({
+      id: linkedId,
+      content: fact("owner", "source", "notes"),
+      claimKey: null,
+      trashedAt: "2026-11-14T15:00:00.000Z",
+      trashGroupId: linkedId,
+    }),
+  );
+  h.api.getKnowledge.mockImplementation(async ({ id: wanted }: { id: string }) => {
+    if (wanted === groupId)
+      return {
+        id: groupId,
+        state: "forgotten",
+        trashedAt: base.createdAt,
+        purgedAt: base.createdAt,
+      };
+    const record = records.get(wanted);
+    if (!record) throw new Error("offline");
+    return record;
+  });
+  setup();
+  await openMemory();
+  const restore = async (details: unknown, message: string) => {
+    const calls = h.api.updateKnowledge.mock.calls.length;
+    h.api.updateKnowledge.mockRejectedValueOnce(conflict(details));
+    press("Restore");
+    await waitFor(() => expect(h.toast.error).toHaveBeenLastCalledWith(message, expect.anything()));
+    expect(h.api.updateKnowledge).toHaveBeenCalledTimes(calls + 1);
+    await waitFor(() => expect(button("Restore")).toHaveProperty("disabled", false));
+  };
+  await restore({ blockedBy: [linkedId] }, "Restore “Source” first. This memory came from it.");
+  await restore(
+    { blockedBy: [linkedId, otherId] },
+    "Restore “Source”, a memory you can’t open first. This memory came from them.",
+  );
+  await restore(
+    { blockedBy: [linkedId, groupId] },
+    "A memory this one came from was deleted, so it can’t be restored.",
+  );
+  await restore(
+    { trashGroupId: linkedId },
+    "This memory moved to Trash with another memory. Restore that one instead.",
+  );
+  // Past Trash retention the API refuses without details; the app says why.
+  records.set(id, { ...trashed, trashedAt: "2026-10-01T15:00:00.000Z" });
+  press("Refresh list");
+  await screen.findByText(/Moved to Trash Oct/);
+  await restore(undefined, "This memory has been in Trash too long to restore.");
+  // Any other refusal is a stale view: it reloads.
+  vi.setSystemTime(Date.parse("2026-10-02T15:00:00.000Z"));
+  await restore(undefined, "This memory changed. Showing the latest version.");
+});
+
+it("core_toggle_explains_when_it_is_unavailable", async () => {
+  records.set(id, memory({ status: "disputed" }));
+  setup();
+  await openMemory();
+  const core = () => screen.getByRole("switch", { name: "Core memory" });
+  expect(core()).toHaveProperty("disabled", true);
+  expect(screen.getByText("Settle the dispute first: confirm or edit this memory.")).toBeTruthy();
+
+  records.set(id, memory({ agentAccess: "blocked" }));
+  press("Refresh list");
+  await screen.findByText("Agents can’t use this memory, so it never loads at session start.");
+  expect(core()).toHaveProperty("disabled", true);
+
+  records.set(id, memory({ sensitivity: "sensitive" }));
+  press("Refresh list");
+  await screen.findByText("Sensitive memories never load at session start.");
+  expect(core()).toHaveProperty("disabled", true);
+
+  // A sensitive memory that is already core can still be taken out.
+  records.set(id, memory({ sensitivity: "sensitive", core: true }));
+  press("Refresh list");
+  await waitFor(() => expect(core()).toHaveProperty("disabled", false));
+  expect(screen.getByText("Agents load it at the start of every session.")).toBeTruthy();
+});
+
+it("tag_chips_stop_at_eight", async () => {
+  const names = ["a", "b", "c", "d", "e", "f", "g", "h", "i"];
+  h.api.listKnowledgeTags.mockResolvedValue({
+    tags: names.map((name) => ({ name, count: 1 })),
+    aliases: [],
+  });
+  setup();
+  for (const name of names.slice(0, 8))
+    fireEvent.click(await screen.findByRole("button", { name: `#${name}` }));
+  await waitFor(() => expect(lastQuery()).toEqual({ tags: names.slice(0, 8) }));
+  expect(button("#i")).toHaveProperty("disabled", true);
+  expect(button("#a")).toHaveProperty("disabled", false);
+  press("#a");
+  await waitFor(() => expect(button("#i")).toHaveProperty("disabled", false));
+});
+
+it("detail_and_tags_pull_to_refresh_report_one_error", async () => {
+  setup();
+  await openMemory();
+  h.api.getKnowledge.mockRejectedValueOnce(new Error("offline"));
+  press("Refresh list");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledWith("Couldn’t refresh. Pull down to try again."),
+  );
+  expect(h.toast.error).toHaveBeenCalledTimes(1);
+  expect(screen.getAllByText("bullets").length).toBeGreaterThan(0);
+
+  // While an action runs, a refresh waits rather than dropping its outcome.
+  let resolve!: (value: unknown) => void;
+  h.api.updateKnowledge.mockReturnValueOnce(new Promise((done) => (resolve = done)));
+  menu("Archive memory");
+  const reads = h.api.getKnowledge.mock.calls.length;
+  press("Refresh list");
+  expect(h.api.getKnowledge).toHaveBeenCalledTimes(reads);
+  await act(async () => resolve(receipt(base)));
+  await expectToast("Archiving memory…", "success", "Memory archived.");
+
+  nativeBack();
+  fireEvent.click(await screen.findByRole("button", { name: "Manage tags" }));
+  await screen.findByText("#family · 2 memories");
+  h.api.listKnowledgeTags.mockRejectedValueOnce(new Error("offline"));
+  press("Refresh list");
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(2));
+  expect(screen.getByText("#family · 2 memories")).toBeTruthy();
 });

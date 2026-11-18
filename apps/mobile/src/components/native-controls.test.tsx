@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import {
   Fragment,
   type PropsWithChildren,
@@ -212,7 +212,13 @@ vi.mock("expo-router/native-tabs", () => {
         {children}
       </div>
     ),
-    { Label, Icon: Image },
+    {
+      Label,
+      Icon: Image,
+      Badge: ({ children }: PropsWithChildren) => (
+        <span data-testid="native-tab-badge">{children}</span>
+      ),
+    },
   );
   return {
     NativeTabs: Object.assign(
@@ -435,6 +441,18 @@ it("uses filled native tab assets with workspace tint and the standard labels", 
   expect(h.tabs.iconColor).toEqual(expect.objectContaining({ selected: h.tabs.tintColor }));
   for (const icon of screen.getAllByTestId("native-tab-icon"))
     expect(icon.getAttribute("data-selected")).toContain("Filled.png");
+});
+it("badges only the named tab and says what the count means", () => {
+  render(
+    <WorkspaceTabs
+      workspace="finances"
+      badges={{ assistant: { value: "3", label: "3 unread messages" } }}
+    />,
+  );
+  expect(screen.getAllByTestId("native-tab-badge")).toHaveLength(1);
+  const tab = screen.getByRole("tab", { name: "assistant, 3 unread messages" });
+  expect(within(tab).getByTestId("native-tab-badge")).toHaveTextContent("3");
+  expect(screen.getByRole("tab", { name: "spending" })).toBeVisible();
 });
 it("leaves every tab page's header spacing to the page, so a list is not inset twice", () => {
   // Each page pads its list by the fixed search header. The tabs otherwise switch a tab's first

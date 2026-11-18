@@ -25,8 +25,13 @@ import type { IconName } from "../../components/icons";
 import { useAuth } from "../auth/context";
 import { TaskPreferencesScreen } from "../tasks/preferences";
 import { Action, Choice, confirm, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
-import { useSettingsAction, useSettingsResource } from "./data";
+import { useSettingsAction, useSettingsListPublisher, useSettingsResource } from "./data";
 import { FinanceConfigurationSettings } from "./finance-settings";
+import {
+  MailRulePreview,
+  mailRuleActionsSummary,
+  mailRuleConditionSummary,
+} from "./mail-rule-preview";
 import { useWorkspacePreferenceQueue } from "./preferences-hook";
 import { SettingsActionRow, SettingsDetailRow, SettingsRow } from "./settings-row";
 
@@ -135,7 +140,7 @@ const preferenceGroups = [
   },
   { title: "Event defaults on other devices", keys: ["defaultEventDurationMinutes"] },
   {
-    title: "Spending defaults on other devices",
+    title: "Spending defaults",
     keys: [
       "financeSpendingBasis",
       "financeSpendingPeriod",
@@ -143,6 +148,7 @@ const preferenceGroups = [
       "financeSpendingIncludeUncategorized",
       "financeSpendingSubtractRefunds",
     ],
+    help: "These apply to Spending on iPhone, web and desktop.",
   },
   {
     title: "Transaction defaults on other devices",
@@ -701,28 +707,6 @@ export function validateGuidancePreferences(
     ).parse(preferences);
   return preferences;
 }
-/** Publish an accepted record without letting an older in-flight read replace it. */
-function useSettingsListPublisher<T>(name: string) {
-  const { state, session } = useAuth();
-  const cache = useQueryClient();
-  const owner = state.user?.id;
-  const epoch = session.epoch();
-  const live = useRef({ owner, epoch });
-  live.current = { owner, epoch };
-  return async (update: (records: T[]) => T[]) => {
-    const current = () =>
-      !!owner &&
-      live.current.owner === owner &&
-      live.current.epoch === epoch &&
-      session.epoch() === epoch;
-    if (!current()) return false;
-    const queryKey = ["settings", owner, epoch, name];
-    await cache.cancelQueries({ queryKey, exact: true });
-    if (!current()) return false;
-    cache.setQueryData<T[]>(queryKey, (records) => update(records ?? []));
-    return true;
-  };
-}
 function MailRules() {
   const rules = useSettingsResource("mail-rules", (api) => api.listMailRules());
   return (
@@ -743,6 +727,11 @@ function MailRules() {
         />
       )}
       {rules.data?.length === 0 && <State empty="No Mail rules." />}
+      <SettingsActionRow
+        icon="add"
+        label="Add rule"
+        onPress={() => router.push("/settings/mail/rule-new")}
+      />
     </Section>
   );
 }
@@ -771,7 +760,10 @@ function MailRuleDetails({ id }: { id: string | undefined }) {
             <SettingsDetailRow label="Name" value={rule.name} icon="mail" />
             <SettingsDetailRow label="Status" value={rule.enabled ? "Enabled" : "Disabled"} />
             <SettingsDetailRow label="Policy" value={human(rule.policy)} />
+            <SettingsDetailRow label="When" value={mailRuleConditionSummary(rule.condition)} />
+            <SettingsDetailRow label="Then" value={mailRuleActionsSummary(rule.actions)} />
           </Section>
+          <MailRulePreview rule={rule} />
           {rule.enabled && (
             <Section>
               <SettingsActionRow

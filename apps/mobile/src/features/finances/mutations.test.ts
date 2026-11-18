@@ -8,6 +8,7 @@ import {
   matchesAttempt,
   parseAmount,
   parseBalance,
+  rejectionReason,
   tallyCategorizations,
   trackingStopped,
 } from "./mutations";
@@ -111,4 +112,9 @@ it("never counts an unreported or unapplied categorization as applied", () => {
     "1 sent to review, 1 changed elsewhere, 2 not changed, 1 unconfirmed",
   );
   expect(describeTally({ applied: 2, review: 0, changed: 0, failed: 0, unconfirmed: 0 })).toBe("");
+});
+it("appends the server's reason for a refusal only when it gave one", () => {
+  expect(rejectionReason({ message: " Profile is incomplete. " })).toBe(" Profile is incomplete.");
+  expect(rejectionReason({ message: "  " })).toBe("");
+  expect(rejectionReason({})).toBe("");
 });

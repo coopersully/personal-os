@@ -440,8 +440,8 @@ reload is silent when it works and raises one error when it fails, beside the Re
 Selection is unavailable while the list is loading, failed, empty or showing a previous filter's
 rows.
 
-Changing a transaction's date is not available: the API accepts only a category or a note on an
-existing transaction.
+A manual transaction's date can be changed; see Changing a manual transaction's date below. A synced
+transaction's date cannot.
 
 A posted transaction's action menu offers Split transaction, or Edit splits once it has more than
 one part. It opens the split editor in the transaction editor sheet, which writes through the
@@ -471,6 +471,32 @@ its parts. The
 transaction list read does not return parts, so a list row cannot yet tell a split transaction
 from an uncategorized one. The reusable merchant rule the web dialog offers for a single-category
 breakdown is not offered on iPhone.
+
+### Changing a manual transaction's date
+
+A transaction on a manual account can have its date corrected; a synced one cannot, because its date
+is the provider's evidence. In transaction details the Date row of a manual transaction opens the
+edit form on the Date field and reads "Change the date" to assistive technology. A synced
+transaction's Date row is plain text. The edit form shows a date-only Date field, in the Finance
+accent, above the category and notes only when the transaction's account is a manual one in the
+accounts list. While that list is unread the field is not offered, and a date is never sent for a
+synced transaction. The date is sent only when it was changed and not cleared, with the revision the
+form opened with; a category or note change in the same save travels with it. A save that changes
+only the date is therefore allowed, and a save with no change says "No changes to save".
+
+The API rule is in `updateTransaction`. A date requires the transaction's current revision
+(`expectedTransactionUpdatedAt`) and is refused with a 400 when the revision is missing, when the
+account is not manual ("Dates on synced transactions can't be changed.") and, for an agent, when it
+is combined with a category. A revision that no longer matches is a 409, checked before and after
+the row lock. A confirmed change records the old and new date in the audit event and refreshes cash
+flow intelligence. The same optional `date` is accepted through the MCP
+`update_finance_transaction` tool under the same rules, and the web transaction dialog has a
+matching date editor for manual transactions.
+
+A 409 says the transaction changed elsewhere and keeps the draft. Another confirmed rejection
+(a 4xx other than 408) says the transaction could not be saved and gives the server's reason, and an
+unknown outcome says the save could not be confirmed. Neither navigates away or retries. Only a
+confirmed save closes the form.
 
 ### Finance goal management
 
@@ -681,6 +707,108 @@ Approvals, and a Reviews and checks list. Every page behind that list is the sin
   `blocked` answer says nothing was saved and closes the form.
 - **A split transaction under review** reads "Split in N parts". Approve splits keeps the
   parts. Choosing one category asks "Replace N parts?" first, because it removes them.
+
+### Finance spending views, saved defaults and Assistant state
+
+Spending reads on the account's saved Spending defaults: accounting basis, whether pending is
+included, whether matched refunds are subtracted and whether uncategorized spending is included.
+The line under the total states what it counts, written from those defaults ("Full outflow · pending
+left out · …"), and uncategorized spending that was left out is stated with its amount. Spending
+waits for the defaults and the saved week start before it reads: a total is never shown on an
+assumed basis, and a failed read of the defaults offers Retry instead of falling back to product
+defaults. The iPhone applies these defaults and does not change them; they are edited in Finance
+settings, whose "Spending defaults" group says they apply on iPhone, web and desktop. The saved
+view, grouping and selected accounts remain web and desktop layout choices.
+
+The period control offers Today, Week, Month and Custom. A visit opens on the saved
+default period unless a link names one; choosing another period lasts for the visit and is not
+saved. The week follows the account's "Week starts on" choice. Custom shows From and Through date
+fields and starts as today; a range that is incomplete, reversed or longer than the API's ten-year
+limit is explained beside the fields and is not read. Dates are days in the account timezone.
+
+Summary has three views, chosen with a segmented control:
+
+- **List** keeps the daily bars and the category or bucket rows.
+- **Trends** shows the period so far as bars (days up to a month, weeks counted from the range
+  start up to half a year, then months), the equal span before it with the difference, and one row
+  per day, week or month. A comparison that rests on incomplete or out-of-date data says so. When
+  only the comparison period fails, the trend stays and the comparison offers Retry.
+- **Rhythm** is a grid whose colour strength is the amount: hours for a single day, days under
+  their weekday for up to two months, then calendar weeks, months or years. Choosing a block names
+  it, its amount and its state below the grid. An hour is assigned only from a source timestamp;
+  purchases without a time are one "Time not provided" block.
+
+Every bar and block carries its amount and state in its accessible label, so coverage, pending,
+refunds and future days are not carried by colour. A group, a trend row and a chosen rhythm block
+open the transactions behind them with the exact query and server revision that produced the
+summary; an hour of the day never does, because a date-only record cannot select an hour. Without
+a server revision nothing offers a drill-down. Bubbles is not offered on iPhone (open decision).
+
+A recorded activity row opens its evidence in place: who acted and when, the explanation, the
+records it concerns, source messages, the audited before and after of each changed field, the
+authority it ran under and its identifiers. Records this app can open are links (transaction,
+account, review case, question, the conversation); any other record, and any reference whose stated
+source disagrees with its kind, is shown as text. Further evidence loads on request through one
+Sonner toast and is refused whole if it does not continue the loaded evidence; evidence the account
+may no longer read is dropped from the screen.
+
+The Assistant tab carries the unread count of the Finance conversation as a native tab badge, named
+for a screen reader ("assistant, 3 unread messages"), and the conversation row says the same. An
+unknown count shows no badge; it is never shown as zero. Messages are recorded as read when the
+transcript is on screen, at its latest message, with every unread message loaded: opening the tab,
+a mounted but hidden transcript, or a page that stops short of older unread messages marks nothing.
+A failed mark is silent and is taken again at the next chance.
+
+### Finance setup and maintenance
+
+Finance setup is a screen of its own, `/finance-setup`, reached from the "Finish Finance setup" row
+at the top of Overview. The row appears only when a server read of the onboarding says it is not
+complete. While that read is pending or has failed the row is absent and nothing is raised, and setup
+never redirects or blocks the rest of Finance.
+
+The screen has three parts. The review lists each setup question with Answered (offered only when a
+saved answer exists, which is shown under the row as "Saved answer"), None (only when the question
+allows it) and Not sure, a switch for having reviewed display preferences, and an Automation choice
+of Later or Set up automation now. Save review stores the answers that were reviewed and leaves the
+rest. Finish setup is enabled only when the draft has been saved and the server's readiness has no
+blocker; each blocker is a line of the same copy the web review uses. Setup shows as finished only
+when the server's snapshot has a completion time, and a completion response without one says setup
+is still pending. While the choice is Set up automation now and setup is not complete, a Finance
+automations row opens the automations screen.
+
+Both writes carry the snapshot's revision and an idempotency key made for that request (operation,
+revision and payload) and kept while the outcome is unknown. A 409 reads the review again and says it
+changed elsewhere. A confirmed rejection gives the server's reason and leaves the draft editable. An
+unknown outcome (no answer, 408 or a server error) locks both writes until Reload setup review
+succeeds; a failed reload keeps the draft and the lock. A background refetch never replaces unsaved
+choices, and a clean review takes a newer snapshot but never an older revision.
+
+Budget offers Prepare budget when no plan exists, which prepares a draft from what has been
+recorded, and Open budget once one does. It says unknown amounts stay unknown and that approval is
+separate. Check records starts maintenance, or resumes an unfinished run, and shows the stage, the
+response's headline, any recovery or next-action reason and the required disclosures. A run that
+awaits approval or finished with questions offers Answer in Review. Both actions use one Sonner toast
+from loading to the outcome and never resend after an unknown outcome.
+
+### Finance automations
+
+Automations lists the account's registered host schedules; it opens from the Assistant tab's For you
+card and from the setup review. Each registration shows its State, its next expected start, when it
+was last observed and, only when it is overdue, a Check-in row; a declared daily cadence titles the
+next start "Projected next start", as `automation-hosts.md` requires. The host and cadence line and
+the web's cause copy are shown. Register automation asks for a name, an authorized connection (only
+connections that allow Finance maintenance), the host (Codex interval, Claude daily times or Claude
+event), that host's cadence field and a time zone.
+
+Per registration, Rename saves a new name. A registration awaiting setup offers Enter host
+automation ID (with Next run for Codex) and Cancel setup; an active or paused one offers Remove
+registration after a destructive confirmation. A cancelled or removed one offers nothing. Every write
+sends the registration's version, and cancel and remove also send the state the person saw. One write
+runs at a time with one Sonner toast. A 409 says the automation changed elsewhere and that nothing
+was saved; an unknown outcome says it could not be confirmed and is never retried. The list is read
+again after every attempt, and a registration's state is always the one just read, never the write's
+response. The screen says "Fire tokens, host prompts and run recovery are managed on the web"; none
+of those are available on iPhone.
 
 ### Workspace conversations
 
@@ -960,13 +1088,75 @@ claims only these links on its web origin; every other nohmi page stays in the b
 
 ### Mail read state and archive
 
-A conversation offers Mark as read or Mark as unread, whichever changes it, and Archive when it is in an inbox. Archive removes it from every inbox and keeps its other mailboxes; a conversation that is in no inbox, or whose mailboxes have not loaded, offers no Archive. The actions sit in the action slot at the trailing end of the row's first line, where the disclosure chevron was, and in the conversation's header: a menu when there are two, a single control when there is one. Opening a conversation does not mark it read, as on web. Snooze, bulk selection and deletion are separate work (COO-241); drafts, reply and send are described below.
+A conversation offers Mark as read or Mark as unread, whichever changes it, and Archive when it is in an inbox. Archive removes it from every inbox and keeps its other mailboxes; a conversation that is in no inbox, or whose mailboxes have not loaded, offers no Archive. The actions sit in the action slot at the trailing end of the row's first line, where the disclosure chevron was, and in the conversation's header: a menu when there are two, a single control when there is one. Opening a conversation does not mark it read, as on web. Snooze and selection are described below, as are drafts, reply and send; deletion is not offered.
 
 These actions change the person's mailbox at the provider, so the list shows the change at once but records it only when the API confirms it. The pending change is an overlay on the cached list, never a cache write: an archived conversation leaves the list, a read change restyles the row, the conversation's actions are disabled until the write settles, and archiving from the open conversation closes it. One Sonner toast runs from loading to the outcome and names the action ("Marked as read", "Conversation archived"). A confirmed change is written to cached summaries from the body-free fields of the response and Mail is then re-read for unread counts and other mailboxes; a failure of that read never reports the write as failed.
 
 Every write carries the conversation's displayed `updatedAt`, so a conversation that changed elsewhere is rejected rather than overwritten. A definitive rejection (a 4xx other than 408 that does not carry `partialEffect`) puts the conversation back as it was and says it was not changed, that it changed, or that it is no longer available. Anything else (a timeout, a lost connection, a server fault, or a provider change the API could not record) is unconfirmed: the conversation goes back to its last confirmed state, the toast says the change could not be confirmed and may have reached the mailbox, and Mail is re-read rather than assuming either outcome. Nothing is retried automatically. That re-read returns nohmi's record, which catches up with the provider at the account's next sync, so Mail is read once more five seconds later. An outcome is reported against the session that sent the change: one that settles after the list has closed still reports, and one that settles after sign-out reports nothing and its Undo does nothing.
 
 A confirmed Archive of a Gmail conversation offers Undo for ten seconds. An iCloud archive moves the message to another mailbox and the API cannot yet move it back (it would report success without changing the mailbox), so an iCloud archive offers no Undo. Undo is used once, restores the mailboxes the conversation had against the revision the archive returned, and reports its own outcome in its own toast. A confirmed Undo puts the conversation back in the loaded inbox at its place by date without waiting for the read that follows; a search is left to that read. Read and unread are their own inverse and offer no Undo. No action-result copy is rendered in the list or the conversation.
+
+### Mail snooze and selection
+
+Snooze is nohmi's own record, not a change to the provider mailbox. A conversation's actions include Snooze, which opens a sheet asking when it should return: In 3 hours, Tomorrow morning and Next week (eight o'clock, next week on Monday, in the device's time), or any day and time still ahead. Choosing a time is the whole decision: the sheet closes, the conversation leaves the list and one Sonner toast runs from loading to "Snoozed until …" with Undo. Opened from a conversation, the sheet sits over it and the conversation closes once a time is chosen. The iOS menu reads its icons once when it mounts, so Mail gives a conversation's menu a new key whenever its actions or their icons change; without that an action that arrives after the mailboxes load shows the wrong icon or none. Mailboxes lists Snoozed under All inboxes; a conversation there offers End snooze instead of Snooze. The API has no route to end a snooze, so ending one snoozes the conversation until a time already past, and the list does not carry when a snooze ends, so Snoozed cannot show return times and an ended snooze has no Undo. A snooze that is refused or unconfirmed puts the conversation back and re-reads Mail.
+
+Touching and holding a conversation starts a selection. While one is under way a tap selects instead of opening, each row shows whether it is selected, and the rows' own actions step aside. The bar under the title shows the number selected, Cancel, Select all, and the actions the selection allows: Mark as read and Mark as unread when some selected conversation would change, Archive when every selected conversation is in an inbox, and Snooze (End snooze under Snoozed). A selection holds at most 50 conversations, one loaded page; Select all takes the first 50 listed. The selection is what is still listed, and a new search clears it.
+
+A selection's action writes one conversation at a time through the same guarded writes as a single change, because the bulk route returns no revisions to undo against. One toast reports the whole action: every change confirmed is a success; some confirmed is an error that says how many changed and how many were not confirmed; none confirmed says whether they were refused or could not be confirmed. Conversations that were not confirmed stay selected and the rest leave the selection. Undo is offered only for confirmed changes that can be reversed (read state, a Gmail archive, a snooze) and reverses exactly those, with its own toast and no further Undo. The selection takes no second action while one is in flight, and a session that changes mid-way stops the remaining writes and reports nothing.
+
+### Mail attention, steward findings and questions
+
+Above the inbox, and only there, a Needs you section lists the open Mail attention items the steward
+raised, most important first, with Critical and High marked. Expired items and run summaries are
+left out. It shows three and one Show all N action expands the rest; it renders nothing when none are
+open and is hidden while a selection is under way and while search results show. An item about a
+conversation opens that conversation, reading it first when the list has not loaded it (one toast,
+and a plain error toast if it is gone or cannot be read); an item with no conversation is not a
+button. A failed attention read adds nothing to the inbox and raises no toast; pulling the inbox to
+refresh reads it again and reports a failure with the usual single toast.
+
+A conversation's reader has a What nohmi found section under the subject: the steward's disposition
+and reason, its open obligations with kind, due date and reason, and each open question with its
+reason, the sources it was based on and its options. A question with no options shows its reason
+only. Choosing an option enables Send answer, which sends the option with the question's version and
+no generalization. One toast follows the action: "Answer sent", "This question changed elsewhere.",
+"This question is no longer available.", "Couldn’t send the answer. It was not saved." for another
+rejection, and, for an unknown outcome, that the answer could not be confirmed. An unknown outcome is
+never sent again. After every outcome the findings and the attention list are read again, and Send
+answer stays off until that read settles. A choice is kept until it is confirmed and is forgotten on
+a 409 or 404, so an option the reloaded question no longer offers is never sent. A failed read of the
+findings leaves the messages readable and raises one toast. Findings are not kept after the reader
+closes. Editing a disposition or an obligation is not offered.
+
+### Mail rules
+
+Mail rules are in Settings under the Mail workspace. The list shows each rule's name, whether it is
+on and its policy, with Add rule at the end. A rule's page shows its name, status, policy, a When row
+and a Then row in plain words (for example "Sender, subject or preview ends with “@shop.example”" and
+"Mark as read right away; Archive after 1 day"), and the confirmed Disable. Disabling and every other
+change are reported by one toast.
+
+Add rule opens a form with Rule name, Look in (anywhere, sender, subject or preview text), Match
+(contains, is exactly or ends with), Text, one Action (Archive, Mark as read, Star or Move to Trash)
+and the Mail accounts it covers. A lone account is chosen for the person, and the form is disabled
+until a name, text, an account and the Mail guidance read have all resolved. Adding a label is not
+offered, since it needs a mailbox owned by one account. A rule is always created off with the Preview
+policy, and the form says it can be turned on once Mail guidance is active (or that guidance is
+needed first). A confirmed create adds the rule to the list as Off · Preview and closes the form. A
+create whose outcome is unknown says it could not be confirmed, reads the rules again and does not
+close.
+
+Preview on a rule's page reads what the saved rule would match, without changing anything, and shows
+Matches, Checked ("N recent conversations"), a note when only the most recent conversations were
+checked, and each matching conversation's subject and sender. Turn on appears only when the rule is
+off and a preview of its current version is on screen. After a native confirmation it sends the
+conversations, fingerprint and time of that preview and the rule's version. The status changes to On
+only from the rule the server returns. A 409 says the rule or its matches changed and to preview
+again, clears the preview and reads the rules again. Another confirmed rejection shows the server's
+reason and keeps the preview. An unknown outcome says it could not be confirmed, is never sent again,
+clears the preview and reads the rules again. A preview of another version of the rule is neither
+shown nor sendable. An unknown preview outcome says the preview could not be loaded and to try
+again.
 
 ### Mail drafts, reply and send
 

@@ -100,3 +100,13 @@ normative requirements and retain the historical policy through Git. A candidate
 governing rule needs independent assessment and explicit maintainer adoption before that rule can
 justify its acceptance. Mechanical check additions and deep-review/handoff integration must state
 what they actually enforce instead of claiming all semantic standards are automated.
+
+## Dependency audit exceptions
+
+`pnpm audit --prod` runs in CI at its default severity. An exception is recorded in
+`pnpm-workspace.yaml` under `auditConfig.ignoreGhsas` and listed here with an owner and exit
+condition. Ignore a single advisory id; never lower the audit level.
+
+| Advisory | Package and range | Reason | Approval | Owner | Exit condition | Tracking |
+| --- | --- | --- | --- | --- | --- | --- |
+| GHSA-fc5q-39xc-vjpf | `picomatch` `<=4.0.7` (ReDoS through single-branch repeated extglobs) | No fixed release exists; the only path is Expo build tooling reached from `apps/mobile`. | Approved by Cooper on 2026-11-17 | Cooper | Remove when a fixed picomatch release ships | COO-265 |

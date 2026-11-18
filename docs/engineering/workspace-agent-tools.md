@@ -18606,7 +18606,7 @@ Patch only supplied finances preferences using the observed expectedRevision. Om
 
 ## update_finance_transaction
 
-Correct a transaction category or note with provenance. Requires finances:write, finances:execute and enabled bypass for agents. Every agent category change, including clearing with null, requires expectedTransactionUpdatedAt from get_finance_transaction. Non-null category decisions also require confidence and rationale. learnMerchant is an explicit reusable-rule decision. Use classify_finance_transactions for reasoned batch categorization.
+Correct a transaction category, note, or the date of a manually entered transaction with provenance. Requires finances:write, finances:execute and enabled bypass for agents. Every agent category change, including clearing with null, requires expectedTransactionUpdatedAt from get_finance_transaction. A date change also requires expectedTransactionUpdatedAt, is sent separately from an agent category change, and is rejected for a synced transaction. Non-null category decisions also require confidence and rationale. learnMerchant is an explicit reusable-rule decision. Use classify_finance_transactions for reasoned batch categorization.
 
 - Domain: finances; stage: commit; policy: approved_rule.
 - Grants (all): finances:write, finances:execute.
@@ -18633,6 +18633,11 @@ Correct a transaction category or note with provenance. Requires finances:write,
       "type": "number",
       "minimum": 0,
       "maximum": 1
+    },
+    "date": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
     },
     "expectedTransactionUpdatedAt": {
       "anyOf": [

@@ -79,6 +79,7 @@ const h = vi.hoisted(() => ({
     listTaskWorkspace: vi.fn(),
     listFinanceAccounts: vi.fn(),
     getFinanceSpending: vi.fn(),
+    getWorkspaceSettings: vi.fn(),
     listFinanceActivity: vi.fn(),
     listFinanceTransactions: vi.fn(),
     listFinanceSpendingTransactions: vi.fn(),
@@ -336,6 +337,12 @@ beforeEach(() => {
     },
   });
   h.api.getFinanceSpending.mockResolvedValue(spending);
+  // The week starts on Monday here, as these tests' fixed dates assume.
+  h.api.getWorkspaceSettings.mockImplementation(async (workspace: string) => ({
+    workspace,
+    revision: 1,
+    preferences: workspace === "calendar" ? { weekStartsOn: "monday" } : {},
+  }));
   h.api.listFinanceActivity.mockResolvedValue({ entries: [], nextCursor: null });
   h.api.listFinanceTransactions.mockResolvedValue({ items: [transaction], nextCursor: null });
   h.api.listFinanceSpendingTransactions.mockResolvedValue({
@@ -1155,6 +1162,11 @@ it("keeps Assistant shortcuts on their matching canonical view", async () => {
   await screen.findByText("No recorded activity yet.");
   expect(h.setParams).toHaveBeenLastCalledWith({ view: "Activity" });
 });
+it("opens Finance automations from the Assistant", async () => {
+  mount(<FinanceAssistantScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: /^Automations/ }));
+  expect(h.push).toHaveBeenLastCalledWith("/finance-automations");
+});
 it("resets the spending drill-down when changing period and opens full transaction details", async () => {
   mount(<FinanceSpendingScreen />);
   fireEvent.click(await screen.findByRole("button", { name: /Groceries/ }));
@@ -1165,9 +1177,9 @@ it("resets the spending drill-down when changing period and opens full transacti
   });
   fireEvent.click(screen.getByRole("button", { name: /All categories/ }));
   expect(screen.queryByText(/Spending contribution:/)).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "This month" }));
+  fireEvent.click(screen.getByRole("button", { name: "Month" }));
   expect(h.setParams).toHaveBeenLastCalledWith({ period: "month" });
-  fireEvent.click(screen.getByRole("button", { name: "This week" }));
+  fireEvent.click(screen.getByRole("button", { name: "Week" }));
   expect(h.setParams).toHaveBeenLastCalledWith({ period: "week" });
 });
 it("preserves actionable source and planning state across account groups", async () => {
@@ -3716,7 +3728,7 @@ it("retains transaction search and status while a new period's summary is pendin
     ),
   );
   const previousFrom = h.api.listFinanceTransactions.mock.calls.at(-1)?.[0].from;
-  fireEvent.click(screen.getByRole("button", { name: "This month" }));
+  fireEvent.click(screen.getByRole("button", { name: "Month" }));
   await waitFor(() =>
     expect(h.api.listFinanceTransactions).toHaveBeenLastCalledWith(
       expect.objectContaining({ search: "coffee", pending: true }),

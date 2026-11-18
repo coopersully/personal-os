@@ -4,6 +4,7 @@ import { balanceHint, balancesFor } from "./balances";
 import { useFinanceRead, useSpending, useUpcoming } from "./data";
 import { OverviewMetric } from "./overview-metric";
 import { expectedAmount, financeLabel, formatLocalDate, formatMoney } from "./presentation";
+import { FinishFinanceSetup } from "./setup";
 import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Section } from "./ui";
 import { upcomingCategory, useUpcomingCategories } from "./upcoming-category";
 
@@ -62,6 +63,7 @@ export function FinanceOverviewScreen() {
   );
   return (
     <FinanceScreen title="Overview" tabBar>
+      <FinishFinanceSetup />
       <ReadState query={spending}>
         {spending.data && (
           <OverviewMetric

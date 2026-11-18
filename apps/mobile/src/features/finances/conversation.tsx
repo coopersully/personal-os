@@ -1,9 +1,10 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { router, useFocusEffect } from "expo-router";
 import { type ComponentRef, useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Keyboard, Platform, ScrollView, Text, View } from "react-native";
 import { radius, spacing, useTheme } from "../../theme";
 import { ConversationComposer } from "./conversation-composer";
+import { conversationUnreadKey, useConversationUnread } from "./conversation-unread";
 import { useFinance } from "./data";
 import { Copy, FinanceRow, ReadState } from "./ui";
 
@@ -43,6 +44,11 @@ export function Conversation() {
   const transcript = useRef<ComponentRef<typeof ScrollView>>(null);
   const nearBottom = useRef(true);
   const [keyboardInset, setKeyboardInset] = useState(0);
+  const client = useQueryClient();
+  const unread = useConversationUnread();
+  // Native tabs stay mounted, so a mounted transcript is not necessarily one being read.
+  const [visible, setVisible] = useState(false);
+  const marked = useRef(0n);
   const query = useInfiniteQuery({
     meta: { scopedReadFeedback: true },
     queryKey: ["finances", owner, "conversation"],
@@ -60,15 +66,18 @@ export function Conversation() {
     useCallback(() => {
       if (!owner) return;
       let active = AppState.currentState === "active";
+      setVisible(active);
       const poll = () => {
         if (active) void refresh();
       };
       const timer = setInterval(poll, 5_000);
       const listener = AppState.addEventListener("change", (state) => {
         active = state === "active";
+        setVisible(active);
         if (active) poll();
       });
       return () => {
+        setVisible(false);
         clearInterval(timer);
         listener.remove();
       };
@@ -79,6 +88,34 @@ export function Conversation() {
       .slice()
       .reverse()
       .flatMap((page) => page.messages) ?? [];
+  // A message without a usable sequence cannot be placed, so nothing is marked read around it.
+  const sequences = messages.map((message) =>
+    /^\d+$/.test(String(message.sequence)) ? BigInt(message.sequence) : null,
+  );
+  const placed = sequences.every((value) => value !== null);
+  const newest = sequences.reduce<bigint>((max, value) => (value && value > max ? value : max), 0n);
+  const oldest = sequences.reduce<bigint>(
+    (min, value) => (value !== null && value < min ? value : min),
+    newest,
+  );
+  const readThrough = unread?.readThrough;
+  const hasOlder = query.hasNextPage;
+  /** Records the shown messages as read. Opening the tab alone never does; showing them does. */
+  const markSeen = useCallback(() => {
+    if (!visible || !placed || !nearBottom.current || readThrough === undefined) return;
+    if (newest <= readThrough || newest <= marked.current) return;
+    // Unread messages older than the loaded page have not been shown; never mark past them.
+    if (hasOlder && oldest > readThrough) return;
+    marked.current = newest;
+    void api
+      .markFinanceConversationRendered(newest.toString())
+      .then(() => client.invalidateQueries({ queryKey: conversationUnreadKey(owner) }))
+      // Unconfirmed, so the next chance to mark these messages is taken again.
+      .catch(() => {
+        if (marked.current === newest) marked.current = 0n;
+      });
+  }, [api, client, owner, visible, placed, newest, oldest, readThrough, hasOlder]);
+  useEffect(markSeen, [markSeen]);
   // Measure the actual composer region, accounting for the native tab bar and workspace header.
   useEffect(() => {
     let active = true;
@@ -116,6 +153,7 @@ export function Conversation() {
               onScroll={({ nativeEvent: { contentOffset, layoutMeasurement, contentSize } }) => {
                 nearBottom.current =
                   contentSize.height - layoutMeasurement.height - contentOffset.y < 80;
+                markSeen();
               }}
               onContentSizeChange={() => {
                 if (nearBottom.current) transcript.current?.scrollToEnd({ animated: false });

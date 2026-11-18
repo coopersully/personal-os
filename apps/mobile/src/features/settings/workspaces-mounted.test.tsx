@@ -143,6 +143,10 @@ vi.mock("../auth/context", () => ({
   }),
 }));
 vi.mock("./data", () => ({
+  useSettingsListPublisher: (name: string) => async (update: (records: unknown[]) => unknown[]) => {
+    h.publish(["settings", "fixture", 1, name], update);
+    return true;
+  },
   useSettingsResource: (key: string) => ({
     data: key.startsWith("guidance-") ? h.guidance : h.resources[key],
     isPending: h.pending.has(key),
@@ -326,6 +330,17 @@ it("groups shared presentation choices and disables snap sensitivity when follow
   await act(async () => fireEvent.click(following.getByLabelText("Snap to today")));
   expect(following.getByLabelText("Snap sensitivity")).toBeDisabled();
   expect(h.write).toHaveBeenLastCalledWith({ snapToFollow: false });
+});
+it("presents the Spending defaults as applying on iPhone too", () => {
+  h.domain = "finances";
+  render(<FinanceSettingsScreen />);
+  const defaults = within(screen.getByRole("region", { name: "Spending defaults" }));
+  expect(defaults.getByText("These apply to Spending on iPhone, web and desktop.")).toBeVisible();
+  expect(
+    screen.queryByRole("region", { name: "Spending defaults on other devices" }),
+  ).not.toBeInTheDocument();
+  // Layout choices that the iPhone does not follow keep saying so.
+  expect(screen.getByRole("region", { name: "Finance layout on other devices" })).toBeVisible();
 });
 it("resets rejected numeric text only after reviewed reload and does not replay it on blur", async () => {
   h.reload.mockResolvedValue({
@@ -652,7 +667,15 @@ it("configures Calendar visibility and local deletion, opening creation without 
 it("opens actual related native settings and disables a named Mail rule only after confirmation", async () => {
   h.guidance = mailGuidance();
   h.resources["mail-rules"] = [
-    { id: identifier(6), name: "Old rule", version: 8, enabled: true, policy: "approved_rule" },
+    {
+      id: identifier(6),
+      name: "Old rule",
+      version: 8,
+      enabled: true,
+      policy: "approved_rule",
+      condition: { field: "sender", operator: "contains", value: "old@example.com" },
+      actions: [{ type: "archive", afterDays: 0, mailboxId: null }],
+    },
   ];
   const disable = vi.fn().mockResolvedValue({
     id: identifier(6),
@@ -660,6 +683,8 @@ it("opens actual related native settings and disables a named Mail rule only aft
     version: 9,
     enabled: false,
     policy: "approved_rule",
+    condition: { field: "sender", operator: "contains", value: "old@example.com" },
+    actions: [{ type: "archive", afterDays: 0, mailboxId: null }],
   });
   h.api = { updateMailRule: disable };
   const { rerender } = render(<MailSettingsScreen />);

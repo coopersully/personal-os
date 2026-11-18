@@ -1,5 +1,4 @@
 import {
-  type AttentionItem,
   type CalendarEvent,
   localDateAt,
   localDateTimeToUtc,
@@ -27,6 +26,7 @@ import {
   formatLocalDate,
   formatMoney,
 } from "../finances/presentation";
+import { mailAttention } from "../mail/logic";
 import { MailReader } from "../mail/reader";
 import { useTodayData } from "./live-data";
 import { useTodaySky } from "./sky-context";
@@ -46,22 +46,6 @@ type Row = {
   at?: string;
 };
 const clip = (text: string) => (text.length > 140 ? `${text.slice(0, 137).trimEnd()}…` : text);
-const importanceRank = { critical: 0, high: 1, normal: 2, low: 3 } as const;
-/** Open Mail attention that is still current, most important first, newest first within a level. */
-function mailAttention(items: AttentionItem[], now: Date) {
-  return items
-    .filter(
-      (item) =>
-        item.status === "open" &&
-        item.kind !== "run_summary" &&
-        (!item.expiresAt || Date.parse(item.expiresAt) > now.getTime()),
-    )
-    .sort(
-      (a, b) =>
-        importanceRank[a.importance] - importanceRank[b.importance] ||
-        b.updatedAt.localeCompare(a.updatedAt),
-    );
-}
 /** What is left of today: events still running or ahead by start time, then all-day events. */
 function remainingEvents(events: CalendarEvent[], timezone: string, now: Date) {
   const today = localDateAt(now, timezone);

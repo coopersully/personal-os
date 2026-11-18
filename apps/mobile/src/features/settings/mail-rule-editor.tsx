@@ -7,13 +7,19 @@ import {
 import { router, Stack } from "expo-router";
 import { useState } from "react";
 import { View } from "react-native";
+import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { FormSave } from "../../components/forms/form-save";
 import { SectionNote } from "../../components/forms/section-content";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
 import { Choice, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
-import { useSettingsAction, useSettingsListPublisher, useSettingsResource } from "./data";
-import { mailRuleActionWords, mailRuleFieldWords } from "./mail-rule-preview";
+import { useSettingsListPublisher, useSettingsResource } from "./data";
+import {
+  mailRuleActionWords,
+  mailRuleFieldWords,
+  useMailRuleAction,
+  useMailRulesReread,
+} from "./mail-rule-preview";
 
 const fields = (["any", "sender", "subject", "snippet"] as const).map((value) => ({
   value,
@@ -38,7 +44,8 @@ export function MailRuleEditorScreen() {
     "mail-accounts",
     async (api) => (await api.getMailSetupContext()).accounts,
   );
-  const action = useSettingsAction();
+  const action = useMailRuleAction();
+  const reread = useMailRulesReread();
   const publish = useSettingsListPublisher<MailRule>("mail-rules");
   const [name, setName] = useState("");
   const [field, setField] = useState<MailRuleCondition["field"]>("sender");
@@ -64,21 +71,27 @@ export function MailRuleEditorScreen() {
     if (!input.success) return;
     const listed = !!rules.data;
     void action
-      .run(
-        async (api) => {
-          const created = await api.createMailRule(input.data);
-          await publish((records) => [
-            ...records.filter((record) => record.id !== created.id),
-            created,
-          ]);
-          // Without a loaded list the published record would stand in for every other rule.
-          if (!listed) void rules.refetch();
-        },
-        "Mail rule created",
-        "Creating rule…",
-      )
-      .then((result) => {
-        if (!result.ok) return;
+      .run("Creating rule…", (api) => api.createMailRule(input.data))
+      .then(async (result) => {
+        if (!result) return;
+        if (!result.ok) {
+          // The rule may exist after an unknown outcome; show the list as the server has it.
+          if (!result.rejection) void reread();
+          toast.error(
+            result.rejection?.message ??
+              "Couldn’t confirm the rule was created. Check Mail rules before trying again.",
+            { id: result.id },
+          );
+          return;
+        }
+        const created = result.value;
+        await publish((records) => [
+          ...records.filter((record) => record.id !== created.id),
+          created,
+        ]);
+        // Without a loaded list the published record would stand in for every other rule.
+        if (!listed) void reread();
+        toast.success("Mail rule created", { id: result.id });
         permitDismiss();
         router.back();
       });

@@ -425,26 +425,57 @@ it("creates a disabled rule from the form and lists it Off", async () => {
   expect(await screen.findByRole("button", { name: /Receipts Off · Preview/ })).toBeVisible();
 });
 
-it("keeps the draft and reports a rejected or unconfirmed create once each", async () => {
+it("keeps the draft and reports a rejected create with the server's reason", async () => {
   h.accounts = [{ accountId: workAccount, email: "work@example.com", label: "Work" }];
-  h.createRule.mockRejectedValueOnce(rejection(400, "That rule is not allowed."));
+  h.createRule.mockRejectedValue(rejection(400, "That rule is not allowed."));
   mount("new");
   await fillRule();
   await waitFor(() => expect(screen.getByLabelText("work@example.com")).toBeChecked());
+  await waitFor(() => expect(h.listRules).toHaveBeenCalledOnce());
   fireEvent.click(screen.getByRole("button", { name: "Create rule" }));
   await waitFor(() =>
-    expect(h.error).toHaveBeenCalledWith("That rule is not allowed.", { id: "toast-id" }),
+    expect(h.error).toHaveBeenCalledExactlyOnceWith("That rule is not allowed.", {
+      id: "toast-id",
+    }),
   );
-  h.createRule.mockRejectedValueOnce(new TypeError("Network request failed"));
+  expect(h.createRule).toHaveBeenCalledOnce();
+  expect(h.listRules).toHaveBeenCalledOnce();
+  expect(screen.getByLabelText("Rule name")).toHaveValue("Receipts");
+  expect(h.back).not.toHaveBeenCalled();
+  expect(h.success).not.toHaveBeenCalled();
+  expectNoInlineResult();
+});
+
+it.each([
+  ["a timeout", rejection(408, "Timed out")],
+  ["a server failure", rejection(503, "Unavailable")],
+  ["a network failure", new TypeError("Network request failed")],
+])("reports %s on create as not confirmed, never resends, and rereads the list", async (_name, failure) => {
+  h.accounts = [{ accountId: workAccount, email: "work@example.com", label: "Work" }];
+  // The server saved the rule even though the phone never heard back.
+  h.createRule.mockImplementation(async (input) => {
+    h.rules = [...h.rules, rule({ ...input, id: createdId, version: 1 })];
+    throw failure;
+  });
+  mount("new");
+  await fillRule();
+  await waitFor(() => expect(screen.getByLabelText("work@example.com")).toBeChecked());
+  await waitFor(() => expect(h.listRules).toHaveBeenCalledOnce());
   fireEvent.click(screen.getByRole("button", { name: "Create rule" }));
   await waitFor(() =>
-    expect(h.error).toHaveBeenLastCalledWith(
-      "Couldn’t confirm the result. Check your connection and refresh before retrying.",
+    expect(h.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn’t confirm the rule was created. Check Mail rules before trying again.",
       { id: "toast-id" },
     ),
   );
-  expect(h.createRule).toHaveBeenCalledTimes(2);
-  expect(h.error).toHaveBeenCalledTimes(2);
+  expect(h.createRule).toHaveBeenCalledOnce();
+  await waitFor(() =>
+    expect(
+      client()
+        .getQueryData<MailRule[]>(key("mail-rules"))
+        ?.map((entry) => entry.id),
+    ).toEqual([ruleId, createdId]),
+  );
   expect(screen.getByLabelText("Rule name")).toHaveValue("Receipts");
   expect(h.back).not.toHaveBeenCalled();
   expect(h.success).not.toHaveBeenCalled();
@@ -631,6 +662,42 @@ it("reports a failed preview once and shows no scope", async () => {
   expect(screen.queryByText(/^Matches:/)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Turn on/ })).not.toBeInTheDocument();
   expectNoInlineResult();
+});
+
+it.each([
+  ["a timeout", rejection(408, "Timed out")],
+  ["a server failure", rejection(503, "Unavailable")],
+  ["a network failure", new TypeError("Network request failed")],
+])("reports %s on preview as not loaded rather than rejected", async (_name, failure) => {
+  h.previewRule.mockRejectedValue(failure);
+  mount("rule");
+  fireEvent.click(await screen.findByRole("button", { name: "Preview" }));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledExactlyOnceWith("Couldn’t load the preview. Try again.", {
+      id: "toast-id",
+    }),
+  );
+  expect(h.previewRule).toHaveBeenCalledOnce();
+  expect(h.success).not.toHaveBeenCalled();
+  expect(screen.queryByText(/^Matches:/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Turn on/ })).not.toBeInTheDocument();
+  expectNoInlineResult();
+});
+
+it.each([
+  ["a changed rule", rejection(409, "The mail rule changed since it was reviewed.")],
+  ["an unknown outcome", new TypeError("Network request failed")],
+])("raises no second toast when the reread after %s also fails", async (_name, failure) => {
+  h.activateRule.mockRejectedValue(failure);
+  mount("rule");
+  await showPreview();
+  h.listRules.mockClear().mockRejectedValue(new TypeError("Network request failed"));
+  fireEvent.click(screen.getByRole("button", { name: "Turn on Newsletters" }));
+  await approve();
+  await waitFor(() => expect(h.listRules).toHaveBeenCalledOnce());
+  await waitFor(() => expect(client().getQueryState(key("mail-rules"))?.status).toBe("error"));
+  expect(h.error).toHaveBeenCalledOnce();
+  expect(screen.getByText("Status: Disabled")).toBeVisible();
 });
 
 it("still disables an enabled rule only after confirmation and never offers Turn on for it", async () => {

@@ -6,6 +6,8 @@ import { categoryIcon, categoryLabel } from "./category-presentation";
 import { Conversation } from "./conversation";
 import { useFinance, useFinanceRead } from "./data";
 import { financeLabel, recordAmount } from "./presentation";
+import { ActionReviews } from "./review-approvals";
+import { ReviewDestinations } from "./reviews";
 import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Section, Segments } from "./ui";
 
 function Activity() {
@@ -112,6 +114,8 @@ export function FinanceAssistantScreen() {
       ) : (
         <>
           <Attention />
+          <ActionReviews />
+          <ReviewDestinations />
           <Card>
             <FinanceRow
               title="Your Finance conversation"

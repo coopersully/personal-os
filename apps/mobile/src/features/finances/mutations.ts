@@ -125,3 +125,14 @@ export function describeTally(tally: CategorizationTally): string {
     .filter(Boolean)
     .join(", ");
 }
+
+/**
+ * The saved record of a write whose records carry their own `status` (an alert, a
+ * reimbursement). An action outcome has no `id`; only an applied one holds a saved record.
+ */
+export function appliedRecord<T extends { id: string }>(
+  value: T | { status: string; result?: T },
+): T | null {
+  if ("id" in value) return value;
+  return value.status === "applied" && value.result ? value.result : null;
+}

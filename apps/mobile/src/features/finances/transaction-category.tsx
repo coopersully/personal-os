@@ -9,6 +9,7 @@ import { Icon } from "../../components/icons";
 import { spacing, useTheme } from "../../theme";
 import { categoryIcon, categoryLabel } from "./category-presentation";
 import { useFinance, useFinanceRead } from "./data";
+import { confirmChoice } from "./goal-confirm";
 import { appliedTransaction } from "./mutations";
 import { activeAllocations } from "./splits";
 import { FinanceRow, ReadState } from "./ui";
@@ -37,9 +38,12 @@ export function TransactionCategory({
   const categories = useFinanceRead(["categories"], (api) => api.getFinanceCategories(), choosing);
   const needsInput = !item.category || !!review;
   const suggested = item.category ?? review?.suggestedCategory?.name;
+  const parts = activeAllocations(item).length;
+  const split = parts > 1;
+  // Approving a split under review keeps its parts; only a chosen category replaces them.
   const canApprove =
     !!review &&
-    !!(item.categoryId ?? review.suggestedCategory?.id) &&
+    (split || !!(item.categoryId ?? review.suggestedCategory?.id)) &&
     item.direction !== "transfer" &&
     review.reason !== "possible_transfer";
   async function save(categoryId?: string) {
@@ -83,7 +87,9 @@ export function TransactionCategory({
           client.setQueryData<FinanceReviewCase[]>(["finances", owner, "reviews"], (rows) =>
             rows?.filter((entry) => entry.id !== review.id),
           );
-        toast.success("Category updated", { id: toastId });
+        toast.success(split && !categoryId ? "Splits approved" : "Category updated", {
+          id: toastId,
+        });
       } else toast.info("This transaction still needs review", { id: toastId });
       void client.invalidateQueries({ queryKey: ["finances", owner] });
     } catch {
@@ -100,7 +106,6 @@ export function TransactionCategory({
     }
   }
   const color = needsInput ? t.warning : t.ink;
-  const parts = activeAllocations(item).length;
   // Split across categories and not awaiting review: the parts are the categorization.
   if (parts > 1 && !review)
     return (
@@ -128,11 +133,15 @@ export function TransactionCategory({
           <FinanceRow
             centered
             title="Category"
-            value={categoryLabel(suggested)}
-            icon={categoryIcon(item.category ?? "Uncategorized")}
+            value={split ? `Split in ${parts} parts` : categoryLabel(suggested)}
+            icon={split ? "categoryLayers" : categoryIcon(item.category ?? "Uncategorized")}
             valueTone={needsInput ? "attention" : undefined}
             accessibilityHint={
-              needsInput ? "Needs your input. Choose or approve a category." : "Change category"
+              split
+                ? "Needs your input. Approve the splits or replace them with one category."
+                : needsInput
+                  ? "Needs your input. Choose or approve a category."
+                  : "Change category"
             }
             onPress={pending ? undefined : () => setChoosing(true)}
           />
@@ -140,7 +149,7 @@ export function TransactionCategory({
         {canApprove && (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Approve category"
+            accessibilityLabel={split ? "Approve splits" : "Approve category"}
             disabled={pending}
             onPress={() => void save()}
             style={{
@@ -166,7 +175,18 @@ export function TransactionCategory({
               value: entry.id,
             }))}
             onChange={(value) => {
-              if (value) void save(value);
+              if (!value) return;
+              if (!split) return void save(value);
+              // A review resolved with one category replaces every part; say so first.
+              const name = categories.data?.find((entry) => entry.id === value)?.name;
+              confirmChoice({
+                title: `Replace ${parts} parts?`,
+                message: `Choosing ${categoryLabel(name)} puts the whole transaction in that category and removes its ${parts} parts.`,
+                cancel: "Keep splits",
+                accept: "Replace parts",
+                destructive: true,
+                onAccept: () => void save(value),
+              });
             }}
             onClose={() => setChoosing(false)}
           />

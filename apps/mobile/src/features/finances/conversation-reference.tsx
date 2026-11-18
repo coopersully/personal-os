@@ -8,6 +8,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { toast } from "sonner-native";
 import { Button } from "../../components/detail-content";
 import { categoryIcon } from "./category-presentation";
+import { ContextualQuestionReference } from "./contextual-answer";
 import { useFinance, useFinanceRead } from "./data";
 import { financeLabel, formatMoney } from "./presentation";
 import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Section } from "./ui";
@@ -28,8 +29,9 @@ export function FinanceConversationReference() {
   if (kind === "budget_plan" && versionId)
     return <BudgetReference key={`${owner}:${id}:${versionId}`} id={id} versionId={versionId} />;
   if (kind === "review_batch") return <BatchReference key={`${owner}:${id}`} id={id} />;
-  if (kind === "review_case" || kind === "contextual_question")
-    return <CaseReference key={`${owner}:${id}`} id={id} kind={kind} />;
+  if (kind === "contextual_question")
+    return <ContextualQuestionReference key={`${owner}:${id}`} id={id} />;
+  if (kind === "review_case") return <CaseReference key={`${owner}:${id}`} id={id} />;
   return (
     <FinanceScreen title="Finance reference">
       <Copy>Reference unavailable.</Copy>
@@ -445,21 +447,15 @@ function BatchReference({ id }: { id: string }) {
   );
 }
 
-function CaseReference({ id, kind }: { id: string; kind: "review_case" | "contextual_question" }) {
-  const query = useFinanceRead(["chat-case", kind, id], async (api) => {
-    if (kind === "review_case") {
-      const [review] = await api.getFinanceReviewQueue(1, id);
-      return review?.id === id
-        ? { text: financeLabel(review.reason), transactionId: review.transaction.id }
-        : null;
-    }
-    const question = await api.getFinanceContextualQuestion(id);
-    return question.state === "available"
-      ? { text: question.question.prompt, transactionId: question.question.transactionId }
+function CaseReference({ id }: { id: string }) {
+  const query = useFinanceRead(["chat-case", "review_case", id], async (api) => {
+    const [review] = await api.getFinanceReviewQueue(1, id);
+    return review?.id === id
+      ? { text: financeLabel(review.reason), transactionId: review.transaction.id }
       : null;
   });
   return (
-    <FinanceScreen title={kind === "review_case" ? "Review case" : "Finance question"}>
+    <FinanceScreen title="Review case">
       <ReadState query={query}>
         {query.data ? (
           <>

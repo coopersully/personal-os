@@ -23,7 +23,7 @@ import {
   knowledgeReceiptSchema,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { createApp } from "../app.js";
 import { loadConfig } from "../config.js";
 import { hashToken } from "../security.js";
@@ -535,6 +535,50 @@ describe("agent-managed memory authority", () => {
     expect(await f.ids(both)).toContain(twice.id);
   });
 
+  it("derived_memory_follows_its_source_when_the_source_is_widened", async () => {
+    const source = await f.save(f.owner, fact("Budget day"));
+    await f.act(f.owner, source, { action: "restrict", workspace: "finances" });
+    const restricted = await f.get(f.owner, source.id);
+    // Stated by the owner too, so the source's next revision leaves it supported.
+    const derived = await f.save(
+      f.owner,
+      fact("Derived day", { evidence: [ownerStatement, citing(restricted)] }),
+    );
+    // The source's workspace narrows the record when it is read, not as a stored scope (R22).
+    expect(derived).toMatchObject({
+      scope: { workspace: null },
+      requiredReadScopes: ["knowledge:read"],
+    });
+    await expect(f.records.get(f.agent, { id: derived.id })).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(await f.ids(f.agent)).toEqual([]);
+
+    await f.act(f.owner, restricted, { action: "widen", workspace: null });
+    expect(await f.get(f.agent, derived.id)).toMatchObject({ id: derived.id });
+    expect(await f.ids(f.agent)).toEqual(expect.arrayContaining([source.id, derived.id]));
+  });
+
+  it("revising_a_derived_record_drops_a_stale_inherited_workspace_scope", async () => {
+    const source = await f.save(f.owner, fact("Budget day"));
+    await f.act(f.owner, source, { action: "restrict", workspace: "finances" });
+    const derived = await f.save(
+      f.owner,
+      fact("Derived day", { evidence: [ownerStatement, citing(await f.get(f.owner, source.id))] }),
+    );
+    // A record saved before R22 carried its source's workspace as a stored scope.
+    await database.db.execute(
+      sql`UPDATE knowledge_revisions SET snapshot = jsonb_set(snapshot, '{requiredReadScopes}', '["finances:read","knowledge:read"]'::jsonb) WHERE record_id = ${derived.id}`,
+    );
+    await f.act(f.owner, await f.get(f.owner, source.id), { action: "widen", workspace: null });
+    const revised = await f.act(f.owner, await f.get(f.owner, derived.id), {
+      action: "revise",
+      content: derived.content,
+    });
+    expect(revised.requiredReadScopes).toEqual(["knowledge:read"]);
+    expect(await f.get(f.agent, derived.id)).toMatchObject({ revision: 2 });
+  });
+
   it("owner_resolves_proposal_after_agent_narrows_original", async () => {
     const original = await f.save(f.owner, fact("Tuesday"));
     const proposal = await f.act(f.agent, original, {
@@ -564,11 +608,20 @@ describe("agent-managed memory authority", () => {
       status: "superseded",
       supersededBy: proposal.id,
     });
-    // Accepted, it stands alone with its own disclosure.
-    expect(await f.get(f.agent, proposal.id)).toMatchObject({ status: "active" });
+    // Accepted, it no longer derives from the original, but keeps the narrower workspace the
+    // original gained while the proposal waited (R21).
+    await expect(f.records.get(f.agent, { id: proposal.id })).rejects.toMatchObject({
+      status: 404,
+    });
+    const finance = await f.newAgent(["knowledge:read", "knowledge:write", "finances:read"]);
+    expect(await f.get(finance, proposal.id)).toMatchObject({
+      status: "active",
+      scope: { workspace: "finances" },
+      requiredReadScopes: ["finances:read", "knowledge:read"],
+    });
   });
 
-  it("accepted_proposal_readable_after_original_blocked", async () => {
+  async function proposeMonday(core?: boolean) {
     const original = await f.save(f.owner, fact("Tuesday"));
     const proposal = await f.act(f.agent, original, {
       action: "revise",
@@ -577,18 +630,84 @@ describe("agent-managed memory authority", () => {
         value: { ...original.content.value, value: { type: "string", value: "Monday" } },
       } as KnowledgeRecord["content"],
       evidence: [chatStatement("Monday instead.")],
+      ...(core === undefined ? {} : { core }),
     });
+    return { original: await f.get(f.owner, original.id), proposal };
+  }
+
+  it("accepted_proposal_stays_blocked_after_original_blocked", async () => {
+    const { original, proposal } = await proposeMonday();
     await f.act(f.owner, original, { action: "set_access", agentAccess: "blocked" });
     await expect(f.records.get(f.agent, { id: proposal.id })).rejects.toMatchObject({
       status: 404,
     });
     await f.act(f.owner, proposal, { action: "resolve_conflict", keep: "proposed" });
-    expect(await f.get(f.agent, proposal.id)).toMatchObject({
+    // The person blocked the memory the proposal replaces; accepting it never unblocks it (R21).
+    expect(await f.get(f.owner, proposal.id)).toMatchObject({
       status: "active",
       ownerHeld: true,
+      agentAccess: "blocked",
       supersededBy: null,
     });
-    expect(await f.ids(f.agent)).toEqual([proposal.id]);
+    await expect(f.records.get(f.agent, { id: proposal.id })).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(await f.ids(f.agent)).toEqual([]);
+  });
+
+  it("accepted_proposal_keeps_original_sensitivity_and_leaves_the_core", async () => {
+    const { original, proposal } = await proposeMonday(true);
+    expect(proposal).toMatchObject({ core: true, sensitivity: "standard" });
+    await f.act(f.owner, original, { action: "set_sensitivity", sensitivity: "sensitive" });
+    const accepted = await f.act(f.owner, proposal, {
+      action: "resolve_conflict",
+      keep: "proposed",
+    });
+    // The resolved proposal-to-original edge is still dropped (R11); only the settings carry.
+    expect(accepted).toMatchObject({ status: "active", sensitivity: "sensitive", core: false });
+    expect(await f.get(f.agent, proposal.id)).toMatchObject({
+      sensitivity: "sensitive",
+      agentAccess: "allowed",
+    });
+  });
+
+  it("accepted_proposal_keeps_a_standard_core_proposal_in_the_core", async () => {
+    const { proposal } = await proposeMonday(true);
+    const accepted = await f.act(f.owner, proposal, {
+      action: "resolve_conflict",
+      keep: "proposed",
+    });
+    expect(accepted).toMatchObject({
+      sensitivity: "standard",
+      core: true,
+      scope: { workspace: null },
+    });
+  });
+
+  it("accepted_proposal_keeps_the_original_workspace_when_both_are_restricted", async () => {
+    const { original, proposal } = await proposeMonday();
+    const mail = await f.newAgent(["knowledge:read", "knowledge:write", "mail:read"]);
+    const narrowed = await f.act(mail, proposal, { action: "restrict", workspace: "mail" });
+    await f.act(f.owner, original, { action: "restrict", workspace: "finances" });
+    const accepted = await f.act(f.owner, narrowed, {
+      action: "resolve_conflict",
+      keep: "proposed",
+    });
+    expect(accepted).toMatchObject({
+      scope: { workspace: "finances" },
+      requiredReadScopes: ["finances:read", "knowledge:read"],
+    });
+  });
+
+  it("accepted_proposal_keeps_its_own_workspace_over_an_unrestricted_original", async () => {
+    const { proposal } = await proposeMonday();
+    const mail = await f.newAgent(["knowledge:read", "knowledge:write", "mail:read"]);
+    const narrowed = await f.act(mail, proposal, { action: "restrict", workspace: "mail" });
+    const accepted = await f.act(f.owner, narrowed, {
+      action: "resolve_conflict",
+      keep: "proposed",
+    });
+    expect(accepted).toMatchObject({ scope: { workspace: "mail" } });
   });
 
   it("agent_tokens_cannot_use_owner_actions_over_http", async () => {

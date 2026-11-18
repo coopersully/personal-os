@@ -157,7 +157,11 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
     return write;
   }
 
-  /** Activate the proposal and supersede every record it proposed to change. */
+  /**
+   * Activate the proposal and supersede every record it proposed to change. The accepted record
+   * keeps the narrowest privacy settings of the proposal and its originals (R21): the person may
+   * have blocked, marked sensitive or restricted the original while the proposal waited.
+   */
   async function acceptProposal(
     tx: KnowledgeTransaction,
     principal: Principal,
@@ -171,11 +175,16 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
     write.metadata.disputedBy = null;
     write.record = { ...write.record, ownerHeld: true, lastConfirmedAt: at };
     const superseded: { write: RevisionWrite; before: KnowledgeRecordSnapshot }[] = [];
+    let originalWorkspace: KnowledgeRecordSnapshot["scope"]["workspace"] = null;
     for (const id of originalIds) {
       const original = await ownedKnowledgeRevision(tx, principal, id, true);
       // Another proposal already replaced it; activating this one too would leave two.
       if (original.snapshot.status === "superseded")
         throw new AppError("conflict", "Another memory already replaced the original.");
+      if (original.agentAccess === "blocked")
+        write.record = { ...write.record, agentAccess: "blocked" };
+      if (original.snapshot.sensitivity === "sensitive") write.snapshot.sensitivity = "sensitive";
+      originalWorkspace ??= original.snapshot.scope.workspace;
       await validateSupersession(tx, principal, id, proposal.snapshot.id);
       const derivations = await knowledgeRevisionDerivations(tx, principal.userId, original);
       if (!original.hasSidecar)
@@ -185,6 +194,12 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
       retired.metadata.supersededBy = proposal.snapshot.id;
       superseded.push({ write: retired, before: original.snapshot });
     }
+    // A restricted original is narrower than an unrestricted proposal; between two different
+    // workspaces the original's restriction, which the person can see and set, stands.
+    if (originalWorkspace && originalWorkspace !== proposal.snapshot.scope.workspace)
+      rescope(write, proposal, originalWorkspace);
+    // The core never loads sensitive memory, so a sensitive result leaves it.
+    if (write.snapshot.sensitivity === "sensitive") write.record = { ...write.record, core: false };
     return superseded;
   }
 

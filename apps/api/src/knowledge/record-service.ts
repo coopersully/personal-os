@@ -29,6 +29,7 @@ import {
   knowledgeReadInputSchema,
   knowledgeRecordSnapshotSchema,
   knowledgeValiditySchema,
+  knowledgeWorkspaceSchema,
 } from "@personal-os/domain";
 import { and, eq, inArray } from "drizzle-orm";
 import { auditValues } from "../audit.js";
@@ -74,6 +75,12 @@ export type RevisionWrite = {
 };
 
 export const knowledgeWriteScopes: AccessScope[] = ["knowledge:read", "knowledge:write"];
+const knowledgeWorkspaceScopes = new Set<AccessScope>(
+  knowledgeWorkspaceSchema.options.map((workspace) => `${workspace}:read` as const),
+);
+function isKnowledgeWorkspaceScope(scope: AccessScope) {
+  return knowledgeWorkspaceScopes.has(scope);
+}
 
 export function knowledgeRequestHash(principal: Principal, input: unknown) {
   return createHash("sha256")
@@ -220,9 +227,11 @@ export async function prepareKnowledgeRevision({
   asProposal?: boolean;
 }): Promise<RevisionWrite> {
   const snapshot = current?.snapshot;
+  // The record's own workspace is added below; a workspace scope an earlier revision inherited
+  // from a source is not carried forward (R22).
   const requiredReadScopes = new Set<AccessScope>([
     "knowledge:read",
-    ...(snapshot?.requiredReadScopes ?? []),
+    ...(snapshot?.requiredReadScopes ?? []).filter((scope) => !isKnowledgeWorkspaceScope(scope)),
   ]);
   const currentClaim = current
     ? knowledgeClaimContent(current.snapshot, current.metadata.generatedInference)
@@ -256,7 +265,11 @@ export async function prepareKnowledgeRevision({
     if (exactRevision !== undefined && source.snapshot.revision !== exactRevision)
       throw new AppError("conflict", "The knowledge source revision changed.");
     if (kind) {
-      for (const scope of source.snapshot.requiredReadScopes) requiredReadScopes.add(scope);
+      // A source's workspace narrows this record when it is read, so a later widening of the
+      // source widens this record too (R22). Scopes read-time narrowing does not re-derive once
+      // the source is trashed or purged (goals, texting) stay with the derived record.
+      for (const scope of source.snapshot.requiredReadScopes)
+        if (!isKnowledgeWorkspaceScope(scope)) requiredReadScopes.add(scope);
       derivations.push({ sourceRecordId: id, sourceRevision: source.snapshot.revision, kind });
     }
     return source;

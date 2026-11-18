@@ -25,6 +25,8 @@ describe("native Settings navigation", () => {
     const before = JSON.stringify(settingsDestinations);
     expect(searchSettings("  TIMEZONE ", available).map((row) => row.id)).toEqual(["profile"]);
     expect(searchSettings("account email", available).map((row) => row.id)).toEqual(["profile"]);
+    expect(searchSettings("memory tags", available).map((row) => row.id)).toEqual(["memory"]);
+    expect(searchSettings("conflicts", available).map((row) => row.id)).toEqual(["memory"]);
     expect(searchSettings("unmatched", available)).toEqual([]);
     expect(JSON.stringify(settingsDestinations)).toBe(before);
   });

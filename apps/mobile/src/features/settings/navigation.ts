@@ -50,7 +50,7 @@ export const settingsDestinations = [
     label: "Memory",
     group: "Personal",
     icon: "history",
-    keywords: "knowledge preferences export trash delete",
+    keywords: "knowledge preferences tags conflicts archive export trash delete",
   },
   {
     id: "tasks",

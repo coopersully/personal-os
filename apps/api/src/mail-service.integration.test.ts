@@ -915,8 +915,20 @@ describe.sequential("mail service", () => {
     );
     await service.snoozeThread(userId, threadId, new Date("2026-07-18T12:00:00.000Z"));
     await expect(service.listThreads(userId, { limit: 100, snoozed: true })).resolves.toEqual([
-      expect.objectContaining({ id: threadId }),
+      expect.objectContaining({ id: threadId, snoozedUntil: "2026-07-18T12:00:00.000Z" }),
     ]);
+    expect(
+      (await service.listThreads(userId, { limit: 100 })).map((thread) => thread.snoozedUntil),
+    ).toEqual([undefined]);
+    // Ending a snooze puts the conversation back in the default list, and can be repeated.
+    await service.unsnoozeThread(userId, threadId);
+    await service.unsnoozeThread(userId, threadId);
+    await expect(service.listThreads(userId, { limit: 100, snoozed: true })).resolves.toEqual([]);
+    await expect(service.listThreads(userId, { limit: 100 })).resolves.toHaveLength(2);
+    await expect(
+      service.unsnoozeThread("00000000-0000-4000-8000-000000000000", threadId),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await service.snoozeThread(userId, threadId, new Date("2026-07-18T12:00:00.000Z"));
     await expect(
       service.listThreads(userId, { limit: 100, mailboxId: disabledAccountId }),
     ).rejects.toMatchObject({ code: "not_found" });
@@ -1020,6 +1032,9 @@ describe.sequential("mail service", () => {
     await expect(
       service.snoozeThread(userId, disabledAccountId, new Date("2026-07-18T12:00:00.000Z")),
     ).rejects.toMatchObject({ code: "not_found" });
+    await expect(service.unsnoozeThread(userId, disabledAccountId)).rejects.toMatchObject({
+      code: "not_found",
+    });
     expect(gateway.update).not.toHaveBeenCalled();
 
     const organized = await service.updateThread(

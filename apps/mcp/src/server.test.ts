@@ -868,6 +868,7 @@ function mockApi() {
       updatedIds: items.map((item) => item.id),
     })),
     snoozeMailThread: vi.fn(async () => undefined),
+    unsnoozeMailThread: vi.fn(async () => undefined),
     getMailStatus: vi.fn(async () => ({
       activeRun: null,
       domain: "mail" as const,
@@ -1659,6 +1660,7 @@ describe("Personal OS MCP server", () => {
         "update_mail",
         "bulk_update_mail",
         "snooze_mail",
+        "unsnooze_mail",
         "create_mail_attention_item",
         "list_mail_rules",
         "preview_mail_rule",
@@ -1696,6 +1698,7 @@ describe("Personal OS MCP server", () => {
       "update_mail",
       "bulk_update_mail",
       "snooze_mail",
+      "unsnooze_mail",
       "create_mail_attention_item",
       "create_mail_rule",
       "update_mail_rule",
@@ -2124,6 +2127,9 @@ describe("Personal OS MCP server", () => {
       name: "snooze_mail",
       arguments: { id, until: "2026-07-14T12:00:00.000Z" },
     });
+    const unsnoozed = await client.callTool({ name: "unsnooze_mail", arguments: { id } });
+    expect(unsnoozed.isError).not.toBe(true);
+    expect(unsnoozed.structuredContent).toMatchObject({ result: { snoozed: false } });
     await client.callTool({
       name: "create_mail_attention_item",
       arguments: {
@@ -2369,6 +2375,7 @@ describe("Personal OS MCP server", () => {
       unread: false,
     });
     expect(api.snoozeMailThread).toHaveBeenCalledWith(id, "2026-07-14T12:00:00.000Z");
+    expect(api.unsnoozeMailThread).toHaveBeenCalledExactlyOnceWith(id);
     expect(api.upsertDomainProfile).toHaveBeenCalledWith(
       expect.objectContaining({ domain: "mail", status: "draft" }),
     );

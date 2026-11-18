@@ -2078,6 +2078,15 @@ export const agentOperationDefinitions = {
     supportingRead: false,
     risk: "ordinary",
   },
+  unsnooze_mail: {
+    readOnly: false,
+    legacyScopes: ["mail:write"],
+    scopeMatch: "all",
+    capabilities: ["records"],
+    workspace: "mail",
+    supportingRead: false,
+    risk: "ordinary",
+  },
   create_mail_attention_item: {
     readOnly: false,
     legacyScopes: ["mail:write"],

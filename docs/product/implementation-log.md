@@ -1507,6 +1507,26 @@ details, and restore a deleted event from the delete toast's Undo.
   write against a real Google or iCloud calendar are outstanding. It is not a production or
   TestFlight release.
 
+## 2026-11-17 — nohmi web links open in the iPhone app (local candidate)
+
+COO-233 — The iPhone app can claim nohmi web links to a task, reminder, transaction, calendar
+event or mail conversation and open the matching screen (Universal Links).
+
+- The app validates a handed-over link against the configured web origin and a fixed list of
+  record links, queues it, and opens it once signed in; a conversation opens in the shared Mail
+  reader. Unknown links are rejected with one Sonner error. No API or schema change.
+- Production configuration: the web app now ships
+  `/.well-known/apple-app-site-association`, nginx serves it as JSON, and signed builds carry the
+  `applinks:` associated-domains entitlement for their HTTPS web origin.
+- `/plaid/return` is reserved in the association file as the bank sign-in return link for
+  COO-234. The app drops it without reading its parameters; nothing uses it yet.
+- Not in effect until three things happen outside the repository: the web change is deployed, a
+  new signed build is installed, and the Apple App ID has the Associated Domains capability. See
+  "iPhone Universal Links" in `docs/engineering/external-boundary-reliability.md`.
+- This is a local candidate covered by parsing, opener, nginx and build-output tests. No link has
+  been opened on a device or simulator; Apple's fetch of the file and the signed entitlement are
+  unverified. It is not a production or TestFlight release.
+
 ## 2026-11-16 — Native Calendar blocks, conflicts and free-time check (local candidate)
 
 COO-242 — On iPhone a person can block an event's time on their other calendars as Busy or

@@ -122,7 +122,9 @@ export function createMailApiClient(
       await request<void>(`/v1/mail/drafts/${id}`, { method: "DELETE" });
     },
     async getMailThread(id) {
-      const response = await request<{ thread: MailThread }>(`/v1/mail/threads/${id}`);
+      const response = await request<{ thread: MailThread }>(
+        `/v1/mail/threads/${encodeURIComponent(id)}`,
+      );
       return response.thread;
     },
     async getMailSetupContext() {
@@ -131,7 +133,7 @@ export function createMailApiClient(
     },
     async listMailMessages(threadId) {
       const response = await request<{ messages: MailMessage[] }>(
-        `/v1/mail/threads/${threadId}/messages`,
+        `/v1/mail/threads/${encodeURIComponent(threadId)}/messages`,
       );
       return response.messages;
     },

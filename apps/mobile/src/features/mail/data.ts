@@ -1,3 +1,5 @@
+import { ApiClientError } from "@personal-os/api-client";
+import { type MailThreadSummary, mailThreadSummarySchema } from "@personal-os/domain";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
@@ -93,6 +95,82 @@ export function useMailMessages(threadId: string) {
     gcTime: 0,
     staleTime: 0,
   });
+}
+
+/** Open Mail attention items, as Today reads them. `enabled` keeps other mailboxes from asking. */
+export function useMailAttention(enabled = true) {
+  const { api, owner } = useMail();
+  return useQuery({
+    queryKey: ["mail", owner, "attention"],
+    meta,
+    enabled: enabled && !!owner,
+    queryFn: () => api.listAttentionItems({ domain: "mail", status: "open", limit: 100 }),
+  });
+}
+
+/** When a findings read was made for an action that reports its own outcome, by cached query. */
+const ownedReads = new WeakMap<object, { from: number; to: number }[]>();
+
+/**
+ * What the steward recorded about one conversation. It quotes the conversation, so like the
+ * messages it is held only while the reader is open. `failedAt` is set while a failed read is
+ * still unreported; `reread` reads again for an action that reports the outcome itself (an
+ * answer, a pull), so a failure there never raises a second toast.
+ */
+export function useMailStewardship(threadId: string) {
+  const { api, owner } = useMail();
+  const client = useQueryClient();
+  const queryKey = ["mail", owner, "stewardship", threadId];
+  const query = useQuery({
+    queryKey,
+    meta,
+    enabled: !!owner,
+    queryFn: () => api.getMailThreadStewardship(threadId),
+    gcTime: 0,
+    staleTime: 0,
+  });
+  const cached = client.getQueryCache().find({ queryKey, exact: true });
+  const reread = async () => {
+    const owned = { from: Date.now(), to: Number.POSITIVE_INFINITY };
+    if (cached) ownedReads.set(cached, [...(ownedReads.get(cached) ?? []), owned]);
+    try {
+      return await query.refetch();
+    } finally {
+      owned.to = Date.now();
+    }
+  };
+  const at = query.errorUpdatedAt;
+  const owned = cached && ownedReads.get(cached)?.some(({ from, to }) => at >= from && at <= to);
+  return { ...query, reread, failedAt: query.isError && !owned ? at : 0 };
+}
+
+/**
+ * Reads one conversation the list has not loaded, as a body-free summary: the reader loads the
+ * message text itself. One toast covers the wait and is dismissed once the conversation opens.
+ */
+export function useMailThreadRead() {
+  const { api, owner } = useMail();
+  const { session } = useAuth();
+  return async (id: string): Promise<MailThreadSummary | null> => {
+    const toastId = `mail-open-${owner}`;
+    const epoch = session.epoch();
+    toast.loading("Opening conversation…", { id: toastId });
+    try {
+      const thread = mailThreadSummarySchema.parse(await api.getMailThread(id));
+      toast.dismiss(toastId);
+      // A conversation that arrives after the account changed belongs to nobody on screen.
+      return session.epoch() === epoch ? thread : null;
+    } catch (error) {
+      if (session.epoch() !== epoch) toast.dismiss(toastId);
+      else if (error instanceof ApiClientError && error.status === 404)
+        toast.error("This conversation is no longer available.", { id: toastId });
+      else
+        toast.error("Couldn’t open this conversation. Check your connection and try again.", {
+          id: toastId,
+        });
+      return null;
+    }
+  };
 }
 
 /** Native tabs stay mounted; revalidate stale Mail reads on return and on foreground. */

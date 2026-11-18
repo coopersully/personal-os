@@ -143,6 +143,10 @@ vi.mock("../auth/context", () => ({
   }),
 }));
 vi.mock("./data", () => ({
+  useSettingsListPublisher: (name: string) => async (update: (records: unknown[]) => unknown[]) => {
+    h.publish(["settings", "fixture", 1, name], update);
+    return true;
+  },
   useSettingsResource: (key: string) => ({
     data: key.startsWith("guidance-") ? h.guidance : h.resources[key],
     isPending: h.pending.has(key),
@@ -663,7 +667,15 @@ it("configures Calendar visibility and local deletion, opening creation without 
 it("opens actual related native settings and disables a named Mail rule only after confirmation", async () => {
   h.guidance = mailGuidance();
   h.resources["mail-rules"] = [
-    { id: identifier(6), name: "Old rule", version: 8, enabled: true, policy: "approved_rule" },
+    {
+      id: identifier(6),
+      name: "Old rule",
+      version: 8,
+      enabled: true,
+      policy: "approved_rule",
+      condition: { field: "sender", operator: "contains", value: "old@example.com" },
+      actions: [{ type: "archive", afterDays: 0, mailboxId: null }],
+    },
   ];
   const disable = vi.fn().mockResolvedValue({
     id: identifier(6),
@@ -671,6 +683,8 @@ it("opens actual related native settings and disables a named Mail rule only aft
     version: 9,
     enabled: false,
     policy: "approved_rule",
+    condition: { field: "sender", operator: "contains", value: "old@example.com" },
+    actions: [{ type: "archive", afterDays: 0, mailboxId: null }],
   });
   h.api = { updateMailRule: disable };
   const { rerender } = render(<MailSettingsScreen />);

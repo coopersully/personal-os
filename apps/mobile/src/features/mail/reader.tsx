@@ -11,9 +11,16 @@ import { SettingsAccentProvider } from "../../components/settings-accent";
 import { SheetHeader } from "../../components/sheet-header";
 import { spacing, useTheme } from "../../theme";
 import { MailComposer } from "./composer";
-import { confirmMailRead, retryMailRead, useMailAccounts, useMailMessages } from "./data";
+import {
+  confirmMailRead,
+  retryMailRead,
+  useMailAccounts,
+  useMailMessages,
+  useMailStewardship,
+} from "./data";
 import { type ComposeStart, forwardStart, replyStart } from "./draft-logic";
 import { actionsKey, senderName } from "./logic";
+import { ThreadStewardship } from "./stewardship";
 
 const people = (addresses: MailAddress[]) => addresses.map(senderName).join(", ");
 
@@ -40,6 +47,8 @@ export function MailReader({
   const t = useTheme();
   const messages = useMailMessages(thread.id);
   const accounts = useMailAccounts();
+  // Shared with the findings section below; here only so a pull re-reads it with the messages.
+  const found = useMailStewardship(thread.id);
   const [composing, setComposing] = useState<ComposeStart | null>(null);
   const loaded = messages.data;
   const own = accounts.data?.find((account) => account.accountId === thread.accountId)?.email;
@@ -88,7 +97,12 @@ export function MailReader({
         <ScrollView
           alwaysBounceVertical
           refreshControl={
-            <PageRefreshControl onRefresh={() => confirmMailRead(messages.refetch())} />
+            <PageRefreshControl
+              // The pull answers for both reads, so a failure of either is one toast.
+              onRefresh={() =>
+                Promise.all([confirmMailRead(messages.refetch()), confirmMailRead(found.reread())])
+              }
+            />
           }
           contentContainerStyle={{ padding: spacing.page, gap: spacing.xl }}
         >
@@ -98,6 +112,7 @@ export function MailReader({
           >
             {thread.subject || "No subject"}
           </Text>
+          <ThreadStewardship threadId={thread.id} />
           {messages.isPending && <ActivityIndicator accessibilityLabel="Loading conversation" />}
           {messages.isError && !messages.data && (
             <View style={{ gap: spacing.sm }}>

@@ -306,7 +306,9 @@ merged or deployed; the [implementation log](implementation-log.md) records what
   already replaced returns 409, while keeping the current memory still retires it.
 - **Agent access.** `knowledge:read` and `knowledge:write` are default grants for new OAuth
   consents and personal access tokens. Migration `0146` backfills both onto every live agent
-  credential that holds a workspace scope and no memory scope, with an audit row each. The consent screen and
+  credential that holds a workspace scope and no memory scope, with an audit row each. A credential
+  the previous API process issues during the release, after the migration, has no memory until the
+  person re-authorizes that connection. The consent screen and
   Agents settings on web and iPhone list them. The person cannot yet remove only the memory scopes
   from a connection; the current way is to revoke the connection and issue a new one without them.
   Per-scope removal is a known gap.

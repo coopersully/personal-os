@@ -164,7 +164,10 @@ than recovered. 0146 creates the knowledge records, revisions, revision metadata
 relationships, derivations, receipts, owner epochs, tags, tag aliases, tag merges, record-tag links
 and tombstones, with owner-composite cascading keys so a purge or account deletion removes
 dependent rows. It also backfills `knowledge:read` and `knowledge:write`, once and with an audit
-row each, onto every live agent credential that holds a workspace scope and no memory scope.
+row each, onto every live agent credential that holds a workspace scope and no memory scope. The
+backfill is not run again: a credential the previous API process issues between the migration and
+the new process taking over carries no memory scope, and gets memory only when the person
+re-authorizes that connection.
 
 Local worktree databases that ran an earlier branch migration are recreated rather than adopted
 in place. Before merge, the production database is checked for any `knowledge_*` tables; if any

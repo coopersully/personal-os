@@ -151,6 +151,8 @@ CREATE TRIGGER knowledge_invalidate_goal_source AFTER DELETE ON "goals"
 -- audit row each. An OAuth access token stays live while the refresh token issued with it is,
 -- because refresh copies that row's scopes; this mirrors activeHostConnectionGrant. A credential
 -- that already holds either memory scope keeps the person's choice, so a second run changes nothing.
+-- It runs once, with this migration: a credential the previous API process issues after it gets
+-- memory only when the person re-authorizes that connection.
 -- scope-backfill.integration.test.ts runs exactly the statement between these markers.
 -- memory-scope-backfill:begin
 WITH workspace_scopes AS (

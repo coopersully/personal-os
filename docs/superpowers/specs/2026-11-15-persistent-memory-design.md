@@ -352,7 +352,9 @@ non-throwaway database turns out to hold them, work stops and Cooper decides.
 - A one-time migration adds both scopes to every existing, unrevoked agent credential (OAuth grants,
   their refresh and access tokens, personal access tokens, and automation-host connections) that
   already holds any workspace scope. Token refresh still never adds scopes on its own; the backfill
-  is the only widening.
+  is the only widening, and it is not run again. A credential the previous API process issues
+  between the migration and the new process taking over has no memory scope; it gets memory when
+  the person re-authorizes that connection.
 - The memory sections in `maintain_finances` and `maintain_mail` require `knowledge:read`, which
   those hosts receive through the backfill.
 - The person can remove memory scopes from any connection in Agents settings, like any other scope.

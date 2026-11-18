@@ -7,6 +7,9 @@
   are active at once with 1-8 tags; inferences stay labeled `inferred`. Agents can revise,
   supersede, dispute, archive, unarchive, restrict, raise sensitivity and merge tags. An agent
   change to a memory the person holds becomes a linked proposal and a visible conflict.
+- Memory is stored per owner with immutable revisions, source attribution, links, exact-retry
+  receipts and audit rows that carry no memory values. Workspace and source grants are checked
+  again on every read and retry, so a narrowed or revoked credential loses access at once.
 - `get_ilo_context` carries a session-start memory core of up to 4 KiB: `core` memories, the tag
   index and counts, with truncation reported. `maintain_finances` starts and every `maintain_mail`
   response carry a memory section of up to 16 KiB for that workspace. Sensitive memory is left out
@@ -21,7 +24,9 @@
 - `knowledge:read` and `knowledge:write` are default scopes for new OAuth consents and personal
   access tokens. Migration `0146_persistent_memory`, the only memory migration, creates the storage
   and backfills both scopes onto every live agent credential holding a workspace scope, with an
-  audit row each. Consent and Agents settings on web and iPhone show the memory line.
+  audit row each. A credential the previous API process issues during the release, after the
+  migration, has no memory until the person re-authorizes that connection. Consent and Agents
+  settings on web and iPhone show the memory line.
 - MCP tool descriptions teach agents to save as soon as something important is said, search
   before saving, reuse tags, mark lasting memories `core`, update instead of duplicating, and check
   origin, freshness and conflicts before acting. Memory grants no permission.
@@ -187,17 +192,6 @@ Corrections to the iPhone work in the entry below, on the same branch.
   idempotency remain release work. Workspace agent/setup/import settings and global archived search
   remain outside this first mobile workspace pass. Container icon/color metadata is editable but
   the mobile directory currently uses semantic list/project icons.
-
-## 2026-10-26 — Scoped knowledge save/read foundation
-
-- Added typed, owner-isolated knowledge persistence with initial immutable revisions, source attribution,
-  relationships, retry receipts, and redacted mutation audit events. Existing agent grants stay unchanged.
-- Registered authenticated API, typed client and MCP save/read paths require explicit knowledge scopes
-  and purpose; workspace/source grants are checked again on reads and retries. Sensitive agent access
-  remains blocked, and unsourced interpretations remain proposed inference.
-- Real PostgreSQL tests cover concurrent retries, owner isolation, live revocation and scope narrowing,
-  source revisions, disclosure inheritance, limits, deletion cascade, and the registered MCP/client/API path.
-  This is source evidence; production deployment and the remaining knowledge lifecycle are not claimed.
 
 ## 2026-10-22 — Native settings and populated source rows
 

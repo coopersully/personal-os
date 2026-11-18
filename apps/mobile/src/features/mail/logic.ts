@@ -1,5 +1,12 @@
 import { ApiClientError } from "@personal-os/api-client";
-import type { MailAddress, Mailbox, MailboxRole, MailThreadSummary } from "@personal-os/domain";
+import type {
+  AttentionItem,
+  MailAddress,
+  Mailbox,
+  MailboxRole,
+  MailStewardshipQuestion,
+  MailThreadSummary,
+} from "@personal-os/domain";
 import type { IconName } from "../../components/icons";
 
 export const MAIL_PAGE_SIZE = 50;
@@ -218,4 +225,59 @@ export function actionsKey(actions: readonly { id: string; icon: string }[]) {
 
 export function conversations(count: number) {
   return count === 1 ? "1 conversation" : `${count} conversations`;
+}
+
+const importanceRank = { critical: 0, high: 1, normal: 2, low: 3 } as const;
+
+/** Open Mail attention that is still current, most important first, newest first within a level. */
+export function mailAttention(items: AttentionItem[], now: Date) {
+  return items
+    .filter(
+      (item) =>
+        item.status === "open" &&
+        item.kind !== "run_summary" &&
+        (!item.expiresAt || Date.parse(item.expiresAt) > now.getTime()),
+    )
+    .sort(
+      (a, b) =>
+        importanceRank[a.importance] - importanceRank[b.importance] ||
+        b.updatedAt.localeCompare(a.updatedAt),
+    );
+}
+
+/** The conversation an attention item is about, when it is about one. */
+export function attentionThreadId(
+  item: Pick<AttentionItem, "relatedEntityId" | "relatedEntityType">,
+) {
+  return item.relatedEntityType === "mail_thread" ? item.relatedEntityId : null;
+}
+
+/** A stored kind or state as a person reads it: `follow_up` is "Follow up". */
+export function stewardLabel(value: string) {
+  const words = value.replaceAll("_", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** What a question rests on, named once each: "this conversation and a calendar event". */
+export function evidenceSummary(evidence: MailStewardshipQuestion["evidence"]) {
+  const names = [
+    ...new Set(
+      evidence.map(({ sourceType }) =>
+        sourceType === "mail_thread"
+          ? "this conversation"
+          : `${/^[aeiou]/.test(sourceType) ? "an" : "a"} ${sourceType.replaceAll("_", " ")}`,
+      ),
+    ),
+  ];
+  return new Intl.ListFormat("en", { type: "conjunction" }).format(names);
+}
+
+/** What to say when an answer to a steward question was not confirmed as saved. */
+export function answerFailure(error: unknown) {
+  if (!mailWriteRejected(error))
+    return "Couldn’t confirm the answer was sent. Check the question once it reloads before trying again.";
+  const status = (error as ApiClientError).status;
+  if (status === 409) return "This question changed elsewhere.";
+  if (status === 404) return "This question is no longer available.";
+  return "Couldn’t send the answer. It was not saved.";
 }

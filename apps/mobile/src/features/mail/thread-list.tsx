@@ -1,6 +1,6 @@
 import type { MailThreadSummary } from "@personal-os/domain";
 import { useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Text, View } from "react-native";
 import { BackLink } from "../../components/back-link";
 import { Action } from "../../components/forms/form-rows";
@@ -9,12 +9,15 @@ import { PageRefreshControl } from "../../components/page-refresh";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import { useWorkspaceHeaderInset } from "../../components/workspace-header-inset";
 import { spacing, useTheme } from "../../theme";
+import { MailAttention } from "./attention";
 import { MailComposer } from "./composer";
 import {
   confirmMailRead,
   retryMailRead,
   useMailAccounts,
+  useMailAttention,
   useMailRevalidation,
+  useMailThreadRead,
   useMailThreads,
 } from "./data";
 import { newStart } from "./draft-logic";
@@ -42,6 +45,10 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
   const { mailSearch = "" } = useLocalSearchParams<{ mailSearch?: string }>();
   const { threads, query, searching } = useMailThreads(scope, mailSearch);
   const accounts = useMailAccounts();
+  const inbox = scope.kind === "inbox";
+  const attention = useMailAttention(inbox);
+  const readThread = useMailThreadRead();
+  const reading = useRef(0);
   useMailRevalidation();
   const triage = useMailTriage();
   const [opened, setOpen] = useState<MailThreadSummary | null>(null);
@@ -79,6 +86,16 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
     picked.filter((thread) => triage.allows(action, thread)).length;
   const actions = (thread: MailThreadSummary, onLeave?: () => void) =>
     triage.actions(thread, { onLeave, snoozed, onSnooze: () => setSnoozing(thread) });
+  // An attention item can be about a conversation this list has not loaded; read that one.
+  const openThread = (id: string) => {
+    reading.current += 1;
+    const request = reading.current;
+    const listed = rows.find((thread) => thread.id === id);
+    if (listed) return setOpen(listed);
+    void readThread(id).then((thread) => {
+      if (thread && request === reading.current) setOpen(thread);
+    });
+  };
   const sheet = snoozing && (
     <SnoozeSheet
       count={snoozing === "selection" ? picked.length : 1}
@@ -112,7 +129,11 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
           <PageRefreshControl
             offset={inset}
             onRefresh={() =>
-              Promise.all([confirmMailRead(threads.refetch()), confirmMailRead(accounts.refetch())])
+              Promise.all([
+                confirmMailRead(threads.refetch()),
+                confirmMailRead(accounts.refetch()),
+                ...(inbox ? [confirmMailRead(attention.refetch())] : []),
+              ])
             }
           />
         }
@@ -209,6 +230,8 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
                 </View>
               </SettingsAccentProvider>
             )}
+            {/* The selection bar and search results own this space while they are showing. */}
+            {inbox && !selecting && !query && <MailAttention onOpen={openThread} />}
           </View>
         }
         renderItem={({ item }) => (

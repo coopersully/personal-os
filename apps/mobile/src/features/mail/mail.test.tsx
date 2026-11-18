@@ -99,6 +99,12 @@ vi.mock("../auth/context", () => ({
         updateMailThread: h.update,
         snoozeMailThread: h.snooze,
         listMailDrafts: h.drafts,
+        listAttentionItems: async () => [],
+        getMailThreadStewardship: async () => ({
+          disposition: null,
+          obligations: [],
+          questions: [],
+        }),
       }),
     },
   }),

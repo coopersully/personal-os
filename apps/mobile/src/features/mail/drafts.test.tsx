@@ -96,6 +96,12 @@ vi.mock("../auth/context", () => ({
         sendMailDraft: h.send,
         reconcileMailDraft: h.reconcile,
         updateMailThread: vi.fn(),
+        listAttentionItems: async () => [],
+        getMailThreadStewardship: async () => ({
+          disposition: null,
+          obligations: [],
+          questions: [],
+        }),
       }),
     },
   }),

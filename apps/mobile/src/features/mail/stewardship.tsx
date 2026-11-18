@@ -7,10 +7,11 @@ import { toast } from "sonner-native";
 import { Action, Actions } from "../../components/forms/form-rows";
 import { InlineOptions } from "../../components/forms/inline-options";
 import { SettingsAccentProvider } from "../../components/settings-accent";
+import { storedLabel } from "../../product/labels";
 import { spacing, useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { useMail, useMailStewardship } from "./data";
-import { answerFailure, evidenceSummary, stewardLabel } from "./logic";
+import { answerFailure, evidenceSummary } from "./logic";
 
 const day = (value: string) =>
   new Date(value).toLocaleDateString([], { month: "short", day: "numeric" });
@@ -93,14 +94,14 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
         </Text>
         {data.disposition && (
           <View style={{ gap: 4 }}>
-            <Text style={title}>{stewardLabel(data.disposition.disposition)}</Text>
+            <Text style={title}>{storedLabel(data.disposition.disposition)}</Text>
             <Text style={detail}>{data.disposition.rationale}</Text>
           </View>
         )}
         {obligations.map((obligation) => (
           <View key={obligation.id} style={{ gap: 4 }}>
             <Text style={title}>
-              {stewardLabel(obligation.kind)}
+              {storedLabel(obligation.kind)}
               {obligation.dueAt ? ` · Due ${day(obligation.dueAt)}` : ""}
             </Text>
             <Text style={detail}>{obligation.rationale}</Text>

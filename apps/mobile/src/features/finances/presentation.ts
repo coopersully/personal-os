@@ -1,5 +1,3 @@
-import type { FinanceSpendingScope } from "@personal-os/domain";
-
 export function formatMoney(
   value: number | null | undefined,
   currency: string | null | undefined,
@@ -19,41 +17,6 @@ export function currencyForTotals(
   const codes = new Set(accounts.map((account) => account.currencyCode));
   return codes.size === 1 ? ([...codes][0] ?? null) : null;
 }
-export function periodScope(
-  period: "week" | "month",
-  timezone: string,
-  now = new Date(),
-): FinanceSpendingScope {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(now);
-  const part = (key: string) => Number(parts.find((item) => item.type === key)?.value);
-  const date = new Date(Date.UTC(part("year"), part("month") - 1, part("day")));
-  const start = new Date(date);
-  const end = new Date(date);
-  if (period === "month") {
-    start.setUTCDate(1);
-    end.setUTCMonth(end.getUTCMonth() + 1, 0);
-  } else {
-    start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7));
-    end.setTime(start.getTime());
-    end.setUTCDate(end.getUTCDate() + 6);
-  }
-  return {
-    from: start.toISOString().slice(0, 10),
-    through: end.toISOString().slice(0, 10),
-    timezone,
-    accountIds: null,
-    categoryIds: null,
-    basis: "personal_cost",
-    includePending: true,
-    subtractRefunds: true,
-  };
-}
-
 export function upcomingScope(timezone: string, now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,

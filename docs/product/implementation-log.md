@@ -1,11 +1,45 @@
 # nohmi — Implementation Log
 
+## 2026-11-18 — iPhone refinement of the remaining slices (local candidate)
+
+Corrections to the iPhone work in the entry below, on the same branch.
+
+- Spending — Summary opens on the saved Spending view; a saved bubbles view opens as List. A
+  custom range that cannot be read keeps the Transactions list on the last usable range and says
+  which dates are shown. Overview, Budget and Spending share one period calculation.
+- Finance conversation — showing the transcript at its latest message records it as read through
+  that message, however many earlier messages are unloaded.
+- Transaction editor — the accounts read's loading or failed state is shown where the Date field
+  goes.
+- Finance maintenance and automations — after an unknown outcome the latest run, or the
+  registrations, are read again before Start or Register is allowed again; a registration that
+  did arrive is reported as registered. The maintenance card shows the newer of the last response
+  and the run read. A confirmed automation write is reported when the server answers, with the
+  list read behind it.
+- Mail snooze — times are worked out in the planning time zone when a row is pressed, and a time
+  that is not ahead is refused before anything is sent. Snoozed rows show when each conversation
+  returns. End snooze removes the snooze and offers Undo back to the earlier time while it is
+  still ahead. Undoing an archive of a snoozed conversation no longer lists it in the inbox.
+- Mail selection — holds up to 100 conversations, cannot be changed or cancelled while its action
+  runs, and offers no Undo for read or unread.
+- Mail rules — Disable reports a timeout or server fault as not confirmed and reads the rules
+  again; a 409 says the rule changed elsewhere.
+- Settings — the "Calendar layout" and "Finance layout" groups say that week start (Calendar week
+  strip and the Spending week) and the Spending view apply on iPhone.
+- Two API additions, no schema change: `DELETE /v1/mail/threads/:id/snooze` ends a snooze (204,
+  repeatable, 404 for a conversation the person does not have), with `unsnoozeMailThread` in the
+  API client; and Mail threads carry an optional `snoozedUntil` when the snoozed list is read.
+- Tests were added or changed with each fix: mobile unit and screen tests, the Mail route and
+  service integration tests and the API client test.
+- Not verified: none of this has been run on a simulator or a device, there is no CI run, and
+  nothing is merged, deployed or verified in production. This is not a release.
+
 ## 2026-11-18 — iPhone completion: remaining slices (local candidate)
 
 - COO-229 — Spending reads on the account's saved Spending defaults and a saved default period, and
   the Assistant tab and its conversation show unread counts.
 - COO-241 — Mail conversations can be snoozed, and a long press starts a selection that marks
-  read or unread, archives or snoozes up to 50 conversations, one guarded write at a time.
+  read or unread, archives or snoozes up to 100 conversations, one guarded write at a time.
 - COO-254 — A manual transaction's date can be corrected from the iPhone edit form and from the web
   transaction dialog. A synced transaction's date still cannot be changed.
 - COO-228 — Finance setup (onboarding review, first budget draft and record maintenance, reached
@@ -17,7 +51,8 @@
   previewed and turned on from the preview.
 - COO-265 — A tracked audit exception for the unpatched picomatch advisory; its terms are in
   `docs/engineering/code-standards.md`.
-- The one API addition is an optional `date` on the transaction update. It is accepted only for a
+- The API addition in this entry is an optional `date` on the transaction update (the refinement
+  entry above adds two Mail ones). It is accepted only for a
   manual account's transaction, requires the revision the caller read (409 when it no longer
   matches), is refused for an agent that also sends a category, and is recorded in the audit event.
   The MCP `update_finance_transaction` tool accepts it under the same rules.
@@ -1605,6 +1640,10 @@ whether a proposed time is free while creating or editing.
 - Limits that need an API change: there is no route to end a snooze, so ending one records a
   snooze that has already passed; thread summaries do not carry when a snooze ends, so Snoozed
   shows no return time and an ended snooze cannot be undone.
+- Changed on 2026-11-18 (see the refinement entry at the top): a selection holds up to 100,
+  `DELETE /v1/mail/threads/:id/snooze` ends a snooze, snoozed conversations carry
+  `snoozedUntil`, Snoozed shows return times and an ended snooze offers Undo. The two limits
+  above no longer apply.
 - Focused Mail tests, mobile type checking and lint passed. Observed in the iPhone simulator on
   the demo fixture: snooze from a row and from an open conversation, the Snoozed list, End
   snooze, selection, and a selection snoozed and undone. The fixture mailbox refuses provider

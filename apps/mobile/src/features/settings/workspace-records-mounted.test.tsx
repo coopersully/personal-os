@@ -334,18 +334,13 @@ it.each([
     await confirmAction();
   } else fireEvent.click(await screen.findByLabelText("Show Personal"));
   await waitFor(() => expect(h.error).toHaveBeenCalledTimes(1));
-  expect(h.error).toHaveBeenCalledWith(
-    "Couldn’t confirm the result. Check your connection and refresh before retrying.",
-    {
-      id: route === "rule" ? "toast-id" : undefined,
-    },
-  );
+  const text =
+    route === "rule"
+      ? "Couldn’t confirm the rule was disabled. Check its status before trying again."
+      : "Couldn’t confirm the result. Check your connection and refresh before retrying.";
+  expect(h.error).toHaveBeenCalledWith(text, { id: route === "rule" ? "toast-id" : undefined });
   expect(screen.queryByText("Rejected by server")).not.toBeInTheDocument();
-  expect(
-    screen.queryByText(
-      "Couldn’t confirm the result. Check your connection and refresh before retrying.",
-    ),
-  ).not.toBeInTheDocument();
+  expect(screen.queryByText(text)).not.toBeInTheDocument();
   expect(h.success).not.toHaveBeenCalled();
   if (route === "rule") expect(screen.getByText("Status: Enabled")).toBeInTheDocument();
   else expect(screen.getByLabelText("Show Personal")).toBeChecked();

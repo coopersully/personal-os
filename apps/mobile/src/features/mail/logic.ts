@@ -7,12 +7,19 @@ import type {
   MailStewardshipQuestion,
   MailThreadSummary,
 } from "@personal-os/domain";
+import {
+  addLocalDays,
+  localDateAt,
+  localDateTimeToUtc,
+  localDateToIso,
+  sameLocalDate,
+} from "@personal-os/domain";
 import type { IconName } from "../../components/icons";
 
 export const MAIL_PAGE_SIZE = 50;
 
-/** How many conversations one selection can hold: one loaded page. */
-export const MAIL_SELECTION_LIMIT = 50;
+/** How many conversations one selection can hold. */
+export const MAIL_SELECTION_LIMIT = 100;
 
 /**
  * The thread list a Mail screen is showing: the unified inbox, the conversations snoozed in
@@ -88,10 +95,15 @@ export function sortMailboxes(mailboxes: Mailbox[]) {
 }
 
 /**
- * A change to one conversation that has been sent but not yet confirmed by the API. `snoozed`
- * is nohmi's own state: a snoozed conversation is listed only under Snoozed until it returns.
+ * A change to one conversation that has been sent but not yet confirmed by the API.
+ * `snoozedUntil` is nohmi's own state: a time snoozes the conversation, which is then listed
+ * only under Snoozed until it returns, and `null` ends its snooze.
  */
-export type MailChange = { unread?: boolean; mailboxIds?: string[]; snoozed?: boolean };
+export type MailChange = {
+  unread?: boolean;
+  mailboxIds?: string[];
+  snoozedUntil?: string | null;
+};
 
 /**
  * The mailboxes a conversation keeps once archived (every one that is not an inbox), or `null`
@@ -146,11 +158,11 @@ export function withMailChanges(
   return rows.flatMap((thread) => {
     const change = changes.get(thread.id);
     if (!change) return [thread];
-    const { snoozed, ...fields } = change;
-    if (snoozed !== undefined && snoozed !== (target === "snoozed")) return [];
+    const { snoozedUntil, ...fields } = change;
+    if (snoozedUntil !== undefined && !!snoozedUntil !== (target === "snoozed")) return [];
     if (fields.mailboxIds && leftMailTarget(target, thread.mailboxIds, fields.mailboxIds))
       return [];
-    return [{ ...thread, ...fields }];
+    return [{ ...thread, ...fields, ...(snoozedUntil ? { snoozedUntil } : {}) }];
   });
 }
 
@@ -167,52 +179,81 @@ export function mailWriteRejected(error: unknown) {
 }
 
 const HOUR = 3_600_000;
-const SNOOZE_MORNING = 8;
+const SNOOZE_MORNING = 8 * 60;
 
-/** The times a snooze offers without a picker, in the device's own time. */
-export function snoozeChoices(now: Date) {
+/**
+ * The times a snooze offers without a picker. Mornings are eight o'clock on the planning time
+ * zone's calendar, wherever the device happens to be.
+ */
+export function snoozeChoices(now: Date, timeZone: string) {
+  const today = localDateAt(now, timeZone);
   const morning = (days: number) =>
-    new Date(now.getFullYear(), now.getMonth(), now.getDate() + days, SNOOZE_MORNING);
+    localDateTimeToUtc(addLocalDays(today, days), SNOOZE_MORNING, timeZone);
   // Monday of next week; on a Monday that is seven days on, never today.
-  const toMonday = (8 - now.getDay()) % 7 || 7;
+  const weekday = new Date(Date.UTC(today.year, today.month - 1, today.day)).getUTCDay();
   return [
     { id: "hours", label: "In 3 hours", until: new Date(now.getTime() + 3 * HOUR) },
     { id: "tomorrow", label: "Tomorrow morning", until: morning(1) },
-    { id: "week", label: "Next week", until: morning(toMonday) },
-  ];
+    { id: "week", label: "Next week", until: morning((8 - weekday) % 7 || 7) },
+  ] as const;
 }
 
-const two = (value: number) => String(value).padStart(2, "0");
-
-/** A local calendar day as the date picker holds it. */
-export function pickerDay(date: Date) {
-  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`;
+/**
+ * The time zone Mail reads days in: the stored planning time zone, or UTC when there is none or
+ * the device's `Intl` does not accept it, so no date formatting here can throw on it.
+ */
+export function planningZone(stored: string | null | undefined) {
+  if (!stored) return "UTC";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: stored });
+    return stored;
+  } catch {
+    return "UTC";
+  }
 }
 
-/** The moment a picked day and time name on this device, or `null` unless it is still ahead. */
-export function pickedSnooze(day: string, time: string, now: Date) {
+/** The planning time zone's calendar day at a moment, as the date picker holds it. */
+export function pickerDay(date: Date, timeZone: string) {
+  return localDateToIso(localDateAt(date, timeZone));
+}
+
+/**
+ * The moment a picked day and time name in the planning time zone, or `null` unless it is a
+ * real day and time that is still ahead.
+ */
+export function pickedSnooze(day: string, time: string, now: Date, timeZone: string) {
   const on = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
   const at = /^(\d{2}):(\d{2})$/.exec(time);
   if (!on || !at) return null;
-  const [year, month, date, hour, minute] = [...on.slice(1), ...at.slice(1)].map(Number);
-  const until = new Date(year, month - 1, date, hour, minute);
-  // An impossible day or time rolls over into another one; that is not what was picked.
-  if (pickerDay(until) !== day || until.getHours() !== hour || until.getMinutes() !== minute)
-    return null;
+  const [year, month, date, hour, minute] = [...on.slice(1), ...at.slice(1)].map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  // An impossible day or time would roll over into another one; that is not what was picked.
+  const real = new Date(Date.UTC(year, month - 1, date));
+  if (real.getUTCMonth() !== month - 1 || real.getUTCDate() !== date) return null;
+  if (hour > 23 || minute > 59) return null;
+  const until = localDateTimeToUtc({ year, month, day: date }, hour * 60 + minute, timeZone);
   return until > now ? until : null;
 }
 
-/** When a snooze ends: the time alone for today, the day with it for anything later. */
-export function snoozeTime(until: Date, now = new Date()) {
-  const time = until.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  return until.toDateString() === now.toDateString()
+/**
+ * When a snooze ends, read in the planning time zone: the time alone for today, the day with it
+ * for anything later.
+ */
+export function snoozeTime(until: Date, now: Date, timeZone: string) {
+  const time = until.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone });
+  return sameLocalDate(localDateAt(until, timeZone), localDateAt(now, timeZone))
     ? time
-    : `${until.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}, ${time}`;
+    : `${until.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", timeZone })}, ${time}`;
 }
 
-/** A snooze that has already ended is how a conversation is unsnoozed: the API has no other way. */
-export function endedSnooze(now = new Date()) {
-  return new Date(now.getTime() - 24 * HOUR).toISOString();
+/** Whether a conversation's snooze is still running. */
+export function snoozeActive(thread: Pick<MailThreadSummary, "snoozedUntil">, now = Date.now()) {
+  return !!thread.snoozedUntil && Date.parse(thread.snoozedUntil) > now;
 }
 
 /**
@@ -250,12 +291,6 @@ export function attentionThreadId(
   item: Pick<AttentionItem, "relatedEntityId" | "relatedEntityType">,
 ) {
   return item.relatedEntityType === "mail_thread" ? item.relatedEntityId : null;
-}
-
-/** A stored kind or state as a person reads it: `follow_up` is "Follow up". */
-export function stewardLabel(value: string) {
-  const words = value.replaceAll("_", " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 /** What a question rests on, named once each: "this conversation and a calendar event". */

@@ -5,7 +5,6 @@ import {
   actionsKey,
   archivedMailboxIds,
   conversations,
-  endedSnooze,
   leftMailTarget,
   MAIL_PAGE_SIZE,
   mailboxIcon,
@@ -16,9 +15,11 @@ import {
   nextMailPage,
   pickedSnooze,
   pickerDay,
+  planningZone,
   scopeTarget,
   scopeTitle,
   senderName,
+  snoozeActive,
   snoozeChoices,
   snoozeTime,
   sortMailboxes,
@@ -198,65 +199,105 @@ it("names the Snoozed list and keeps each scope's lists apart", () => {
 
 it("takes a conversation being snoozed out of every list but Snoozed, and back", () => {
   const rows = [{ ...thread, id: "a", mailboxIds: ["inbox"], unread: true }] as MailThreadSummary[];
-  expect(withMailChanges(rows, new Map([["a", { snoozed: true }]]), "inbox")).toEqual([]);
-  expect(withMailChanges(rows, new Map([["a", { snoozed: true }]]), "snoozed")).toEqual(rows);
-  expect(withMailChanges(rows, new Map([["a", { snoozed: false }]]), "snoozed")).toEqual([]);
-  // The marker is nohmi's own state and never becomes a field of the row.
-  expect(withMailChanges(rows, new Map([["a", { snoozed: false }]]), "inbox")).toEqual(rows);
+  const wake = "2026-11-20T08:00:00.000Z";
+  expect(withMailChanges(rows, new Map([["a", { snoozedUntil: wake }]]), "inbox")).toEqual([]);
+  // A conversation snoozed again shows the time it now waits for.
+  expect(withMailChanges(rows, new Map([["a", { snoozedUntil: wake }]]), "snoozed")).toEqual([
+    { ...rows[0], snoozedUntil: wake },
+  ]);
+  expect(withMailChanges(rows, new Map([["a", { snoozedUntil: null }]]), "snoozed")).toEqual([]);
+  // Ending a snooze adds nothing to the row.
+  expect(withMailChanges(rows, new Map([["a", { snoozedUntil: null }]]), "inbox")).toEqual(rows);
 });
 
-it("offers snooze times ahead of now, with mornings at eight and next week on a Monday", () => {
-  // A Wednesday afternoon and a Monday morning, in the device's own time.
-  for (const now of [new Date(2026, 10, 18, 15, 30), new Date(2026, 10, 16, 7, 0)]) {
-    const [hours, tomorrow, week] = snoozeChoices(now);
-    expect([hours.label, tomorrow.label, week.label]).toEqual([
-      "In 3 hours",
-      "Tomorrow morning",
-      "Next week",
-    ]);
-    expect(hours.until.getTime() - now.getTime()).toBe(3 * 3_600_000);
-    expect(pickerDay(tomorrow.until)).toBe(
-      pickerDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)),
-    );
-    expect([tomorrow.until.getHours(), tomorrow.until.getMinutes()]).toEqual([8, 0]);
-    expect(week.until.getDay()).toBe(1);
-    expect(week.until.getHours()).toBe(8);
-    const days = (week.until.getTime() - now.getTime()) / 86_400_000;
-    expect(days).toBeGreaterThan(0.9);
-    expect(days).toBeLessThanOrEqual(7.1);
-  }
-  // On a Monday, next week is the Monday after, never later the same day.
-  expect(pickerDay(snoozeChoices(new Date(2026, 10, 16, 7, 0))[2].until)).toBe("2026-11-23");
-});
+const chicago = "America/Chicago";
 
-it("reads a picked day and time on this device and refuses the past or the impossible", () => {
-  const now = new Date(2026, 10, 18, 15, 30);
-  expect(pickedSnooze("2026-11-20", "09:30", now)).toEqual(new Date(2026, 10, 20, 9, 30));
-  expect(pickedSnooze("2026-11-18", "15:31", now)).toEqual(new Date(2026, 10, 18, 15, 31));
-  expect(pickedSnooze("2026-11-18", "15:30", now)).toBeNull();
-  expect(pickedSnooze("2026-11-17", "09:00", now)).toBeNull();
-  expect(pickedSnooze("2026-02-31", "09:00", now)).toBeNull();
-  expect(pickedSnooze("2026-11-20", "25:00", now)).toBeNull();
-  expect(pickedSnooze("tomorrow", "09:00", now)).toBeNull();
-  expect(pickedSnooze("2026-11-20", "nine", now)).toBeNull();
-});
-
-it("says when a snooze ends with the day only when it is not today", () => {
-  const now = new Date(2026, 10, 18, 15, 30);
-  const today = new Date(2026, 10, 18, 18, 30);
-  const later = new Date(2026, 10, 23, 8, 0);
-  const time = (date: Date) => date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  expect(snoozeTime(today, now)).toBe(time(today));
-  expect(snoozeTime(later, now)).toBe(
-    `${later.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}, ${time(later)}`,
+it("offers snooze times in the planning time zone, with mornings at eight and next week on a Monday", () => {
+  // Wednesday 18 November 2026, 15:30 in Chicago, whatever zone this device is in.
+  const now = new Date("2026-11-18T21:30:00.000Z");
+  const [hours, tomorrow, week] = snoozeChoices(now, chicago);
+  expect([hours.label, tomorrow.label, week.label]).toEqual([
+    "In 3 hours",
+    "Tomorrow morning",
+    "Next week",
+  ]);
+  expect(hours.until.toISOString()).toBe("2026-11-19T00:30:00.000Z");
+  expect(tomorrow.until.toISOString()).toBe("2026-11-19T14:00:00.000Z");
+  expect(week.until.toISOString()).toBe("2026-11-23T14:00:00.000Z");
+  // The same moment is already Thursday in Auckland, so its tomorrow is Friday there.
+  expect(snoozeChoices(now, "Pacific/Auckland")[1].until.toISOString()).toBe(
+    "2026-11-19T19:00:00.000Z",
   );
-  expect(snoozeTime(new Date(Date.now() + 60_000))).toContain(":");
+  // On a Monday, next week is the Monday after, never later the same day.
+  expect(snoozeChoices(new Date("2026-11-16T13:00:00.000Z"), chicago)[2].until.toISOString()).toBe(
+    "2026-11-23T14:00:00.000Z",
+  );
+  // On a Sunday it is the next day.
+  expect(snoozeChoices(new Date("2026-11-15T18:00:00.000Z"), chicago)[2].until.toISOString()).toBe(
+    "2026-11-16T14:00:00.000Z",
+  );
 });
 
-it("ends a snooze with a time that has already passed", () => {
-  const now = new Date("2026-11-18T15:30:00.000Z");
-  expect(endedSnooze(now)).toBe("2026-11-17T15:30:00.000Z");
-  expect(new Date(endedSnooze()).getTime()).toBeLessThan(Date.now());
+it("keeps mornings at eight across a daylight-saving change", () => {
+  // Saturday 31 October 2026 in Chicago; clocks go back that night.
+  const now = new Date("2026-10-31T20:00:00.000Z");
+  const [hours, tomorrow, week] = snoozeChoices(now, chicago);
+  expect(hours.until.getTime() - now.getTime()).toBe(3 * 3_600_000);
+  expect(tomorrow.until.toISOString()).toBe("2026-11-01T14:00:00.000Z");
+  expect(week.until.toISOString()).toBe("2026-11-02T14:00:00.000Z");
+  // Saturday 7 March 2026; clocks go forward that night.
+  expect(snoozeChoices(new Date("2026-03-07T20:00:00.000Z"), chicago)[1].until.toISOString()).toBe(
+    "2026-03-08T13:00:00.000Z",
+  );
+});
+
+it("names the planning time zone's day for the picker", () => {
+  const late = new Date("2026-11-19T03:00:00.000Z");
+  expect(pickerDay(late, chicago)).toBe("2026-11-18");
+  expect(pickerDay(late, "UTC")).toBe("2026-11-19");
+});
+
+it("reads a picked day and time in the planning time zone and refuses the past or the impossible", () => {
+  const now = new Date("2026-11-18T21:30:00.000Z");
+  expect(pickedSnooze("2026-11-20", "09:30", now, chicago)?.toISOString()).toBe(
+    "2026-11-20T15:30:00.000Z",
+  );
+  expect(pickedSnooze("2026-11-18", "15:31", now, chicago)?.toISOString()).toBe(
+    "2026-11-18T21:31:00.000Z",
+  );
+  expect(pickedSnooze("2026-11-18", "15:30", now, chicago)).toBeNull();
+  // Ahead on a UTC clock, already past in Chicago.
+  expect(pickedSnooze("2026-11-18", "22:00", now, "UTC")).not.toBeNull();
+  expect(pickedSnooze("2026-11-18", "15:00", now, chicago)).toBeNull();
+  expect(pickedSnooze("2026-11-17", "09:00", now, chicago)).toBeNull();
+  expect(pickedSnooze("2026-02-31", "09:00", now, chicago)).toBeNull();
+  expect(pickedSnooze("2026-13-01", "09:00", now, chicago)).toBeNull();
+  expect(pickedSnooze("2026-11-20", "25:00", now, chicago)).toBeNull();
+  expect(pickedSnooze("2026-11-20", "09:60", now, chicago)).toBeNull();
+  expect(pickedSnooze("tomorrow", "09:00", now, chicago)).toBeNull();
+  expect(pickedSnooze("2026-11-20", "nine", now, chicago)).toBeNull();
+});
+
+it("says when a snooze ends in the planning time zone, with the day only when it is not today", () => {
+  const now = new Date("2026-11-18T21:30:00.000Z");
+  const time = (date: Date) =>
+    date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: chicago });
+  const today = new Date("2026-11-19T03:30:00.000Z");
+  const later = new Date("2026-11-23T14:00:00.000Z");
+  // 21:30 on the 18th in Chicago is still today there, though the 19th in UTC.
+  expect(snoozeTime(today, now, chicago)).toBe(time(today));
+  expect(snoozeTime(today, now, "UTC")).toContain(",");
+  expect(snoozeTime(later, now, chicago)).toBe(
+    `${later.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", timeZone: chicago })}, ${time(later)}`,
+  );
+});
+
+it("knows a snooze is running only while its time is ahead", () => {
+  const now = Date.parse("2026-11-18T21:30:00.000Z");
+  expect(snoozeActive({ snoozedUntil: "2026-11-18T21:30:00.001Z" }, now)).toBe(true);
+  expect(snoozeActive({ snoozedUntil: "2026-11-18T21:30:00.000Z" }, now)).toBe(false);
+  expect(snoozeActive({}, now)).toBe(false);
+  expect(snoozeActive({ snoozedUntil: "2999-01-01T00:00:00.000Z" })).toBe(true);
 });
 
 it("counts conversations in words", () => {
@@ -272,4 +313,16 @@ it("gives a menu a new key when an action or its icon changes", () => {
     actionsKey([read, { id: "archive", icon: "archive" }, snooze]),
   );
   expect(actionsKey([read])).not.toBe(actionsKey([{ id: "unread", icon: "mail" }]));
+});
+
+it("reads Mail in UTC when the stored planning time zone is not one the device accepts", () => {
+  expect(planningZone("Asia/Tokyo")).toBe("Asia/Tokyo");
+  expect(planningZone("UTC")).toBe("UTC");
+  for (const stored of ["Invalid/Zone", "", undefined, null]) {
+    const zone = planningZone(stored);
+    expect(zone).toBe("UTC");
+    const now = new Date("2026-11-18T21:30:00.000Z");
+    expect(() => snoozeChoices(now, zone)).not.toThrow();
+    expect(() => snoozeTime(now, now, zone)).not.toThrow();
+  }
 });

@@ -57,6 +57,8 @@ export type MailApiClient = {
   listMailThreadSummaries(query?: Partial<MailSummaryQuery>): Promise<MailThreadSummary[]>;
   listMailThreads(query?: Partial<MailListQuery>): Promise<MailThread[]>;
   snoozeMailThread(id: string, until: string): Promise<void>;
+  /** Ends a snooze; a conversation that is not snoozed is left as it is. */
+  unsnoozeMailThread(id: string): Promise<void>;
   previewMailRule(input: PreviewMailRuleInput): Promise<MailRulePreview>;
   previewSavedMailRule(id: string): Promise<MailRulePreview>;
   reconcileMailDraft(id: string, input: ReconcileMailDraftInput): Promise<MailDraft>;
@@ -217,6 +219,11 @@ export function createMailApiClient(
       await request<void>(`/v1/mail/threads/${id}/snooze`, {
         body: JSON.stringify({ until }),
         method: "POST",
+      });
+    },
+    async unsnoozeMailThread(id) {
+      await request<void>(`/v1/mail/threads/${encodeURIComponent(id)}/snooze`, {
+        method: "DELETE",
       });
     },
   };

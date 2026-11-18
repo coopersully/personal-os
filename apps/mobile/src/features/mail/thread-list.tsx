@@ -14,6 +14,7 @@ import { MailComposer } from "./composer";
 import {
   confirmMailRead,
   retryMailRead,
+  useMail,
   useMailAccounts,
   useMailAttention,
   useMailRevalidation,
@@ -28,6 +29,7 @@ import {
   mergeMailPages,
   scopeTarget,
   scopeTitle,
+  snoozeTime,
   withMailChanges,
 } from "./logic";
 import { MailReader } from "./reader";
@@ -51,6 +53,7 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
   const reading = useRef(0);
   useMailRevalidation();
   const triage = useMailTriage();
+  const { timeZone } = useMail();
   const [opened, setOpen] = useState<MailThreadSummary | null>(null);
   const [writing, setWriting] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
@@ -70,7 +73,10 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
   const picked = rows.filter((thread) => selected.includes(thread.id));
   const selecting = picked.length > 0;
   const selectable = rows.slice(0, MAIL_SELECTION_LIMIT).map((thread) => thread.id);
+  // The selection holds still while its action runs: what that action could not confirm is
+  // handed back as the selection, and a change made meanwhile would be lost under it.
   const toggle = (id: string) =>
+    !triage.pending &&
     setSelected(() => {
       const live = picked.map((thread) => thread.id);
       if (live.includes(id)) return live.filter((other) => other !== id);
@@ -82,7 +88,7 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
   const perform = (action: BulkAction, until?: Date) =>
     triage.bulk(action, picked, setSelected, until);
   // How many selected conversations an action would change; its control names that number.
-  const able = (action: BulkAction) =>
+  const able = (action: Exclude<BulkAction, "snooze">) =>
     picked.filter((thread) => triage.allows(action, thread)).length;
   const actions = (thread: MailThreadSummary, onLeave?: () => void) =>
     triage.actions(thread, { onLeave, snoozed, onSnooze: () => setSnoozing(thread) });
@@ -180,7 +186,11 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
                   <Text style={{ color: t.ink, paddingHorizontal: spacing.md }}>
                     {picked.length} selected
                   </Text>
-                  <Action label="Cancel" onPress={() => setSelected([])} />
+                  <Action
+                    label="Cancel"
+                    disabled={triage.pending}
+                    onPress={() => setSelected([])}
+                  />
                   {selectable.some((id) => !selected.includes(id)) && (
                     <Action
                       label="Select all"
@@ -237,6 +247,11 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
         renderItem={({ item }) => (
           <ThreadRow
             thread={item}
+            wake={
+              snoozed && item.snoozedUntil
+                ? snoozeTime(new Date(item.snoozedUntil), new Date(), timeZone)
+                : undefined
+            }
             actions={actions(item)}
             selecting={selecting}
             marked={selected.includes(item.id)}

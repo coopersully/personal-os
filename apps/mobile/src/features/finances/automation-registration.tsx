@@ -12,60 +12,102 @@ import { TextRow } from "./account-editor";
 import { useCurrentSession } from "./budget-write";
 import { useFinance, useFinanceRead } from "./data";
 import { confirmedRejection, rejectionReason } from "./mutations";
-import { Copy, FinanceScreen, ReadState } from "./ui";
+import { Card, Copy, FinanceRow, FinanceScreen, ReadState } from "./ui";
 
 export type HostStatus = Awaited<
   ReturnType<ReturnType<typeof useFinance>["api"]["listAutomationHostSchedules"]>
 >[number];
-/** Runs one automation write under one toast. True only when the server confirmed it. */
+/**
+ * How one automation write ended. `unknown` is an unconfirmed write whose registrations were
+ * read again and do not show it; `unchecked` is one whose registrations could not be read.
+ */
+export type AutomationOutcome = "saved" | "not_saved" | "unknown" | "unchecked";
+/**
+ * Runs one automation write under one toast. `landed` recognises the write in a fresh read of
+ * the registrations, so an unconfirmed write that did arrive is reported as saved.
+ */
 export type AutomationAction = (
   action: () => Promise<unknown>,
   message: string,
-) => Promise<boolean>;
+  landed?: (schedules: HostStatus[]) => boolean,
+) => Promise<AutomationOutcome>;
+
+const unconfirmed =
+  "Couldn’t confirm the automation was saved. Check its state before trying again.";
 
 /**
- * One automation write at a time, with one toast from loading to the confirmed outcome. The
- * registrations are read again after every attempt, so what the screens show is always what the
- * server lists and never what a request asked for.
+ * One automation write at a time, with one toast from loading to the confirmed outcome. A
+ * confirmed write is announced as soon as the server answers. The registrations are read again
+ * after every attempt, and no further write is accepted until they have been, so what the
+ * screens show and send against is always what the server lists.
  */
-export function useAutomationWrite(): { pending: boolean; perform: AutomationAction } {
-  const { owner } = useFinance();
+export function useAutomationWrite(): {
+  pending: boolean;
+  perform: AutomationAction;
+  /** Reads the registrations again, bypassing the cache. */
+  readSchedules: () => Promise<HostStatus[]>;
+} {
+  const { api, owner } = useFinance();
   const client = useQueryClient();
   const current = useCurrentSession();
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
-  const perform: AutomationAction = async (action, message) => {
-    if (busy.current) return false;
+  const readSchedules = () =>
+    client.fetchQuery({
+      queryKey: ["finances", owner, "automation-schedules"],
+      queryFn: () => api.listAutomationHostSchedules(),
+      staleTime: 0,
+    });
+  const perform: AutomationAction = async (action, message, landed) => {
+    if (busy.current) return "not_saved";
     busy.current = true;
     setPending(true);
     const id = toast.loading("Saving automation…");
-    let saved = false;
+    let outcome: AutomationOutcome = "not_saved";
     try {
       await action();
-      saved = true;
+      outcome = "saved";
+      if (current()) toast.success(message, { id });
     } catch (error) {
-      if (current())
+      const conflict = error instanceof ApiClientError && error.status === 409;
+      // The write may have landed; it is not sent again. The read below looks for it.
+      if (!conflict && !confirmedRejection(error)) outcome = landed ? "unchecked" : "unknown";
+      if (current() && outcome === "not_saved")
         toast.error(
-          error instanceof ApiClientError && error.status === 409
+          conflict
             ? "This automation changed elsewhere. Nothing was saved; its latest state is shown."
-            : confirmedRejection(error)
-              ? `Automation not saved.${rejectionReason(error)}`
-              : // The write may have landed; it is not sent again. The list read below shows it.
-                "Couldn’t confirm the automation was saved. Check its state before trying again.",
+            : `Automation not saved.${rejectionReason(error as Error)}`,
           { id },
         );
+      else if (current() && !landed) toast.error(unconfirmed, { id });
     }
-    try {
-      await client.invalidateQueries({ queryKey: ["finances", owner] });
-      if (!current()) toast.dismiss(id);
-      else if (saved) toast.success(message, { id });
-      return saved && current();
-    } finally {
-      busy.current = false;
-      if (current()) setPending(false);
+    // The refresh runs behind the announced outcome; this hook stays busy until it settles.
+    const refresh = client
+      .invalidateQueries({ queryKey: ["finances", owner] })
+      .catch(() => undefined)
+      .finally(() => {
+        busy.current = false;
+        if (current()) setPending(false);
+      });
+    if (outcome === "unchecked" && landed) {
+      try {
+        outcome = landed(await readSchedules()) ? "saved" : "unknown";
+      } catch {
+        // Still unchecked: the caller keeps the write closed until the list can be read.
+      }
+      if (current()) {
+        if (outcome === "saved") toast.success(message, { id });
+        else toast.error(unconfirmed, { id });
+      }
+      await refresh;
     }
+    if (!current()) {
+      toast.dismiss(id);
+      return "not_saved";
+    }
+    return outcome;
   };
-  return { pending, perform };
+  return { pending, perform, readSchedules };
 }
 
 /** Records the identifier of the job the person created in their host. A one-time step. */
@@ -127,8 +169,8 @@ export function AutomationBinding({
                     : { hostSurface: "claude_code_routine" }),
                 }),
               "Host automation ID saved.",
-            ).then((saved) => {
-              if (saved) onClose();
+            ).then((outcome) => {
+              if (outcome === "saved") onClose();
             })
           }
         />
@@ -149,6 +191,30 @@ type DeclaredSchedule = AutomationHostScheduleCreateInput extends infer Input
     ? Pick<Input, "hostSurface" | "trigger">
     : never
   : never;
+
+/** Whether a listed trigger declares the cadence and time zone a submitted one asked for. */
+function sameTrigger(
+  listed: HostStatus["schedule"]["trigger"],
+  asked: DeclaredSchedule["trigger"],
+) {
+  if (asked.type === "event")
+    return (
+      listed.type === "event" &&
+      listed.expectedMaximumLatencyMinutes === asked.expectedMaximumLatencyMinutes
+    );
+  if (asked.type === "scheduled")
+    return (
+      listed.type === "scheduled" &&
+      listed.timeZone === asked.timeZone &&
+      // The server stores the times sorted.
+      [...listed.localTimes].sort().join() === [...asked.localTimes].sort().join()
+    );
+  return (
+    listed.type === "recurring" &&
+    listed.recurrence.everyMinutes === asked.recurrence.everyMinutes &&
+    listed.recurrence.timeZone === asked.recurrence.timeZone
+  );
+}
 
 /** Whole minutes from 1 to `max`; `null` for anything else. */
 function wholeMinutes(text: string, max: number): number | null {
@@ -176,10 +242,24 @@ function localTimes(text: string): string[] | null {
  */
 export function FinanceAutomationRegistrationScreen() {
   const { api, timezone } = useFinance();
-  const { pending, perform } = useAutomationWrite();
+  const { pending, perform, readSchedules } = useAutomationWrite();
+  const current = useCurrentSession();
   const connections = useFinanceRead(["automation-connections"], (api) =>
     api.listAutomationHostConnections(),
   );
+  // The registrations that exist now: a new one can only be recognised against them.
+  const schedules = useFinanceRead(["automation-schedules"], (api) =>
+    api.listAutomationHostSchedules(),
+  );
+  /**
+   * After an unconfirmed registration the list did not show or could not be read: recognises
+   * that registration in a later read. Registering stays closed while this is set.
+   */
+  const [unchecked, setUnchecked] = useState<{
+    landed: (list: HostStatus[]) => boolean;
+  } | null>(null);
+  const [checking, setChecking] = useState(false);
+  const checkLock = useRef(false);
   const [label, setLabel] = useState("Finance maintenance");
   const [connection, setConnection] = useState<string | null>(null);
   const [host, setHost] = useState<Host>("codex_desktop");
@@ -228,6 +308,52 @@ export function FinanceAutomationRegistrationScreen() {
           ...schedule,
         }
       : null;
+
+  const registered = "Automation registered. Set it up in your host.";
+  function register() {
+    if (!input || !schedules.data) return;
+    const known = new Set(schedules.data.map((item) => item.schedule.id));
+    // A registration this form did not see before, declaring what this form asked for.
+    const landed = (list: HostStatus[]) =>
+      list.some(
+        ({ schedule }) =>
+          !known.has(schedule.id) &&
+          schedule.label === input.label &&
+          schedule.tenantAuthorizationConnectionId === input.tenantAuthorizationConnectionId &&
+          schedule.hostSurface === input.hostSurface &&
+          sameTrigger(schedule.trigger, input.trigger),
+      );
+    void perform(() => api.createAutomationHostSchedule(input), registered, landed).then(
+      (outcome) => {
+        if (outcome === "saved") router.back();
+        // A read that does not show the request is no proof it failed: it may still be landing.
+        // Registering stays closed until the person reads the list again.
+        else if (outcome === "unchecked" || outcome === "unknown") setUnchecked({ landed });
+      },
+    );
+  }
+  /** Reads the registrations again after an unconfirmed registration, under its own toast. */
+  async function check() {
+    if (!unchecked || checkLock.current) return;
+    checkLock.current = true;
+    setChecking(true);
+    const id = toast.loading("Checking automations…");
+    try {
+      const found = unchecked.landed(await readSchedules());
+      if (!current()) return void toast.dismiss(id);
+      setUnchecked(null);
+      if (found) {
+        toast.success(registered, { id });
+        router.back();
+      } else toast.info("That registration isn’t listed. You can register it again.", { id });
+    } catch {
+      if (!current()) return void toast.dismiss(id);
+      toast.error("Couldn’t read your automations. Check again before registering.", { id });
+    } finally {
+      checkLock.current = false;
+      if (current()) setChecking(false);
+    }
+  }
 
   return (
     <FinanceScreen title="Register automation">
@@ -315,21 +441,26 @@ export function FinanceAutomationRegistrationScreen() {
               />
             )}
           </Group>
-          <Actions inset={false}>
-            <Action
-              label="Register expected schedule"
-              disabled={pending || !input}
-              onPress={() => {
-                if (!input) return;
-                void perform(
-                  () => api.createAutomationHostSchedule(input),
-                  "Automation registered. Set it up in your host.",
-                ).then((saved) => {
-                  if (saved) router.back();
-                });
-              }}
-            />
-          </Actions>
+          {unchecked && !pending && (
+            <Card rows>
+              <FinanceRow
+                title="Check automations"
+                subtitle="Read your automations before registering again."
+                icon="refresh"
+                onPress={checking ? undefined : () => void check()}
+              />
+            </Card>
+          )}
+          {/* Without the current registrations a repeated request could not be recognised. */}
+          <ReadState query={schedules}>
+            <Actions inset={false}>
+              <Action
+                label="Register expected schedule"
+                disabled={pending || checking || !input || !!unchecked}
+                onPress={register}
+              />
+            </Actions>
+          </ReadState>
         </ReadState>
       </SettingsAccentProvider>
     </FinanceScreen>

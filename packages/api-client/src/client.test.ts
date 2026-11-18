@@ -3095,6 +3095,11 @@ describe("Personal OS API client", () => {
       }),
     ).resolves.toEqual(attentionItem);
     await api.snoozeMailThread(id, "2026-07-14T12:00:00.000Z");
+    await expect(api.unsnoozeMailThread("a/b")).resolves.toBeUndefined();
+    const unsnoozeCall = fetch.mock.calls.at(-1);
+    expect(unsnoozeCall?.[1]?.method).toBe("DELETE");
+    expect(new URL(String(unsnoozeCall?.[0])).pathname).toBe("/v1/mail/threads/a%2Fb/snooze");
+    expect(unsnoozeCall?.[1]?.body).toBeUndefined();
     await expect(api.syncConnector(id)).resolves.toEqual({
       changed: 3,
       pending: false,

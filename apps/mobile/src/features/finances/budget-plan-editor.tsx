@@ -20,7 +20,8 @@ import { TextRow } from "./account-editor";
 import { amountCents, budgetMonth, useCurrentSession, writeFailure } from "./budget-write";
 import { useFinance, useFinanceRead } from "./data";
 import { confirmChoice } from "./goal-confirm";
-import { formatMoney, periodScope } from "./presentation";
+import { formatMoney } from "./presentation";
+import { spendingMonth } from "./spending-math";
 import { Card, Copy, FinanceScreen, ReadState, Section } from "./ui";
 
 type Named = { id: string; name: string };
@@ -155,8 +156,7 @@ function PlanForm({
   // The reviewed version stays with the draft; a background refresh never replaces either.
   const [snapshot] = useState(record);
   const [month, setMonth] = useState(
-    () =>
-      snapshot?.effectiveFrom ?? (timezone ? periodScope("month", timezone).from.slice(0, 7) : ""),
+    () => snapshot?.effectiveFrom ?? (timezone ? spendingMonth(timezone) : ""),
   );
   const [rationale, setRationale] = useState(snapshot?.rationale ?? "");
   const [assumptions, setAssumptions] = useState(() =>

@@ -8,7 +8,7 @@ import type {
   MailThreadSummary,
 } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { PropsWithChildren, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import InboxRoute from "../../app/(workspaces)/mail/index";
@@ -713,6 +713,36 @@ it("raises no second toast when the read after an answer fails", async () => {
     { id: "mail-answer-q1" },
   );
   expectNoInlineResult();
+});
+
+it("reports a later failed read of the findings, however soon after a silent one", async () => {
+  h.stewardship.mockResolvedValueOnce(found());
+  h.stewardship.mockRejectedValue(new Error("offline"));
+  h.answer.mockResolvedValueOnce({});
+  const reader = await openReader();
+  fireEvent.click(await within(reader).findByRole("radio", { name: "I’ll reply" }));
+  // Both failures below land in the same millisecond: only the answer's own read is silent.
+  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now());
+  try {
+    fireEvent.click(within(reader).getByRole("button", { name: "Send answer" }));
+    await waitFor(() => expect(h.stewardship).toHaveBeenCalledTimes(2));
+    const send = within(reader).getByRole("button", { name: "Send answer" });
+    await waitFor(() => expect(send).toHaveProperty("disabled", false));
+    expect(h.toast.error).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["mail", "owner", "stewardship", ONE] });
+    });
+    expect(h.stewardship).toHaveBeenCalledTimes(3);
+    await waitFor(() =>
+      expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(
+        "Couldn’t load what nohmi found in this conversation.",
+        { id: `mail-stewardship-${ONE}` },
+      ),
+    );
+  } finally {
+    clock.mockRestore();
+  }
 });
 
 it("raises one toast for a pull that fails to read both the messages and the findings", async () => {

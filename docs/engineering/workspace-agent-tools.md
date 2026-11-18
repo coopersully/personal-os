@@ -17541,6 +17541,33 @@ Remove one linked destination block without deleting the source event.
 }
 ```
 
+## unsnooze_mail
+
+End a cached conversation's snooze now so it is no longer hidden. This changes nohmi's local snooze state, not provider mail.
+
+- Domain: mail; stage: commit; policy: approve_each.
+- Grants (all): mail:write.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/mail.ts); typed API methods: `unsnoozeMailThread`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "nohmi object identifier"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
 ## update_attention_item
 
 Resolve, dismiss, or reopen one nohmi attention item using the version returned by list_attention_items. If another workflow refreshed it first, nohmi returns a conflict with the current version.

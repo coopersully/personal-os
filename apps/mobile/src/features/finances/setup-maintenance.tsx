@@ -32,9 +32,29 @@ const finished: readonly Run["status"][] = [
   "failed_terminal",
 ];
 
+const time = (value: string | undefined) => (value ? Date.parse(value) || 0 : 0);
+/**
+ * Whether an action's response describes the run at least as recently as the run read. The
+ * server's own times decide it; a read that lists no run predates a response that has one.
+ */
+function responseIsNewest(
+  response: { payload: FinanceMaintenancePayload; at: number },
+  read: { payload: FinanceMaintenancePayload; at: number } | null,
+) {
+  if (!read) return true;
+  const answered = response.payload.run;
+  const listed = read.payload.run;
+  if (answered && listed)
+    return answered.id === listed.id
+      ? time(answered.updatedAt) >= time(listed.updatedAt)
+      : time(answered.createdAt) >= time(listed.createdAt);
+  return answered ? true : response.at >= read.at;
+}
+
 /**
  * Starts a maintenance run, or resumes the latest unfinished one. Everything shown about a run
- * is what the server returned for it: the latest run it lists, then each response to a request.
+ * is what the server returned for it: the newer of the latest run it lists and the last response
+ * to a request.
  */
 export function SetupMaintenance() {
   const { api, owner } = useFinance();
@@ -43,12 +63,24 @@ export function SetupMaintenance() {
   const latest = useFinanceRead(["maintenance-latest"], (api) =>
     api.getFinanceMaintenanceHistory({ limit: 1 }),
   );
-  const [response, setResponse] = useState<FinanceToolResult<FinanceMaintenancePayload> | null>(
-    null,
-  );
+  const [response, setResponse] = useState<{
+    result: FinanceToolResult<FinanceMaintenancePayload>;
+    at: number;
+  } | null>(null);
   const [pending, setPending] = useState(false);
+  // After an unconfirmed request a run may exist that this screen has not read yet.
+  const [unchecked, setUnchecked] = useState(false);
   const busy = useRef(false);
-  const payload = response?.data ?? latest.data?.items[0] ?? null;
+  const listed = latest.data?.items[0];
+  const answered =
+    response &&
+    responseIsNewest(
+      { payload: response.result.data, at: response.at },
+      listed ? { payload: listed, at: latest.dataUpdatedAt } : null,
+    )
+      ? response.result
+      : null;
+  const payload = answered?.data ?? listed ?? null;
   const run = payload?.run ?? null;
   const input: FinanceMaintenanceInput =
     run && !finished.includes(run.status)
@@ -65,22 +97,50 @@ export function SetupMaintenance() {
       if (!current()) return void toast.dismiss(id);
       if (result.outcome === "failed") toast.error(result.communication.headline, { id });
       else {
-        setResponse(result);
+        setResponse({ result, at: Date.now() });
         toast.success("Maintenance status updated", { id });
       }
     } catch (error) {
       if (!current()) return void toast.dismiss(id);
-      // An unconfirmed request is never sent again here; the latest run is read again instead.
+      const rejected = confirmedRejection(error);
       toast.error(
-        confirmedRejection(error)
+        rejected
           ? `Maintenance didn’t run.${rejectionReason(error)}`
           : "Couldn’t confirm maintenance ran. Check the latest run before starting again.",
         { id },
       );
+      // An unconfirmed request is never sent again here. The run it may have started is read
+      // before another request is allowed, so a start that landed is resumed, not repeated.
+      if (!rejected) {
+        setUnchecked(true);
+        const read = await latest.refetch();
+        if (current() && !read.isError) setUnchecked(false);
+      }
     } finally {
       busy.current = false;
       if (current()) setPending(false);
       void client.invalidateQueries({ queryKey: ["finances", owner] });
+    }
+  }
+
+  /** Reads the latest run again after a read that failed, under its own toast. */
+  async function check() {
+    if (busy.current) return;
+    busy.current = true;
+    setPending(true);
+    const id = toast.loading("Checking the latest run…");
+    try {
+      const read = await latest.refetch();
+      if (!current()) return void toast.dismiss(id);
+      if (read.isError)
+        toast.error("Couldn’t read the latest run. Check again before starting.", { id });
+      else {
+        setUnchecked(false);
+        toast.success("Latest run checked", { id });
+      }
+    } finally {
+      busy.current = false;
+      if (current()) setPending(false);
     }
   }
 
@@ -96,12 +156,12 @@ export function SetupMaintenance() {
                 : "Maintain transaction evidence"}
           </Copy>
           <Copy secondary>
-            {response?.communication.headline ??
+            {answered?.communication.headline ??
               "Check categorization, reconciliation, and transaction evidence independently of your profile."}
           </Copy>
           {payload?.recovery && <Copy>{payload.recovery.reason}</Copy>}
           {payload?.nextAction && <Copy>{payload.nextAction.reason}</Copy>}
-          {response?.communication.requiredDisclosures.map((disclosure) => (
+          {answered?.communication.requiredDisclosures.map((disclosure) => (
             <Copy key={disclosure.message}>{disclosure.message}</Copy>
           ))}
           {(run?.status === "awaiting_approval" || run?.status === "completed_with_questions") && (
@@ -111,6 +171,14 @@ export function SetupMaintenance() {
               onPress={() => router.navigate("/finances/assistant")}
             />
           )}
+          {unchecked && !pending && (
+            <FinanceRow
+              title="Check the latest run"
+              subtitle="Read the latest run before starting maintenance again."
+              icon="refresh"
+              onPress={() => void check()}
+            />
+          )}
           <Actions inset={false}>
             <Action
               label={
@@ -118,7 +186,7 @@ export function SetupMaintenance() {
                   ? "Check maintenance progress"
                   : "Start initial maintenance"
               }
-              disabled={pending}
+              disabled={pending || unchecked}
               onPress={() => void maintain()}
             />
           </Actions>

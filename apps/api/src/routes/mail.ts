@@ -229,6 +229,10 @@ export function registerMailRoutes({ app, db, mail, mutationContext }: MailRoute
     );
     return context.body(null, 204);
   });
+  app.delete("/v1/mail/threads/:id/snooze", async (context) => {
+    await mail.unsnoozeThread(context.get("principal").userId, context.req.param("id"));
+    return context.body(null, 204);
+  });
   app.put("/v1/mail/threads/:id/attention", async (context) =>
     context.json({
       item: await mail.upsertAttentionItem(

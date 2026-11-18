@@ -2,7 +2,7 @@ import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceTransaction } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { type ComponentProps, useEffect, useRef, useState } from "react";
 import { Alert, TextInput, View } from "react-native";
 import { toast } from "sonner-native";
 import { AppToaster } from "../../components/app-toaster";
@@ -26,11 +26,14 @@ function TransactionForm({
   record,
   field,
   manualAccount,
+  accounts,
 }: {
   record: FinanceTransaction;
   field?: string;
   /** Only a manually entered transaction's date can be corrected; a synced date is evidence. */
   manualAccount: boolean;
+  /** The read that says which kind of account this is; until it answers, the date is unknown. */
+  accounts: ComponentProps<typeof ReadState>["query"];
 }) {
   const { api, owner } = useFinance();
   const client = useQueryClient();
@@ -206,24 +209,27 @@ function TransactionForm({
             </>
           )}
         </Card>
-        {manualAccount && (
-          <Card rows>
-            <PaddedSurfaceRows>
-              <SettingsAccentProvider workspace="finances">
-                <DateField
-                  label="Date"
-                  dateOnly
-                  value={date}
-                  onChange={(value) => {
-                    if (pending || submitted) return;
-                    setDate(value ? value.slice(0, 10) : null);
-                    setEdited(true);
-                  }}
-                />
-              </SettingsAccentProvider>
-            </PaddedSurfaceRows>
-          </Card>
-        )}
+        {/* A loading or failed account read shows as that, never as a transaction without a date. */}
+        <ReadState query={accounts}>
+          {manualAccount && (
+            <Card rows>
+              <PaddedSurfaceRows>
+                <SettingsAccentProvider workspace="finances">
+                  <DateField
+                    label="Date"
+                    dateOnly
+                    value={date}
+                    onChange={(value) => {
+                      if (pending || submitted) return;
+                      setDate(value ? value.slice(0, 10) : null);
+                      setEdited(true);
+                    }}
+                  />
+                </SettingsAccentProvider>
+              </PaddedSurfaceRows>
+            </Card>
+          )}
+        </ReadState>
         <Section title="Notes">
           <Card>
             <TextInput
@@ -288,6 +294,7 @@ export function FinanceTransactionEditor() {
                 record={query.data.data}
                 field={field}
                 manualAccount={manualAccount}
+                accounts={accounts}
               />
             )
           ) : null}

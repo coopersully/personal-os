@@ -9,11 +9,13 @@ import { RecordRow } from "../../components/record-row";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import { SheetHeader } from "../../components/sheet-header";
 import { useTheme, workspaceColor } from "../../theme";
+import { useMail } from "./data";
 import { conversations, pickedSnooze, pickerDay, snoozeChoices, snoozeTime } from "./logic";
 
 /**
- * Asks when snoozed mail should come back: a few common times, or any day and time ahead.
- * Choosing a time is the whole decision, so it closes the sheet and the snooze starts.
+ * Asks when snoozed mail should come back: a few common times, or any day and time ahead, all
+ * read in the planning time zone. Choosing a time is the whole decision, so it closes the sheet
+ * and the snooze starts. A time that is not ahead is refused here and nothing is sent.
  */
 export function SnoozeSheet({
   count,
@@ -25,13 +27,17 @@ export function SnoozeSheet({
   close: () => void;
 }) {
   const t = useTheme();
-  // The offered times are fixed when the sheet opens, so a row never changes under a finger.
-  const [opened] = useState(() => new Date());
-  const choices = snoozeChoices(opened);
-  const [day, setDay] = useState(() => pickerDay(choices[1].until));
+  const { timeZone } = useMail();
+  // Shown as of this render; the time that is sent is worked out again when a row is pressed.
+  const shown = new Date();
+  const choices = snoozeChoices(shown, timeZone);
+  const [day, setDay] = useState(() => pickerDay(choices[1].until, timeZone));
   const [time, setTime] = useState("08:00");
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const accent = workspaceColor(t, "mail");
+  const pick = (until: Date | null | undefined) => {
+    if (until && until.getTime() > Date.now()) choose(until);
+    else toast.error("Choose a day and time that are still ahead.");
+  };
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={close}>
       <SettingsAccentProvider workspace="mail">
@@ -48,10 +54,16 @@ export function SnoozeSheet({
                   <RecordRow
                     centered
                     title={choice.label}
-                    value={snoozeTime(choice.until, opened)}
+                    value={snoozeTime(choice.until, shown, timeZone)}
                     leading={<Icon name="clock" color={accent} />}
                     accessibilityHint="Snoozes until then."
-                    onPress={() => choose(choice.until)}
+                    onPress={() =>
+                      // A sheet left open must not send the time it opened with.
+                      pick(
+                        snoozeChoices(new Date(), timeZone).find(({ id }) => id === choice.id)
+                          ?.until,
+                      )
+                    }
                   />
                 </SectionItem>
               ))}
@@ -75,11 +87,7 @@ export function SnoozeSheet({
             <Actions>
               <Action
                 label="Snooze until this time"
-                onPress={() => {
-                  const until = pickedSnooze(day, time, new Date());
-                  if (until) choose(until);
-                  else toast.error("Choose a day and time that are still ahead.");
-                }}
+                onPress={() => pick(pickedSnooze(day, time, new Date(), timeZone))}
               />
             </Actions>
           </FormBody>

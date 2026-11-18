@@ -759,6 +759,99 @@ it("reports maintenance that failed, was refused or was not confirmed", async ()
   expectNoInlineResult();
 });
 
+it("re-reads the run after an unconfirmed start and resumes the one that landed", async () => {
+  await loaded();
+  h.api.maintainFinances.mockRejectedValueOnce(new TypeError("Network request failed"));
+  const reread = Promise.withResolvers<unknown>();
+  h.api.getFinanceMaintenanceHistory.mockReturnValue(reread.promise);
+  press("Start initial maintenance");
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(
+      "Couldn’t confirm maintenance ran. Check the latest run before starting again.",
+      expect.any(Object),
+    ),
+  );
+  // Nothing can be started while the run that may exist has not been read.
+  expect(button("Start initial maintenance").disabled).toBe(true);
+  press("Start initial maintenance");
+  await act(async () => reread.resolve({ items: [maintenance("running")], nextCursor: null }));
+  await screen.findByText("Processing transaction evidence");
+  expect(button("Check maintenance progress").disabled).toBe(false);
+  expect(h.api.maintainFinances).toHaveBeenCalledTimes(1);
+  expectNoInlineResult();
+});
+
+it("keeps Start closed while the run cannot be read after an unconfirmed start", async () => {
+  await loaded();
+  h.api.maintainFinances.mockRejectedValueOnce(rejection(503));
+  h.api.getFinanceMaintenanceHistory.mockRejectedValue(rejection(500));
+  press("Start initial maintenance");
+  const check = await screen.findByRole("button", { name: /Check the latest run/ });
+  expect(button("Start initial maintenance").disabled).toBe(true);
+  // A check that fails changes nothing.
+  h.loading.mockClear();
+  fireEvent.click(check);
+  expect(h.loading).toHaveBeenCalledExactlyOnceWith("Checking the latest run…");
+  await waitFor(() =>
+    expect(h.error).toHaveBeenLastCalledWith(
+      "Couldn’t read the latest run. Check again before starting.",
+      expect.any(Object),
+    ),
+  );
+  expect(button("Start initial maintenance").disabled).toBe(true);
+  h.api.getFinanceMaintenanceHistory.mockResolvedValue({ items: [], nextCursor: null });
+  press(/Check the latest run/);
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Latest run checked", expect.any(Object)),
+  );
+  expect(button("Start initial maintenance").disabled).toBe(false);
+  expect(screen.queryByRole("button", { name: /Check the latest run/ })).toBeNull();
+  expect(h.api.maintainFinances).toHaveBeenCalledTimes(1);
+  expectNoInlineResult();
+});
+
+it("shows whichever of the last response and the run read is newer", async () => {
+  const stamped = (status: string, updatedAt: string, reason: string | null = null) => {
+    const payload = maintenance(status, reason);
+    return {
+      ...payload,
+      run: { ...payload.run, createdAt: "2026-11-18T14:00:00.000Z", updatedAt },
+    };
+  };
+  await loaded();
+  h.api.maintainFinances.mockResolvedValue(
+    result(
+      stamped("running", "2026-11-18T14:01:00.000Z"),
+      "work_remaining",
+      "Processing 12 transactions.",
+    ),
+  );
+  // A read that is older than the response does not replace it.
+  h.api.getFinanceMaintenanceHistory.mockResolvedValue({
+    items: [stamped("queued", "2026-11-18T14:00:00.000Z")],
+    nextCursor: null,
+  });
+  press("Start initial maintenance");
+  await waitFor(() => expect(h.success).toHaveBeenCalled());
+  await waitFor(() =>
+    expect(h.api.getFinanceMaintenanceHistory.mock.calls.length).toBeGreaterThan(1),
+  );
+  await act(async () => {});
+  expect(screen.getByText("Processing transaction evidence")).toBeTruthy();
+  expect(screen.getByText("Processing 12 transactions.")).toBeTruthy();
+  // The run then finishes elsewhere: the read is newer, and the old response's words go with it.
+  h.api.getFinanceMaintenanceHistory.mockResolvedValue({
+    items: [stamped("completed", "2026-11-18T14:05:00.000Z")],
+    nextCursor: null,
+  });
+  await act(async () => {
+    await client.refetchQueries({ queryKey: ["finances", "owner-a", "maintenance-latest"] });
+  });
+  await screen.findByText("Maintenance complete");
+  expect(screen.queryByText("Processing 12 transactions.")).toBeNull();
+  expect(button("Start initial maintenance").disabled).toBe(false);
+});
+
 // Overview
 
 it("shows Finish Finance setup on Overview only while the server has no completion", async () => {

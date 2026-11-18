@@ -126,6 +126,8 @@ export const mailThreadSchema = z.object({
   receivedAt: isoDateTimeSchema,
   remoteThreadId: z.string(),
   snippet: z.string(),
+  /** When nohmi's snooze ends. Present only on conversations listed as snoozed. */
+  snoozedUntil: isoDateTimeSchema.optional(),
   starred: z.boolean(),
   subject: z.string(),
   to: z.array(mailAddressSchema),

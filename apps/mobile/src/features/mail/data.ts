@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AppState } from "react-native";
 import { toast } from "sonner-native";
 import { useAuth } from "../auth/context";
-import { MAIL_PAGE_SIZE, type MailScope, nextMailPage, scopeTarget } from "./logic";
+import { MAIL_PAGE_SIZE, type MailScope, nextMailPage, planningZone, scopeTarget } from "./logic";
 
 /** Mail reads own their feedback, so the shared read-error toast stays out of the way. */
 const meta = { scopedReadFeedback: true };
@@ -28,9 +28,14 @@ export async function retryMailRead(read: () => Promise<{ isError: boolean }>) {
   }
 }
 
+/** The signed-in person's Mail: their API, their id, and the time zone their days are read in. */
 export function useMail() {
   const { session, state } = useAuth();
-  return { api: session.api(), owner: state.user?.id };
+  return {
+    api: session.api(),
+    owner: state.user?.id,
+    timeZone: planningZone(state.user?.planningTimezone),
+  };
 }
 
 /**
@@ -108,8 +113,13 @@ export function useMailAttention(enabled = true) {
   });
 }
 
-/** When a findings read was made for an action that reports its own outcome, by cached query. */
-const ownedReads = new WeakMap<object, { from: number; to: number }[]>();
+/**
+ * The findings reads made for an action that reports its own outcome, by cached query. Each is
+ * known by the query's failure count: `after` is the count when the read began, and `failure`
+ * the count of the failure that read itself ended in (`null` when it ended in none), unset while
+ * the read is in flight.
+ */
+const ownedReads = new WeakMap<object, { after: number; failure?: number | null }[]>();
 
 /**
  * What the steward recorded about one conversation. It quotes the conversation, so like the
@@ -131,16 +141,31 @@ export function useMailStewardship(threadId: string) {
   });
   const cached = client.getQueryCache().find({ queryKey, exact: true });
   const reread = async () => {
-    const owned = { from: Date.now(), to: Number.POSITIVE_INFINITY };
+    const owned: { after: number; failure?: number | null } = {
+      after: cached?.state.errorUpdateCount ?? query.errorUpdateCount,
+    };
     if (cached) ownedReads.set(cached, [...(ownedReads.get(cached) ?? []), owned]);
+    let failure: number | null = null;
     try {
-      return await query.refetch();
+      const read = await query.refetch();
+      if (read.isError && read.errorUpdateCount > owned.after) failure = read.errorUpdateCount;
+      return read;
     } finally {
-      owned.to = Date.now();
+      owned.failure = failure;
     }
   };
+  const failures = query.errorUpdateCount;
+  // A query has one fetch at a time, so a failure that lands while the read is in flight is its
+  // own. Once it settles, exactly the failure it ended in stays silent: a later read that fails
+  // is reported, however soon after.
+  const owned =
+    cached &&
+    ownedReads
+      .get(cached)
+      ?.some((read) =>
+        read.failure === undefined ? failures > read.after : read.failure === failures,
+      );
   const at = query.errorUpdatedAt;
-  const owned = cached && ownedReads.get(cached)?.some(({ from, to }) => at >= from && at <= to);
   return { ...query, reread, failedAt: query.isError && !owned ? at : 0 };
 }
 

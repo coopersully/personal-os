@@ -42,7 +42,9 @@ const h = vi.hoisted(() => ({
   dismiss: undefined as undefined | (() => void),
   allowDismiss: vi.fn(),
 }));
-vi.mock("sonner-native", () => ({ toast: { error: h.error } }));
+vi.mock("sonner-native", () => ({
+  toast: { error: h.error, success: h.success, loading: () => "toast-id", dismiss: () => {} },
+}));
 vi.mock("react-native", () => ({
   Text: ({ children }: PropsWithChildren) => <span>{children}</span>,
   View: ({ children }: PropsWithChildren) => <div>{children}</div>,
@@ -339,8 +341,30 @@ it("presents the Spending defaults as applying on iPhone too", () => {
   expect(
     screen.queryByRole("region", { name: "Spending defaults on other devices" }),
   ).not.toBeInTheDocument();
-  // Layout choices that the iPhone does not follow keep saying so.
-  expect(screen.getByRole("region", { name: "Finance layout on other devices" })).toBeVisible();
+  // The layout group says which of its choices the iPhone follows.
+  const layout = within(screen.getByRole("region", { name: "Finance layout" }));
+  expect(
+    layout.getByText(
+      "Spending view applies on iPhone, where bubbles opens as the list. Grouping and transaction layout apply on web and desktop.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("region", { name: "Finance layout on other devices" }),
+  ).not.toBeInTheDocument();
+});
+it("says the week start applies on iPhone while the rest of the calendar layout does not", () => {
+  h.domain = "calendar";
+  render(<CalendarSettingsScreen />);
+  const layout = within(screen.getByRole("region", { name: "Calendar layout" }));
+  expect(
+    layout.getByText(
+      "Calendar view and weekends apply to the web and desktop calendar, not the iPhone agenda. Week start applies on iPhone too: it sets the Calendar week and where This week begins in Spending.",
+    ),
+  ).toBeVisible();
+  expect(layout.getByLabelText("Week starts on")).toBeVisible();
+  expect(
+    screen.queryByRole("region", { name: "Calendar layout on other devices" }),
+  ).not.toBeInTheDocument();
 });
 it("resets rejected numeric text only after reviewed reload and does not replay it on blur", async () => {
   h.reload.mockResolvedValue({

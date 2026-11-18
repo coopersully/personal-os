@@ -11,9 +11,11 @@ import { actionsKey, messageTime, senderName } from "./logic";
  * Its actions sit beside the row, not inside it, so they never open the conversation.
  * A long press starts a selection; while one is under way a tap selects instead of opening, the
  * leading mark shows whether the row is selected, and the row's own actions step aside.
+ * `wake` is when a snoozed conversation returns, already worded for the planning time zone.
  */
 export function ThreadRow({
   thread,
+  wake,
   actions,
   selecting = false,
   marked = false,
@@ -21,6 +23,7 @@ export function ThreadRow({
   onSelect,
 }: {
   thread: MailThreadSummary;
+  wake?: string;
   actions: readonly RowAction[];
   selecting?: boolean;
   marked?: boolean;
@@ -50,6 +53,7 @@ export function ThreadRow({
           thread.snippet,
           messageTime(thread.receivedAt),
           thread.messageCount > 1 ? `${thread.messageCount} messages` : "",
+          wake ? `Returns ${wake}` : "",
         ]
           .filter(Boolean)
           .join(". ")}
@@ -115,6 +119,12 @@ export function ThreadRow({
           <Text numberOfLines={2} style={{ color: t.secondary, fontSize: 15, lineHeight: 21 }}>
             {thread.snippet || "No preview available"}
           </Text>
+          {wake && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.xs }}>
+              <Icon name="clock" size={13} color={accent} />
+              <Text style={{ color: accent, fontSize: 13 }}>Returns {wake}</Text>
+            </View>
+          )}
         </View>
       </Pressable>
       {!selecting && (

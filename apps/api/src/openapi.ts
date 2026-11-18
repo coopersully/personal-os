@@ -1615,6 +1615,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       },
       "/v1/mail/threads/{id}/snooze": {
         post: { security, responses: { 204: { description: "Mail conversation snoozed" } } },
+        delete: { security, responses: { 204: { description: "Mail conversation snooze ended" } } },
       },
       "/v1/mail/rules": {
         get: { security, responses: { 200: { description: "Mail rules" } } },

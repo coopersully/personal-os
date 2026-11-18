@@ -718,3 +718,63 @@ it("still disables an enabled rule only after confirmation and never offers Turn
   expect(await screen.findByText("Status: Disabled")).toBeVisible();
   expect(client().getQueryData<MailRule[]>(key("mail-rules"))?.[0]?.version).toBe(4);
 });
+
+it.each([
+  ["a timeout", rejection(408, "Timed out")],
+  ["a server failure", rejection(503, "Unavailable")],
+  ["a network failure", new TypeError("Network request failed")],
+])("reports %s on Disable as not confirmed without retrying and rereads the rule", async (_name, failure) => {
+  h.rules = [rule({ enabled: true, policy: "approved_rule" })];
+  h.updateRule.mockRejectedValue(failure);
+  mount("rule");
+  fireEvent.click(await screen.findByRole("button", { name: "Disable Newsletters" }));
+  h.listRules.mockClear();
+  await approve();
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn’t confirm the rule was disabled. Check its status before trying again.",
+      { id: "toast-id" },
+    ),
+  );
+  expect(h.loading).toHaveBeenCalledExactlyOnceWith("Disabling rule…");
+  expect(h.updateRule).toHaveBeenCalledOnce();
+  expect(h.success).not.toHaveBeenCalled();
+  // The rule may be off already, so its real state is read again.
+  await waitFor(() => expect(h.listRules).toHaveBeenCalledOnce());
+  expectNoInlineResult();
+});
+
+it("reports a refused Disable with the server's reason and leaves the rule on", async () => {
+  h.rules = [rule({ enabled: true, policy: "approved_rule" })];
+  h.updateRule.mockRejectedValue(rejection(403, "This token cannot change Mail rules."));
+  mount("rule");
+  fireEvent.click(await screen.findByRole("button", { name: "Disable Newsletters" }));
+  h.listRules.mockClear();
+  await approve();
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledExactlyOnceWith("This token cannot change Mail rules.", {
+      id: "toast-id",
+    }),
+  );
+  expect(h.listRules).not.toHaveBeenCalled();
+  expect(screen.getByText("Status: Enabled")).toBeVisible();
+  expectNoInlineResult();
+});
+
+it("says a rule changed elsewhere when Disable conflicts, and reads it again", async () => {
+  h.rules = [rule({ enabled: true, policy: "approved_rule" })];
+  h.updateRule.mockRejectedValue(rejection(409, "The mail rule changed."));
+  mount("rule");
+  fireEvent.click(await screen.findByRole("button", { name: "Disable Newsletters" }));
+  h.listRules.mockClear();
+  await approve();
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledExactlyOnceWith(
+      "This rule changed elsewhere. Check it before trying again.",
+      { id: "toast-id" },
+    ),
+  );
+  await waitFor(() => expect(h.listRules).toHaveBeenCalledOnce());
+  expect(h.updateRule).toHaveBeenCalledOnce();
+  expectNoInlineResult();
+});

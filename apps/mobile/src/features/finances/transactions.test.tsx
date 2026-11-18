@@ -709,6 +709,27 @@ it("keeps the date of a synced transaction read-only", async () => {
   expect(screen.getByText("Date")).toBeTruthy();
 });
 
+it("does not open the date, and says why the editor has none, until the account is known", async () => {
+  h.api.listFinanceAccounts.mockRejectedValue(new Error("offline"));
+  h.params = { id: transaction.id };
+  const view = mount(<FinanceTransactionScreen />);
+  await screen.findByText("Date");
+  await waitFor(() => expect(h.api.listFinanceAccounts).toHaveBeenCalled());
+  await act(async () => undefined);
+  expect(screen.queryByRole("button", { name: /^Date/ })).toBeNull();
+  view.unmount();
+  // Reached another way, the editor shows the failed account read where the date would be.
+  h.params = { id: transaction.id, field: "date" };
+  mount(<FinanceTransactionEditor />);
+  await screen.findByRole("button", { name: /^Category/ });
+  const retry = await screen.findByRole("button", { name: /Retry loading/ });
+  expect(screen.queryByLabelText(dateLabel)).toBeNull();
+  h.api.listFinanceAccounts.mockResolvedValue(accounts([account, linked]));
+  fireEvent.click(retry);
+  await screen.findByLabelText(dateLabel);
+  expect(screen.queryByRole("button", { name: /Retry loading/ })).toBeNull();
+});
+
 it("opens the date for editing from a manual transaction", async () => {
   h.params = { id: transaction.id };
   mount(<FinanceTransactionScreen />);

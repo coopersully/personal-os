@@ -3,7 +3,6 @@ import {
   calendarAutomaticEvidenceKindSchema,
   calendarProfilePreferencesSchema,
   type DomainProfile,
-  type MailRule,
   mailProfilePreferencesSchema,
   type UpsertDomainProfileInput,
   upsertDomainProfileInputSchema,
@@ -22,6 +21,7 @@ import { FloatingAdd, FormSave } from "../../components/forms/form-save";
 import { SectionNote } from "../../components/forms/section-content";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
 import type { IconName } from "../../components/icons";
+import { storedLabel as human } from "../../product/labels";
 import { useAuth } from "../auth/context";
 import { TaskPreferencesScreen } from "../tasks/preferences";
 import { Action, Choice, confirm, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
@@ -31,6 +31,7 @@ import {
   MailRulePreview,
   mailRuleActionsSummary,
   mailRuleConditionSummary,
+  useMailRuleDisable,
 } from "./mail-rule-preview";
 import { useWorkspacePreferenceQueue } from "./preferences-hook";
 import { SettingsActionRow, SettingsDetailRow, SettingsRow } from "./settings-row";
@@ -117,10 +118,6 @@ const choices: Record<string, readonly string[]> = {
   financeSpendingPeriod: ["today", "week", "month", "custom"],
   financeTransactionGroup: ["none", "date", "category", "merchant", "direction", "posting"],
 };
-const human = (value: string) => {
-  const words = value.replaceAll("_", " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
-};
 const preferenceGroups = [
   { title: "Search", keys: ["includeArchivedInSearch"] },
   {
@@ -129,9 +126,9 @@ const preferenceGroups = [
     help: "These layout choices apply on web and desktop. The iPhone keeps its native Mail layout.",
   },
   {
-    title: "Calendar layout on other devices",
+    title: "Calendar layout",
     keys: ["calendarView", "showWeekends", "weekStartsOn"],
-    help: "These choices apply to the web and desktop calendar, not the iPhone agenda.",
+    help: "Calendar view and weekends apply to the web and desktop calendar, not the iPhone agenda. Week start applies on iPhone too: it sets the Calendar week and where This week begins in Spending.",
   },
   {
     title: "Following today on other devices",
@@ -155,9 +152,9 @@ const preferenceGroups = [
     keys: ["financeManualVisibility", "financeTransactionGroup"],
   },
   {
-    title: "Finance layout on other devices",
+    title: "Finance layout",
     keys: ["financeSpendingView", "financeSpendingGrouping", "financeTransactionView"],
-    help: "These shared web and desktop layout choices do not change the iPhone Finance views.",
+    help: "Spending view applies on iPhone, where bubbles opens as the list. Grouping and transaction layout apply on web and desktop.",
   },
 ];
 function WorkspacePreferencesEditor({ initial }: { initial: WorkspaceSettings }) {
@@ -747,8 +744,7 @@ export function MailRuleSettingsScreen() {
 }
 function MailRuleDetails({ id }: { id: string | undefined }) {
   const rules = useSettingsResource("mail-rules", (api) => api.listMailRules());
-  const action = useSettingsAction();
-  const publish = useSettingsListPublisher<MailRule>("mail-rules");
+  const action = useMailRuleDisable();
   useDirtyDismiss(false, action.pending);
   const rule = id ? rules.data?.find((candidate) => candidate.id === id) : undefined;
   return (
@@ -774,20 +770,7 @@ function MailRuleDetails({ id }: { id: string | undefined }) {
                   confirm(
                     "Disable Mail rule?",
                     `${rule.name} will stop applying to new mail.`,
-                    () =>
-                      void action.run(async (api) => {
-                        const accepted = await api.updateMailRule(rule.id, {
-                          enabled: false,
-                          expectedVersion: rule.version,
-                        });
-                        await publish((records) =>
-                          records.map((current) =>
-                            current.id === rule.id && current.version <= accepted.version
-                              ? accepted
-                              : current,
-                          ),
-                        );
-                      }, "Mail rule disabled"),
+                    () => void action.disable(rule),
                   )
                 }
               />

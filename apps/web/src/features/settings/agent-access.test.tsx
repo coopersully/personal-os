@@ -854,6 +854,25 @@ describe("agent access settings", () => {
     expect(screen.getByText("Expired · Legacy inactive permission")).toBeInTheDocument();
   }, 15_000);
 
+  it("preselects both memory scopes for a new token and lets the person untick them", async () => {
+    const browser = userEvent.setup();
+    renderSettings("/settings?page=connections&subpage=agent-connections");
+    await browser.click(await screen.findByRole("button", { name: "Set up a local token" }));
+    expect(screen.getByRole("radio", { name: /Mail setup/ })).toBeChecked();
+    await browser.click(screen.getByText(/Fine-tune permissions · 4 selected/));
+    expect(screen.getByLabelText("Read memory")).toBeChecked();
+    expect(screen.getByLabelText("Save memory")).toBeChecked();
+    await browser.click(screen.getByLabelText("Save memory"));
+    expect(screen.getByLabelText("Save memory")).not.toBeChecked();
+    await browser.click(screen.getByRole("button", { name: "Create local token" }));
+    await waitFor(() =>
+      expect(mocks.createAccessToken).toHaveBeenCalledWith({
+        name: "Local agent",
+        scopes: ["mail:read", "mail:write", "knowledge:read"],
+      }),
+    );
+  });
+
   it("allows reviewed one-day recoverable Trash rules to activate durably", async () => {
     const browser = userEvent.setup();
     const ruleId = "33333333-3333-4333-8333-333333333333";

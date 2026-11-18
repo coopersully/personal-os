@@ -1943,8 +1943,8 @@ function escapeHtml(value: string): string {
 }
 
 const oauthScopeLabels: Record<string, string> = {
-  "knowledge:read": "Read saved personal knowledge for authorized purposes",
-  "knowledge:write": "Save personal knowledge with source attribution",
+  "knowledge:read": "Memory: read what nohmi knows about you",
+  "knowledge:write": "Memory: save what nohmi knows about you",
   "mail:execute":
     "With review bypass enabled, send exact saved drafts, activate reviewed rules, reconcile delivery, and manage Mail stewardship and preferences. Combined Mail, Calendar, and Tasks execution grants also permit source sync and disconnection. Sending cannot be undone.",
   "finances:execute":
@@ -1978,6 +1978,17 @@ const oauthScopeLabels: Record<string, string> = {
   "tasks:read": "Read tasks",
   "tasks:write": "Create and manage tasks",
 };
+
+/** One consent line per scope, except that both memory scopes share one line. */
+function oauthConsentLines(scopes: string[]): string[] {
+  const bothMemory = scopes.includes("knowledge:read") && scopes.includes("knowledge:write");
+  return scopes.flatMap((scope) => {
+    if (bothMemory && scope === "knowledge:write") return [];
+    if (bothMemory && scope === "knowledge:read")
+      return ["Memory: read and save what nohmi knows about you"];
+    return [oauthScopeLabels[scope] ?? scope];
+  });
+}
 
 function oauthConsentPage({
   clientName,
@@ -2203,7 +2214,9 @@ function oauthConsentPage({
       </header>
       <section aria-labelledby="permissions-title" class="oauth-permissions">
         <h2 id="permissions-title">Requested access</h2>
-        <ul>${scopes.map((scope) => `<li>${escapeHtml(oauthScopeLabels[scope] ?? scope)}</li>`).join("")}</ul>
+        <ul>${oauthConsentLines(scopes)
+          .map((line) => `<li>${escapeHtml(line)}</li>`)
+          .join("")}</ul>
       </section>
       <form class="oauth-actions" method="post">
         ${Object.entries(fields)

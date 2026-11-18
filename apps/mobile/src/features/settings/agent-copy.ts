@@ -24,8 +24,8 @@ export const scopeLabels: Record<AccessScope, string> = {
   "finances:read": "Read sensitive financial accounts and activity",
   "finances:write": "Manage financial records, plans, and reviews",
   "finances:maintain": "Maintain Finances",
-  "knowledge:read": "Memory: read what nohmi knows about you",
-  "knowledge:write": "Memory: save what nohmi knows about you",
+  "knowledge:read": "Read memory",
+  "knowledge:write": "Save memory",
   "goals:read": "Read goals & motives",
   "goals:write": "Manage goals & motives",
   "tracking:read": "Read private ritual responses",
@@ -92,6 +92,7 @@ const areaLabels: Record<string, string> = {
   calendar: "Calendar",
   finances: "Finances",
   goals: "Goals & motives",
+  knowledge: "Memory",
   mail: "Mail",
   reminders: "Reminders",
   tasks: "Tasks",
@@ -109,6 +110,7 @@ const verbOrder = Object.keys(verbLabels);
 /** Permissions whose verb alone would overstate or misname what they allow. */
 const summaryOverrides: Record<string, string> = {
   "automations:write": "legacy access (inactive)",
+  "knowledge:write": "save",
   "texting:write": "send",
 };
 

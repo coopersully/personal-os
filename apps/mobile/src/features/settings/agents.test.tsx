@@ -735,6 +735,12 @@ it("matches web permission presets, changes only draft scopes, and keeps custom 
   fireEvent.change(screen.getByLabelText("Permission preset"), { target: { value: "Mail setup" } });
   expect(screen.getByLabelText("Read mail")).toBeChecked();
   expect(screen.getByLabelText("Manage mail")).toBeChecked();
+  // Memory is on by default in every preset; the read-only Daily brief only reads it.
+  expect(screen.getByLabelText("Read memory")).toBeChecked();
+  expect(screen.getByLabelText("Save memory")).toBeChecked();
+  expect(tokenPresets.find((preset) => preset.name === "Daily brief")?.scopes).not.toContain(
+    "knowledge:write",
+  );
   expect(screen.getByLabelText("Read tasks")).not.toBeChecked();
   fireEvent.click(screen.getByLabelText("Read tasks"));
   expect(screen.getByLabelText("Permission preset")).toHaveValue("custom");
@@ -744,13 +750,13 @@ it("matches web permission presets, changes only draft scopes, and keeps custom 
   expect(h.createToken).not.toHaveBeenCalled();
   expect(h.confirm).toHaveBeenLastCalledWith(
     "Grant agent access?",
-    "Preset helper will receive these permissions:\n• Read mail\n• Manage mail\n• Read tasks\nKeep its token private.",
+    "Preset helper will receive these permissions:\n• Read mail\n• Manage mail\n• Read memory\n• Save memory\n• Read tasks\nKeep its token private.",
     expect.any(Function),
   );
   await act(async () => h.confirm.mock.calls.at(-1)?.[2]());
   expect(h.createToken).toHaveBeenCalledWith({
     name: "Preset helper",
-    scopes: ["mail:read", "mail:write", "tasks:read"],
+    scopes: ["mail:read", "mail:write", "knowledge:read", "knowledge:write", "tasks:read"],
   });
 });
 

@@ -35,11 +35,14 @@ import {
 } from "./data";
 import { SettingsActionRow, SettingsDetailRow } from "./settings-row";
 
+/** Memory is on by default for new tokens (spec §5.11); the person can still switch it off. */
+const memoryScopes: AccessScope[] = ["knowledge:read", "knowledge:write"];
+
 export const tokenPresets: Array<{ description: string; name: string; scopes: AccessScope[] }> = [
   {
     description: "Learn your inbox preferences, preview rules, and run approved Mail rules.",
     name: "Mail setup",
-    scopes: ["mail:read", "mail:write"],
+    scopes: ["mail:read", "mail:write", ...memoryScopes],
   },
   {
     description: "Plan, create, and complete your day.",
@@ -52,12 +55,14 @@ export const tokenPresets: Array<{ description: string; name: string; scopes: Ac
       "tasks:read",
       "tasks:write",
       "automations:read",
+      ...memoryScopes,
     ],
   },
   {
     description: "Read your agenda, mail, and generated daily brief without changing them.",
     name: "Daily brief",
-    scopes: ["calendar:read", "reminders:read", "mail:read", "automations:read"],
+    // Read-only preset: it may read memory but never saves it.
+    scopes: ["calendar:read", "reminders:read", "mail:read", "automations:read", "knowledge:read"],
   },
   {
     description: "Create, manage, and audit all supported nohmi material.",
@@ -82,6 +87,7 @@ export const tokenPresets: Array<{ description: string; name: string; scopes: Ac
       "bookmarks:read",
       "texting:read",
       "texting:write",
+      ...memoryScopes,
     ],
   },
 ];

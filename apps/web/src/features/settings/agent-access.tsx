@@ -107,7 +107,9 @@ import { RelatedSettings } from "./related-settings.js";
 import { connectedAgentCount as countConnectedAgents } from "./sidebar-counts.js";
 import { WorkspaceGuidance } from "./workspace-guidance.js";
 
-const defaultTokenScopes: AccessScope[] = ["mail:read", "mail:write"];
+/** Memory is on by default for new tokens (spec §5.11); the person can still untick it. */
+const memoryScopes: AccessScope[] = ["knowledge:read", "knowledge:write"];
+const defaultTokenScopes: AccessScope[] = ["mail:read", "mail:write", ...memoryScopes];
 
 const tokenPresets: Array<{ description: string; name: string; scopes: AccessScope[] }> = [
   {
@@ -126,12 +128,14 @@ const tokenPresets: Array<{ description: string; name: string; scopes: AccessSco
       "tasks:read",
       "tasks:write",
       "automations:read",
+      ...memoryScopes,
     ],
   },
   {
     description: "Read your agenda, mail, and generated daily brief without changing them.",
     name: "Daily brief",
-    scopes: ["calendar:read", "reminders:read", "mail:read", "automations:read"],
+    // Read-only preset: it may read memory but never saves it.
+    scopes: ["calendar:read", "reminders:read", "mail:read", "automations:read", "knowledge:read"],
   },
   {
     description: "Create, manage, and audit all supported nohmi material.",
@@ -156,6 +160,7 @@ const tokenPresets: Array<{ description: string; name: string; scopes: AccessSco
       "bookmarks:read",
       "texting:read",
       "texting:write",
+      ...memoryScopes,
     ],
   },
 ];

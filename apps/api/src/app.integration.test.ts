@@ -8617,6 +8617,19 @@ describe.sequential("ilo API", () => {
     expect(consentPage).toContain('class="oauth-card"');
     expect(consentPage).toContain("Requested access");
     expect(consentPage).toContain('class="oauth-cancel"');
+    expect(consentPage).not.toContain("Memory:");
+    const defaultAuthorize = new URL(authorize);
+    defaultAuthorize.searchParams.delete("scope");
+    const defaultConsentPage = await (
+      await app.request(defaultAuthorize.pathname + defaultAuthorize.search, {
+        headers: { authorization: `Session ${oauthSessionToken}` },
+      })
+    ).text();
+    expect(
+      defaultConsentPage.match(/<li>Memory: read and save what nohmi knows about you<\/li>/g),
+    ).toHaveLength(1);
+    expect(defaultConsentPage).not.toContain("Memory: read what");
+    expect(defaultConsentPage).toMatch(/name="scope" value="[^"]*knowledge:read knowledge:write/);
     const approved = await app.request("/oauth/authorize", {
       body: new URLSearchParams(Object.fromEntries(authorize.searchParams)).toString(),
       headers: {

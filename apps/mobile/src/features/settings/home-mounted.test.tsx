@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SettingsHome } from "./home";
-import { settingsDestinations } from "./navigation";
+import { settingsDestinations, settingsPath } from "./navigation";
 import { SettingsRow } from "./settings-row";
 import { SettingsScreen } from "./settings-screen";
 
@@ -77,6 +77,7 @@ vi.mock("./appearance", () => ({ AppearanceSettingsScreen: () => <p>Appearance c
 vi.mock("./about", () => ({ AboutSettingsScreen: () => <p>About content</p> }));
 vi.mock("../goals/settings", () => ({ GoalsSettingsScreen: () => <p>Goals content</p> }));
 vi.mock("../rituals/settings", () => ({ RitualsSettingsScreen: () => <p>Rituals content</p> }));
+vi.mock("../knowledge/screen", () => ({ MemoryScreen: () => <p>Memory content</p> }));
 vi.mock("./agents", () => ({ AgentsSettingsScreen: () => <p>Agents content</p> }));
 vi.mock("./connections", () => ({ ConnectionsSettingsScreen: () => <p>Connections content</p> }));
 vi.mock("./notifications", () => ({
@@ -106,7 +107,7 @@ it("opens every registered destination from the grouped root without a Settings 
   ]);
   for (const destination of settingsDestinations) {
     fireEvent.click(screen.getByRole("button", { name: destination.label }));
-    expect(h.push).toHaveBeenLastCalledWith(`/settings/${destination.id}`);
+    expect(h.push).toHaveBeenLastCalledWith(settingsPath(destination.id));
   }
   expect(screen.queryByRole("tablist")).toBeNull();
   expect(screen.queryByRole("button", { name: "About" })).toBeNull();

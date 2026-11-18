@@ -145,3 +145,59 @@ CREATE TRIGGER knowledge_invalidate_signed_source AFTER DELETE ON "text_inbound_
 --> statement-breakpoint
 CREATE TRIGGER knowledge_invalidate_goal_source AFTER DELETE ON "goals"
   FOR EACH ROW EXECUTE FUNCTION knowledge_invalidate_external_source();
+--> statement-breakpoint
+-- Spec §5.11: memory is on by default for existing connections. Every live agent credential that
+-- holds a workspace scope and no memory scope receives both memory scopes once, with one system
+-- audit row each. An OAuth access token stays live while the refresh token issued with it is,
+-- because refresh copies that row's scopes; this mirrors activeHostConnectionGrant. A credential
+-- that already holds either memory scope keeps the person's choice, so a second run changes nothing.
+-- scope-backfill.integration.test.ts runs exactly the statement between these markers.
+-- memory-scope-backfill:begin
+WITH workspace_scopes AS (
+  SELECT ARRAY['reminders:read', 'reminders:write', 'tasks:read', 'tasks:write', 'tasks:execute', 'calendar:read', 'calendar:write', 'calendar:execute', 'mail:read', 'mail:write', 'mail:execute', 'finances:read', 'finances:write', 'finances:execute', 'finances:maintain', 'texting:read', 'texting:write', 'texting:execute']::text[] AS scopes
+), granted_tokens AS (
+  UPDATE "access_tokens" AS token
+  SET "scopes" = token."scopes" || '["knowledge:read","knowledge:write"]'::jsonb
+  WHERE token."revoked_at" IS NULL
+    AND (
+      token."expires_at" IS NULL
+      OR token."expires_at" > now()
+      OR EXISTS (
+        SELECT 1 FROM "oauth_refresh_tokens" AS refresh
+        WHERE refresh."access_token_id" = token."id"
+          AND refresh."user_id" = token."user_id"
+          AND refresh."client_id" = token."client_id"
+          AND token."audience" IS NOT NULL
+          AND refresh."replaced_at" IS NULL
+          AND refresh."expires_at" > now()
+      )
+    )
+    AND NOT token."scopes" ?| ARRAY['knowledge:read', 'knowledge:write']
+    AND token."scopes" ?| (SELECT scopes FROM workspace_scopes)
+  RETURNING token."user_id", token."id", token."scopes", 'access_token'::text AS entity_type
+), granted_codes AS (
+  UPDATE "oauth_authorization_codes" AS code
+  SET "scopes" = code."scopes" || '["knowledge:read","knowledge:write"]'::jsonb
+  WHERE code."used_at" IS NULL
+    AND code."expires_at" > now()
+    AND NOT code."scopes" ?| ARRAY['knowledge:read', 'knowledge:write']
+    AND code."scopes" ?| (SELECT scopes FROM workspace_scopes)
+  RETURNING code."user_id", code."id", code."scopes", 'oauth_authorization_code'::text AS entity_type
+)
+INSERT INTO "audit_events" ("user_id", "actor_type", "actor_id", "request_id", "action", "entity_type", "entity_id", "before", "after")
+SELECT
+  granted."user_id",
+  'system',
+  'migration:0146_persistent_memory',
+  'migration:0146_persistent_memory:memory-scope-backfill',
+  granted.entity_type || '.memory_scopes_granted',
+  granted.entity_type,
+  granted."id",
+  jsonb_build_object('scopes', granted."scopes" - 'knowledge:read' - 'knowledge:write'),
+  jsonb_build_object('scopes', granted."scopes", 'addedScopes', '["knowledge:read","knowledge:write"]'::jsonb)
+FROM (
+  SELECT * FROM granted_tokens
+  UNION ALL
+  SELECT * FROM granted_codes
+) AS granted;
+-- memory-scope-backfill:end

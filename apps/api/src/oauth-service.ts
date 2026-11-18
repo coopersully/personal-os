@@ -45,14 +45,9 @@ const allScopes = new Set<AccessScope>([
   "tasks:write",
   "tasks:execute",
 ]);
+/** Memory is on by default (spec §5.11); maintenance and execution stay explicit. */
 const defaultScopes = new Set<AccessScope>(
-  [...allScopes].filter(
-    (scope) =>
-      scope !== "finances:maintain" &&
-      scope !== "knowledge:read" &&
-      scope !== "knowledge:write" &&
-      !scope.endsWith(":execute"),
-  ),
+  [...allScopes].filter((scope) => scope !== "finances:maintain" && !scope.endsWith(":execute")),
 );
 
 export function createOAuthService(options: { db: Database; now: () => Date; resource: string }) {

@@ -9,10 +9,10 @@ import { useMail, useMailAccounts } from "./data";
 import {
   archivedMailboxIds,
   conversations,
-  endedSnooze,
   leftMailTarget,
   type MailChange,
   mailWriteRejected,
+  snoozeActive,
   snoozeTime,
   withMailRow,
 } from "./logic";
@@ -104,16 +104,19 @@ function inverse(
       return back ? [{ thread: after, change: back }] : [];
     }),
   });
-  if (action === "read") return steps("unread", () => ({ unread: true }));
-  if (action === "unread") return steps("read", () => ({ unread: false }));
   // Gmail restores a conversation by label. An iCloud archive moves the message to another
   // mailbox, and the API cannot yet move it back, so no inverse is offered there.
   if (action === "archive")
     return steps("restore", (before) =>
       before.provider === "google" ? { mailboxIds: before.mailboxIds } : null,
     );
-  if (action === "snooze") return steps("unsnooze", () => ({ snoozed: false }));
-  // An ended snooze cannot be put back: the list never carried when it was due to end.
+  if (action === "snooze") return steps("unsnooze", () => ({ snoozedUntil: null }));
+  // An ended snooze goes back to the time it was waiting for, while that is still ahead.
+  if (action === "unsnooze")
+    return steps("snooze", (before) =>
+      before.snoozedUntil && snoozeActive(before) ? { snoozedUntil: before.snoozedUntil } : null,
+    );
+  // Read and unread are one tap to reverse, and a restore is itself an Undo.
   return null;
 }
 
@@ -125,13 +128,14 @@ type Written =
 
 /**
  * Read, unread, archive and snooze for one mailbox list, one conversation or several at a time.
+ * A snooze is nohmi's own record of when the conversation returns; ending one removes it.
  * Read, unread and archive change the person's real mailbox, so a change is recorded only once
  * the API confirms it: until then it is an overlay on the cached list, and dropping the overlay
  * is all a failed or unconfirmed write needs to put the conversation back. Every failure
  * re-reads Mail rather than assuming either outcome.
  */
 export function useMailTriage() {
-  const { api, owner } = useMail();
+  const { api, owner, timeZone } = useMail();
   const { session } = useAuth();
   const client = useQueryClient();
   const mailboxes = useMailAccounts().data?.flatMap((account) => account.mailboxes);
@@ -157,7 +161,6 @@ export function useMailTriage() {
   async function write(
     action: Action,
     { thread, change }: Step,
-    until: string | undefined,
     current: () => boolean,
   ): Promise<Written> {
     if (busy.current.has(thread.id)) return { state: "skipped" };
@@ -173,10 +176,12 @@ export function useMailTriage() {
     };
     let confirmed: MailThread | undefined;
     try {
-      if (local(action)) await api.snoozeMailThread(thread.id, until ?? endedSnooze());
+      const { snoozedUntil, ...fields } = change;
+      if (snoozedUntil) await api.snoozeMailThread(thread.id, snoozedUntil);
+      else if (snoozedUntil === null) await api.unsnoozeMailThread(thread.id);
       else
         confirmed = await api.updateMailThread(thread.id, {
-          ...change,
+          ...fields,
           expectedUpdatedAt: thread.updatedAt,
         });
     } catch (error) {
@@ -196,28 +201,34 @@ export function useMailTriage() {
       return { state: "skipped" };
     }
     // Summaries stay body-free: copy only the fields a summary carries.
-    const fields = confirmed
+    const fields: Partial<MailThreadSummary> = confirmed
       ? {
           mailboxIds: confirmed.mailboxIds,
           starred: confirmed.starred,
           unread: confirmed.unread,
           updatedAt: confirmed.updatedAt,
         }
-      : {};
+      : { snoozedUntil: change.snoozedUntil ?? undefined };
     const after = { ...thread, ...fields };
+    // A snoozed conversation is listed only under Snoozed, whatever mailboxes it is in.
+    const asleep = snoozeActive(after);
     for (const query of client.getQueryCache().findAll({ queryKey: summaries })) {
       const target = String(query.queryKey[3]);
-      // A snoozed conversation is listed only under Snoozed; one whose snooze ended leaves it.
+      // A conversation that was snoozed joins Snoozed alone; one whose snooze ended leaves it.
       const left = confirmed
         ? leftMailTarget(target, thread.mailboxIds, confirmed.mailboxIds)
-        : (action === "snooze") === (target !== "snoozed");
-      // The archive took the row out of these lists, so a confirmed restore puts it back
-      // without waiting on the read below. A search is left to that read: it may not match.
+        : asleep === (target !== "snoozed");
+      // A confirmed Undo puts the row back where it was taken from without waiting on the read
+      // below: a restore into the inbox and its mailbox, unless the conversation is snoozed and
+      // so listed in neither, and a snooze put back into Snoozed. A search is left to that
+      // read: it may not match.
       const back =
-        action === "restore" &&
         !query.queryKey[4] &&
-        (target === "inbox" ||
-          (after.mailboxIds.includes(target) && !thread.mailboxIds.includes(target)));
+        (action === "restore"
+          ? !asleep &&
+            (target === "inbox" ||
+              (after.mailboxIds.includes(target) && !thread.mailboxIds.includes(target)))
+          : action === "snooze" && target === "snoozed");
       client.setQueryData<InfiniteData<MailThreadSummary[]>>(query.queryKey, (data) => {
         if (!data) return data;
         const pages = data.pages.map((page) =>
@@ -239,14 +250,15 @@ export function useMailTriage() {
     const epoch = session.epoch();
     return () => session.epoch() === epoch;
   }
-  const snoozedUntil = (until: string | undefined) =>
-    until ? ` until ${snoozeTime(new Date(until))}` : "";
+  const snoozedUntil = (until: string | null | undefined) =>
+    until ? ` until ${snoozeTime(new Date(until), new Date(), timeZone)}` : "";
 
-  async function send(action: Action, step: Step, until?: string) {
+  /** `undoable` is false for a change that is itself an Undo, which offers no further one. */
+  async function send(action: Action, step: Step, undoable = true) {
     if (!owner || busy.current.has(step.thread.id)) return;
     const current = asked();
     const id = toast.loading(copy[action].loading);
-    const result = await write(action, step, until, current);
+    const result = await write(action, step, current);
     if (result.state === "skipped" || !current()) return void toast.dismiss(id);
     if (result.state === "failed") {
       toast.error(failure(action, result.error), { id });
@@ -254,14 +266,13 @@ export function useMailTriage() {
       if (!mailWriteRejected(result.error)) recheck(current);
       return;
     }
-    const undo = inverse(action, [{ before: step.thread, after: result.after }]);
+    const undo = undoable ? inverse(action, [{ before: step.thread, after: result.after }]) : null;
     const back = undo?.steps[0];
     let undone = false;
     toast.success(
-      action === "snooze" ? `Snoozed${snoozedUntil(until)}` : copy[action].done,
-      // A single read or unread change is one tap to reverse from the row, so only the changes
-      // that take the conversation out of sight offer Undo.
-      undo && back && (action === "archive" || action === "snooze")
+      action === "snooze" ? `Snoozed${snoozedUntil(step.change.snoozedUntil)}` : copy[action].done,
+      // Only the changes that take the conversation out of sight offer Undo.
+      undo && back
         ? {
             id,
             duration: 10_000,
@@ -270,7 +281,7 @@ export function useMailTriage() {
               onClick: () => {
                 if (undone || !current()) return;
                 undone = true;
-                void send(undo.action, back);
+                void send(undo.action, back, false);
               },
             },
           }
@@ -288,7 +299,6 @@ export function useMailTriage() {
   async function sendMany(
     action: Action,
     steps: readonly Step[],
-    until: string | undefined,
     settled: (failed: string[]) => void,
     undoable = true,
   ) {
@@ -302,7 +312,7 @@ export function useMailTriage() {
     let rejected = true;
     try {
       for (const step of steps) {
-        const result = await write(action, step, until, current);
+        const result = await write(action, step, current);
         if (!current()) return void toast.dismiss(id);
         if (result.state === "done") confirmed.push({ before: step.thread, after: result.after });
         else {
@@ -315,7 +325,10 @@ export function useMailTriage() {
       setPending(false);
     }
     settled(failed);
-    const state = `${copy[action].state}${action === "snooze" ? snoozedUntil(until) : ""}`;
+    // One time is named only when every conversation was snoozed until it.
+    const until = steps[0]?.change.snoozedUntil;
+    const shared = steps.every((step) => step.change.snoozedUntil === until) ? until : null;
+    const state = `${copy[action].state}${action === "snooze" ? snoozedUntil(shared) : ""}`;
     const undo = undoable ? inverse(action, confirmed) : null;
     let undone = false;
     const options = undo?.steps.length
@@ -328,7 +341,7 @@ export function useMailTriage() {
               // While another selection's action is in flight this Undo waits, unspent.
               if (undone || bulking.current || !current()) return;
               undone = true;
-              void sendMany(undo.action, undo.steps, undefined, () => {}, false);
+              void sendMany(undo.action, undo.steps, () => {}, false);
             },
           },
         }
@@ -351,14 +364,15 @@ export function useMailTriage() {
   }
 
   /** The change an action asks of a conversation, or `null` when it would change nothing. */
-  function step(action: BulkAction, thread: MailThreadSummary): Step | null {
+  function step(action: BulkAction, thread: MailThreadSummary, until?: Date): Step | null {
     if (action === "read") return thread.unread ? { thread, change: { unread: false } } : null;
     if (action === "unread") return thread.unread ? null : { thread, change: { unread: true } };
     if (action === "archive") {
       const kept = archivedMailboxIds(thread, mailboxes);
       return kept ? { thread, change: { mailboxIds: kept } } : null;
     }
-    return { thread, change: { snoozed: action === "snooze" } };
+    if (action === "unsnooze") return { thread, change: { snoozedUntil: null } };
+    return until ? { thread, change: { snoozedUntil: until.toISOString() } } : null;
   }
 
   return {
@@ -366,11 +380,12 @@ export function useMailTriage() {
     /** A selection's action is in flight; the selection takes no second one until it reports. */
     pending,
     /** Whether an action would change this conversation. */
-    allows: (action: BulkAction, thread: MailThreadSummary) => !!step(action, thread),
+    allows: (action: Exclude<BulkAction, "snooze">, thread: MailThreadSummary) =>
+      !!step(action, thread),
     /** Snoozes one conversation until `until`; `onLeave` runs as it leaves the list. */
     snooze(thread: MailThreadSummary, until: Date, onLeave?: () => void) {
       onLeave?.();
-      void send("snooze", { thread, change: { snoozed: true } }, until.toISOString());
+      void send("snooze", { thread, change: { snoozedUntil: until.toISOString() } });
     },
     /**
      * Applies an action to the selected conversations it would change. `settled` receives the
@@ -384,8 +399,7 @@ export function useMailTriage() {
     ) {
       void sendMany(
         action,
-        threads.flatMap((thread) => step(action, thread) ?? []),
-        action === "snooze" ? until?.toISOString() : undefined,
+        threads.flatMap((thread) => step(action, thread, until) ?? []),
         settled,
       );
     },
@@ -440,7 +454,7 @@ export function useMailTriage() {
                 disabled,
                 onPress: () => {
                   onLeave?.();
-                  void send("unsnooze", { thread, change: { snoozed: false } });
+                  void send("unsnooze", { thread, change: { snoozedUntil: null } });
                 },
               },
             ]

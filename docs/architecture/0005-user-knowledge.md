@@ -156,11 +156,11 @@ records stay out of the session-start core and workflow memory sections.
 
 See the [current implementation boundary](../product/user-knowledge.md#relationship-to-current-implementation).
 
-## Migration 0146
+## Migrations 0146 and 0147
 
-All memory storage is created by one migration, `0146_persistent_memory`. Earlier branch
-migrations were never on main or in production, so they were folded into it and deleted rather
-than recovered. 0146 creates the knowledge records, revisions, revision metadata, sources,
+Memory storage comes from two migrations, `0146_persistent_memory` and `0147_memory_trash_version`.
+Earlier branch migrations were never on main or in production, so they were folded into 0146 and
+deleted rather than recovered. 0146 creates the knowledge records, revisions, revision metadata, sources,
 relationships, derivations, receipts, owner epochs, tags, tag aliases, tag merges, record-tag links
 and tombstones, with owner-composite cascading keys so a purge or account deletion removes
 dependent rows. It also backfills `knowledge:read` and `knowledge:write`, once and with an audit
@@ -168,6 +168,10 @@ row each, onto every live agent credential that holds a workspace scope and no m
 backfill is not run again: a credential the previous API process issues between the migration and
 the new process taking over carries no memory scope, and gets memory only when the person
 re-authorizes that connection.
+
+0147 was added after 0146 was in review, because a migration in a pull request is immutable. It
+adds the Trash version column on knowledge records, its non-negative check, and two lookup
+indexes: sources by owner and record, and relationships by owner and related record.
 
 Local worktree databases that ran an earlier branch migration are recreated rather than adopted
 in place. Before merge, the production database is checked for any `knowledge_*` tables; if any

@@ -22,8 +22,9 @@
   restored for 30 days, and are then purged, or purged at once with Delete now, to a content-free
   tombstone. A purge pass runs every six hours.
 - `knowledge:read` and `knowledge:write` are default scopes for new OAuth consents and personal
-  access tokens. Migration `0146_persistent_memory`, the only memory migration, creates the storage
-  and backfills both scopes onto every live agent credential holding a workspace scope, with an
+  access tokens. Migrations `0146_persistent_memory` and `0147_memory_trash_version` create the
+  storage (0147 adds the Trash version column, its check and two lookup indexes), and 0146
+  backfills both scopes onto every live agent credential holding a workspace scope, with an
   audit row each. A credential the previous API process issues during the release, after the
   migration, has no memory until the person re-authorizes that connection. Consent and Agents
   settings on web and iPhone show the memory line.

@@ -285,7 +285,7 @@ privacy rules above; the deferred control must not be described as available.
 PR #419 (COO-166, COO-167) implements the agent-managed memory foundation in source. It is not
 merged or deployed; the [implementation log](implementation-log.md) records what it ships.
 
-- **Storage.** Migration `0146_persistent_memory` creates owner-keyed records, immutable revisions,
+- **Storage.** Migrations `0146_persistent_memory` and `0147_memory_trash_version` create owner-keyed records, immutable revisions,
   sources, relationships, derivations, receipts, tags, tag aliases and merges, record-tag links and
   tombstones in PostgreSQL. Full-text search is a PostgreSQL index; there is no vector search.
 - **API.** `POST/GET /v1/knowledge`, `GET /v1/knowledge/:id`, `/:id/history`, `/:id/actions`,

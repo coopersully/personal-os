@@ -311,7 +311,8 @@ merged or deployed; the [implementation log](implementation-log.md) records what
   person re-authorizes that connection. The consent screen and
   Agents settings on web and iPhone list them. The person cannot yet remove only the memory scopes
   from a connection; the current way is to revoke the connection and issue a new one without them.
-  Per-scope removal is a known gap.
+  Per-scope removal is a known gap. Activity history (`GET /v1/audit`) omits memory activity for
+  agents, including those holding `audit:read`; the person still sees it.
 - **Not in this round.** Memory screens on web and iPhone (follow-up PRs, COO-168), per-scope
   removal, vector search, automatic learning, `explain_context` and context-use records, and an
   external deletion record that survives a backup restore.

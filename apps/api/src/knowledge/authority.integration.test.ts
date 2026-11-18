@@ -96,6 +96,7 @@ function fact(value: string, overrides: Partial<KnowledgeMutationInput> = {}) {
 async function setUp() {
   const userId = randomUUID();
   const sessionId = randomUUID();
+  const sessionToken = randomUUID();
   await database.db.insert(users).values({
     id: userId,
     email: `${userId}@example.test`,
@@ -106,7 +107,7 @@ async function setUp() {
   await database.db.insert(sessions).values({
     id: sessionId,
     userId,
-    tokenHash: hashToken(randomUUID()),
+    tokenHash: hashToken(sessionToken),
     expiresAt: new Date(now().getTime() + 60 * 60_000),
   });
   const owner: Principal = {
@@ -136,6 +137,7 @@ async function setUp() {
   const context = createKnowledgeContextService(config());
   return {
     owner,
+    sessionToken,
     agent: await newAgent(),
     newAgent,
     records,
@@ -735,6 +737,28 @@ describe("agent-managed memory authority", () => {
       expect(response.status, body.action).toBe(403);
     }
     expect(await f.get(f.owner, saved.id)).toMatchObject({ revision: 1, agentAccess: "allowed" });
+  });
+
+  it("agent_audit_read_omits_memory_activity", async () => {
+    const saved = await f.save(f.owner, fact("Tuesday"));
+    await f.act(f.owner, saved, { action: "set_access", agentAccess: "blocked" });
+    const auditor = await f.newAgent(["audit:read"]);
+    const api = app();
+    async function actions(authorization: string) {
+      const response = await api.request("https://api.example.com/v1/audit?limit=100", {
+        headers: { authorization },
+      });
+      expect(response.status).toBe(200);
+      const { events } = (await response.json()) as { events: { action: string }[] };
+      return events.map(({ action }) => action);
+    }
+    // Memory activity would tell an agent that blocked or trashed memory exists (M2).
+    expect(
+      (await actions(`Bearer ${auditor.token}`)).filter((a) => a.startsWith("knowledge.")),
+    ).toEqual([]);
+    expect(await actions(`Session ${f.sessionToken}`)).toEqual(
+      expect.arrayContaining(["knowledge.created", "knowledge.set_access"]),
+    );
   });
 
   it("owner_can_revise_relationship_after_agent_narrows_endpoint", async () => {

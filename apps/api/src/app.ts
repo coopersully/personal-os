@@ -1723,7 +1723,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
 
   app.get("/v1/audit", async (context) => {
     const query = auditQuerySchema.parse(context.req.query());
-    return context.json({ events: await audit.list(context.get("principal").userId, query.limit) });
+    return context.json({ events: await audit.list(context.get("principal"), query.limit) });
   });
 
   async function sendEmailVerification(emailAddress: string, userId: string): Promise<void> {

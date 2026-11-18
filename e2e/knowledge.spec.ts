@@ -18,18 +18,87 @@ async function openMemory(page: Page) {
   await expect(page.getByRole("heading", { name: "Memory", exact: true })).toBeVisible();
 }
 
-async function addFact(page: Page, title: string, value: string) {
+async function dismissToast(page: Page, message: string) {
+  await page
+    .locator("[data-sonner-toast]")
+    .filter({ hasText: message })
+    .getByRole("button", { name: "Close toast" })
+    .click();
+  await expect(toast(page, message)).toHaveCount(0);
+}
+
+async function addFact(page: Page, title: string, value: string, tag = "e2e") {
   await page.getByRole("button", { name: "Add memory", exact: true }).click();
   const editor = page.getByRole("dialog", { name: "Add memory" });
   await editor.getByLabel("Fact", { exact: true }).fill(title);
   await editor.getByLabel("Value", { exact: true }).fill(value);
-  await editor.getByLabel("Tags", { exact: true }).fill("e2e");
+  await editor.getByLabel("Tags", { exact: true }).fill(tag);
   await editor.getByRole("button", { name: "Save memory" }).click();
   await expect(toast(page, "Memory saved.")).toBeVisible();
   const row = page.getByRole("button", { name: new RegExp(title, "i") });
   await expect(row).toBeVisible();
+  await dismissToast(page, "Memory saved.");
   return row;
 }
+
+test("add, filter by tag, edit, trash and restore a memory", async ({ page }) => {
+  await login(page);
+  await openMemory(page);
+  const id = randomUUID().replaceAll("-", "");
+  const marker = `lifecycle${id}`;
+  const tag = `e2e-${id.slice(0, 12)}`;
+  const row = await addFact(page, marker, "Window seat", tag);
+  await expect(row.getByText("Stated", { exact: true })).toBeVisible();
+  await expect(row.getByText(tag, { exact: true })).toBeVisible();
+
+  const filtered = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/v1/knowledge/search") &&
+      JSON.stringify(request.postDataJSON()?.tags) === JSON.stringify([tag]),
+  );
+  const chip = page.getByRole("group", { name: "Filter by tag" }).getByRole("button", {
+    name: tag,
+    exact: true,
+  });
+  await chip.click();
+  await filtered;
+  await expect(chip).toHaveAttribute("aria-pressed", "true");
+  await expect(row).toBeVisible();
+
+  await row.click();
+  const detail = page.getByRole("dialog", { name: new RegExp(marker, "i") });
+  await detail.getByRole("button", { name: "Edit memory" }).click();
+  const editor = page.getByRole("dialog", { name: "Edit memory" });
+  await editor.getByLabel("Value", { exact: true }).fill("Aisle seat");
+  await editor.getByRole("button", { name: "Save memory" }).click();
+  await expect(toast(page, "Memory saved.")).toBeVisible();
+  await expect(detail.getByText("Aisle seat", { exact: true })).toBeVisible();
+
+  await detail.getByRole("button", { name: "Move to Trash" }).click();
+  const confirmation = page.getByRole("dialog", { name: "Move to Trash?" });
+  await expect(
+    confirmation.getByText("Older backups may still contain this until they're deleted."),
+  ).toBeVisible();
+  await expect(
+    confirmation.getByText("Agents that already read it may remember it."),
+  ).toBeVisible();
+  await expect(confirmation.getByText("This memory doesn't link to other memories.")).toBeVisible();
+  await confirmation.getByRole("button", { name: "Move to Trash" }).click();
+  await expect(toast(page, "Memory moved to Trash.")).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(row).toHaveCount(0);
+  await dismissToast(page, "Memory moved to Trash.");
+
+  await page.getByRole("tab", { name: "Trash" }).click();
+  const trashed = page.getByRole("listitem").filter({ hasText: new RegExp(marker, "i") });
+  await expect(trashed.getByText(/Deleted for good in 30 days/)).toBeVisible();
+  await trashed.getByRole("button", { name: "Restore" }).click();
+  await expect(toast(page, "Memory restored.")).toBeVisible();
+  await expect(trashed).toHaveCount(0);
+  await page.getByRole("tab", { name: "All" }).click();
+  await expect(row).toBeVisible();
+  await expect(row.getByText(/Aisle seat/)).toBeVisible();
+});
 
 test("search and revision history use the real API, with bounded private download", async ({
   page,
@@ -53,7 +122,7 @@ test("search and revision history use the real API, with bounded private downloa
   await page.keyboard.press("Enter");
   const detail = page.getByRole("dialog", { name: new RegExp(marker, "i") });
   await expect(detail.getByText("Please allow a quiet morning", { exact: true })).toBeVisible();
-  await expect(detail.getByText("Accepted by you", { exact: true })).toBeVisible();
+  await expect(detail.getByText("Written or confirmed by you", { exact: true })).toBeVisible();
   const historyRequests: string[] = [];
   page.on("request", (request) => {
     if (new URL(request.url()).pathname.endsWith("/history")) historyRequests.push(request.url());
@@ -83,11 +152,7 @@ test("search and revision history use the real API, with bounded private downloa
   expect((await downloadEvent).suggestedFilename()).toBe("nohmi-memory-1.json");
   await expect(toast(page, "Memory download started.")).toBeVisible();
 
-  await page
-    .locator("[data-sonner-toast]")
-    .filter({ hasText: "Memory download started." })
-    .getByRole("button", { name: "Close toast" })
-    .click();
+  await dismissToast(page, "Memory download started.");
   await page.screenshot({ path: info.outputPath("memory-settings.png"), animations: "disabled" });
   await page.evaluate(() => {
     document.documentElement.style.fontSize = "200%";
@@ -115,53 +180,4 @@ test("search and revision history use the real API, with bounded private downloa
     .evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
   expect(titleFits).toBeTruthy();
   await page.screenshot({ path: info.outputPath("memory-large-text.png"), animations: "disabled" });
-});
-
-test("All memory reopens a superseded predecessor", async ({ page }) => {
-  await login(page);
-  await openMemory(page);
-  const predecessorTitle = `previous${randomUUID().replaceAll("-", "")}`;
-  const predecessor = await addFact(page, predecessorTitle, "Previous preference");
-  await page
-    .locator("[data-sonner-toast]")
-    .filter({ hasText: "Memory saved." })
-    .getByRole("button", { name: "Close toast" })
-    .click();
-  await expect(toast(page, "Memory saved.")).toHaveCount(0);
-  const successorTitle = `replacement${randomUUID().replaceAll("-", "")}`;
-  const successor = await addFact(page, successorTitle, "Replacement preference");
-  const opening = page.waitForRequest(
-    (request) =>
-      request.method() === "GET" &&
-      /^\/v1\/knowledge\/[0-9a-f-]{36}$/.test(new URL(request.url()).pathname),
-  );
-  await successor.click();
-  const successorId = new URL((await opening).url()).pathname.split("/").at(-1);
-  if (!successorId) throw new Error("Expected a replacement memory ID.");
-  await page
-    .getByRole("dialog", { name: new RegExp(successorTitle, "i") })
-    .getByRole("button", { name: "Close", exact: true })
-    .click();
-
-  await predecessor.click();
-  const detail = page.getByRole("dialog", { name: new RegExp(predecessorTitle, "i") });
-  await detail.getByRole("button", { name: "Supersede", exact: true }).click();
-  const supersede = page.getByRole("dialog", { name: "Supersede memory" });
-  await supersede.getByLabel("Replacement memory ID").fill(successorId);
-  await supersede.getByRole("button", { name: "Supersede memory" }).click();
-  await expect(toast(page, "Memory superseded.")).toBeVisible();
-  await detail.getByRole("button", { name: "Close", exact: true }).click();
-  await expect(predecessor).toHaveCount(0);
-
-  await page.getByRole("tab", { name: "All memory" }).click();
-  await expect(predecessor).toBeVisible();
-  await predecessor.click();
-  await expect(detail.getByText("Superseded", { exact: true })).toBeVisible();
-  await detail.getByRole("button", { name: "Show history" }).click();
-  await expect(
-    detail
-      .getByRole("region", { name: "Revision history" })
-      .getByText("Revision 2", { exact: true }),
-  ).toBeVisible();
-  await expect(detail.getByRole("button", { name: "Edit memory" })).toHaveCount(0);
 });

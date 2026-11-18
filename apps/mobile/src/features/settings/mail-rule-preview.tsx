@@ -96,6 +96,47 @@ export function useMailRulesReread() {
 }
 
 /**
+ * Turns a rule off. Like every rule action, only a definitive rejection is reported as one; after
+ * an unknown outcome or a conflict the rule is read again, and the change is never sent twice.
+ */
+export function useMailRuleDisable() {
+  const action = useMailRuleAction();
+  const reread = useMailRulesReread();
+  const publish = useSettingsListPublisher<MailRule>("mail-rules");
+  const disable = async (rule: MailRule) => {
+    const result = await action.run("Disabling rule…", (api) =>
+      api.updateMailRule(rule.id, { enabled: false, expectedVersion: rule.version }),
+    );
+    if (!result) return;
+    if (result.ok) {
+      const accepted = result.value;
+      const published = await publish((records) =>
+        records.map((current) =>
+          current.id === rule.id && current.version <= accepted.version ? accepted : current,
+        ),
+      );
+      // The session can change while the list is published; the next person hears nothing.
+      if (published) toast.success("Mail rule disabled", { id: result.id });
+      else if (result.id !== undefined) toast.dismiss(result.id);
+      return;
+    }
+    const { rejection } = result;
+    if (rejection && rejection.status !== 409) {
+      toast.error(rejection.message, { id: result.id });
+      return;
+    }
+    void reread();
+    toast.error(
+      rejection
+        ? "This rule changed elsewhere. Check it before trying again."
+        : "Couldn’t confirm the rule was disabled. Check its status before trying again.",
+      { id: result.id },
+    );
+  };
+  return { pending: action.pending, disable };
+}
+
+/**
  * A rule's scope is shown before it can be turned on. Activation sends exactly the preview on
  * screen, and a preview of another rule version is never shown or sent.
  */

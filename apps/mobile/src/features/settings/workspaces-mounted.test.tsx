@@ -42,7 +42,9 @@ const h = vi.hoisted(() => ({
   dismiss: undefined as undefined | (() => void),
   allowDismiss: vi.fn(),
 }));
-vi.mock("sonner-native", () => ({ toast: { error: h.error } }));
+vi.mock("sonner-native", () => ({
+  toast: { error: h.error, success: h.success, loading: () => "toast-id", dismiss: () => {} },
+}));
 vi.mock("react-native", () => ({
   Text: ({ children }: PropsWithChildren) => <span>{children}</span>,
   View: ({ children }: PropsWithChildren) => <div>{children}</div>,

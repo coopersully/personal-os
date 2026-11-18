@@ -21,6 +21,12 @@ export function confirmedRejection(error: unknown): error is ApiClientError {
   );
 }
 
+/** The server's own reason for a refusal, as a sentence to append; empty when it gave none. */
+export function rejectionReason(error: { message?: string }): string {
+  const text = error.message?.trim();
+  return text ? ` ${text}` : "";
+}
+
 /** Blank means the balance is unavailable; `undefined` means the text is not an exact amount. */
 export function parseBalance(text: string): number | null | undefined {
   const value = text.trim().replaceAll(",", "");

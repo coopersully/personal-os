@@ -87,6 +87,7 @@ function AuthenticatedLayout() {
               options={{ title: "edit transaction", presentation: "modal" }}
             />
             <Stack.Screen name="finance-transaction" options={{ title: "transaction" }} />
+            <Stack.Screen name="finance-setup" options={{ title: "Finance setup" }} />
             <Stack.Screen name="task-preferences" options={{ title: "task preferences" }} />
             <Stack.Screen name="task-browser" options={{ title: "tasks" }} />
             <Stack.Screen name="task-containers" options={{ title: "tasks" }} />

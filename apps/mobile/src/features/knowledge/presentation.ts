@@ -57,23 +57,29 @@ export function memoryStatus(record: KnowledgeRecord) {
   return record.trashedAt ? "In Trash" : statusLabels[record.status];
 }
 
-/** The latest content change or confirmation. */
-export function memoryUpdatedAt(record: KnowledgeRecord) {
-  const created = Date.parse(record.createdAt);
-  const confirmed = record.lastConfirmedAt ? Date.parse(record.lastConfirmedAt) : 0;
-  return Math.max(created, confirmed);
+const day = 24 * 60 * 60 * 1000;
+/** "today", "3 days ago", "a year ago": how long ago a time was, in whole days. */
+export function memoryAge(at: string, now = Date.now()) {
+  const days = Math.max(0, Math.floor((now - Date.parse(at)) / day));
+  if (days === 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days} days ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return months === 1 ? "a month ago" : `${months} months ago`;
+  const years = Math.floor(days / 365);
+  return years <= 1 ? "a year ago" : `${years} years ago`;
 }
 
-const day = 24 * 60 * 60 * 1000;
+/**
+ * When the memory was added and, if later, last confirmed. A record's `createdAt` is when it was
+ * added and stays the same across revisions, so it never reads as an update time.
+ */
 export function memoryFreshness(record: KnowledgeRecord, now = Date.now()) {
-  const days = Math.max(0, Math.floor((now - memoryUpdatedAt(record)) / day));
-  if (days === 0) return "Updated today";
-  if (days === 1) return "Updated yesterday";
-  if (days < 30) return `Updated ${days} days ago`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return months === 1 ? "Updated a month ago" : `Updated ${months} months ago`;
-  const years = Math.floor(days / 365);
-  return years <= 1 ? "Updated a year ago" : `Updated ${years} years ago`;
+  const added = `Added ${memoryAge(record.createdAt, now)}`;
+  const confirmed = record.lastConfirmedAt;
+  return confirmed && Date.parse(confirmed) > Date.parse(record.createdAt)
+    ? `${added} · Confirmed ${memoryAge(confirmed, now)}`
+    : added;
 }
 
 export function memoryDate(date: string) {

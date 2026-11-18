@@ -133,7 +133,7 @@ function RecordFacts({ record }: { record: KnowledgeRecord }) {
         facts={[
           { label: "Tags", value: record.tags.map((tag) => `#${tag}`).join(" ") || "None" },
           { label: "Saved by", value: savedBy(record.author) },
-          { label: "Updated", value: memoryDate(record.createdAt) },
+          { label: "Added", value: memoryDate(record.createdAt) },
           ...(record.lastConfirmedAt
             ? [{ label: "Confirmed by you", value: memoryDate(record.lastConfirmedAt) }]
             : []),

@@ -391,15 +391,17 @@ it("shows_stated_inferred_and_sensitive_labels", async () => {
       author: { actorId: otherId, actorType: "agent" },
     }),
   );
+  records.set(id, memory({ lastConfirmedAt: "2026-11-14T15:00:00.000Z" }));
   setup();
-  await screen.findByText(/Stated · Updated 3 days ago/);
+  await screen.findByText(/Stated · Added 3 days ago · Confirmed yesterday/);
   await screen.findByText(/#home #travel/);
-  await screen.findByText(/Inferred · Sensitive · Disputed · Updated a month ago/);
+  await screen.findByText(/Inferred · Sensitive · Disputed · Added a month ago$/);
   expect(document.body.textContent).not.toMatch(/%|0\.8|confidence/i);
   await openMemory(/Home city/);
   expect(screen.getByText(/Inferred · Sensitive · Disputed/)).toBeTruthy();
   expect(screen.getByText(`An agent (${otherId})`)).toBeTruthy();
-  expect(document.body.textContent).not.toMatch(/%|0\.8|confidence/i);
+  expect(screen.getByText("Added")).toBeTruthy();
+  expect(document.body.textContent).not.toMatch(/%|0\.8|confidence|Updated/i);
 });
 
 it("pending_proposal_offers_only_resolve_conflict", async () => {
@@ -1608,4 +1610,45 @@ it("detail_and_tags_pull_to_refresh_report_one_error", async () => {
   press("Refresh list");
   await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(2));
   expect(screen.getByText("#family · 2 memories")).toBeTruthy();
+});
+
+it("a_trashed_or_replaced_proposal_offers_no_resolution_and_a_pending_one_no_trash", async () => {
+  const proposal = memory({
+    id: proposalId,
+    status: "proposed",
+    ownerHeld: false,
+    origin: "inferred",
+    content: fact("owner", "coffee", "oat milk"),
+    claimKey: null,
+    conflictRecordIds: [id],
+  });
+  records.set(proposalId, proposal);
+  setup();
+  await openMemory(/Coffee/);
+  // Pending: resolve it; Trash is not offered.
+  expect(button("Keep mine")).toBeTruthy();
+  expect(headerActions()).not.toContain("Move to Trash");
+
+  // In Trash: no resolution, only its Trash state.
+  records.set(proposalId, {
+    ...proposal,
+    trashedAt: "2026-11-14T15:00:00.000Z",
+    trashGroupId: proposalId,
+    trashVersion: 1,
+  });
+  press("Refresh list");
+  await screen.findByRole("button", { name: "Restore" });
+  for (const name of ["Keep mine", "Take the agent’s", "Edit and keep mine"])
+    expect(screen.queryByRole("button", { name })).toBeNull();
+  expect(headerActions()).toEqual([]);
+
+  // Superseded: no resolution either; it can only be read or trashed.
+  records.set(proposalId, { ...proposal, status: "superseded", supersededBy: id });
+  press("Refresh list");
+  await screen.findByRole("button", { name: "Open replacement memory" });
+  for (const name of ["Keep mine", "Take the agent’s", "Edit and keep mine"])
+    expect(screen.queryByRole("button", { name })).toBeNull();
+  expect(headerActions()).toEqual(["Move to Trash"]);
+  press("Open replacement memory");
+  await waitFor(() => expect(h.api.getKnowledge).toHaveBeenLastCalledWith({ id }));
 });

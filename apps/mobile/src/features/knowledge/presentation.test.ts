@@ -89,18 +89,24 @@ it("labels_origin_sensitivity_and_status_without_scores", () => {
   expect(memoryStatus(record({ trashedAt: "2026-01-02T00:00:00.000Z" }))).toBe("In Trash");
 });
 
-it("describes_freshness_from_the_latest_change_or_confirmation", () => {
+it("describes_when_a_memory_was_added_and_confirmed_never_updated", () => {
   const at = (iso: string) => Date.parse(iso);
   const saved = record({ createdAt: "2026-01-01T12:00:00.000Z" });
-  expect(memoryFreshness(saved, at("2026-01-01T13:00:00.000Z"))).toBe("Updated today");
-  expect(memoryFreshness(saved, at("2026-01-02T13:00:00.000Z"))).toBe("Updated yesterday");
-  expect(memoryFreshness(saved, at("2026-01-05T13:00:00.000Z"))).toBe("Updated 4 days ago");
-  expect(memoryFreshness(saved, at("2026-02-05T13:00:00.000Z"))).toBe("Updated a month ago");
-  expect(memoryFreshness(saved, at("2026-05-05T13:00:00.000Z"))).toBe("Updated 4 months ago");
-  expect(memoryFreshness(saved, at("2027-01-15T13:00:00.000Z"))).toBe("Updated a year ago");
-  expect(memoryFreshness(saved, at("2029-02-01T13:00:00.000Z"))).toBe("Updated 3 years ago");
+  expect(memoryFreshness(saved, at("2026-01-01T13:00:00.000Z"))).toBe("Added today");
+  expect(memoryFreshness(saved, at("2026-01-02T13:00:00.000Z"))).toBe("Added yesterday");
+  expect(memoryFreshness(saved, at("2026-01-05T13:00:00.000Z"))).toBe("Added 4 days ago");
+  expect(memoryFreshness(saved, at("2026-02-05T13:00:00.000Z"))).toBe("Added a month ago");
+  expect(memoryFreshness(saved, at("2026-05-05T13:00:00.000Z"))).toBe("Added 4 months ago");
+  expect(memoryFreshness(saved, at("2027-01-15T13:00:00.000Z"))).toBe("Added a year ago");
+  expect(memoryFreshness(saved, at("2029-02-01T13:00:00.000Z"))).toBe("Added 3 years ago");
+  // A later confirmation is named as such; createdAt is never presented as an update.
   const confirmed = { ...saved, lastConfirmedAt: "2026-03-01T12:00:00.000Z" };
-  expect(memoryFreshness(confirmed, at("2026-03-01T13:00:00.000Z"))).toBe("Updated today");
+  expect(memoryFreshness(confirmed, at("2026-03-01T13:00:00.000Z"))).toBe(
+    "Added a month ago · Confirmed today",
+  );
+  const sameTime = { ...saved, lastConfirmedAt: saved.createdAt };
+  expect(memoryFreshness(sameTime, at("2026-01-01T13:00:00.000Z"))).toBe("Added today");
+  expect(memoryFreshness(confirmed, at("2026-03-01T13:00:00.000Z"))).not.toMatch(/Updated/);
 });
 
 it("lists_linked_memories_once_and_never_itself", () => {

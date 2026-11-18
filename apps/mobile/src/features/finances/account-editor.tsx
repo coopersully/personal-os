@@ -12,6 +12,7 @@ import { formRow, PaddedSurfaceRows } from "../../components/forms/form-rows";
 import { FormSave, useFormKeyboardOffset } from "../../components/forms/form-save";
 import { SettingLabel } from "../../components/settings-row-content";
 import { spacing, useTheme } from "../../theme";
+import { type CsvProvider, csvProviders } from "./csv-import";
 import { useFinance, useFinanceRead } from "./data";
 import { confirmedRejection, parseBalance } from "./mutations";
 import { Card, Copy, FinanceScreen, ReadState } from "./ui";
@@ -21,6 +22,15 @@ const kinds: readonly { value: FinanceAccountKind; label: string }[] = [
   { value: "investment", label: "Investments" },
   { value: "debt", label: "Debt" },
   { value: "other", label: "Other" },
+];
+
+type AccountSource = "manual" | CsvProvider;
+const sources: readonly { value: AccountSource; label: string }[] = [
+  { value: "manual", label: "Entered by hand" },
+  ...Object.entries(csvProviders).map(([value, label]) => ({
+    value: value as CsvProvider,
+    label: `${label} CSV exports`,
+  })),
 ];
 
 export function TextRow({
@@ -77,13 +87,19 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
   const [name, setName] = useState(snapshot?.name ?? "");
   const [institution, setInstitution] = useState(snapshot?.institution ?? "");
   const [kind, setKind] = useState<FinanceAccountKind>(snapshot?.kind ?? "cash");
+  // Where a new account's records come from: entered by hand, or CSV exports of one service.
+  const [provider, setProvider] = useState<AccountSource>("manual");
   const [currency, setCurrency] = useState("");
   const [balance, setBalance] = useState(snapshot?.balance == null ? "" : String(snapshot.balance));
   const [edited, setEdited] = useState(false);
   const [pending, setPending] = useState(false);
   const lock = useRef(false);
   const attempt = useRef<{ payload: string; key: string } | null>(null);
-  const unconfirmed = useRef<{ name: string; institution: string } | null>(null);
+  const unconfirmed = useRef<{
+    name: string;
+    institution: string;
+    provider: AccountSource;
+  } | null>(null);
   const active = useRef(true);
   const currentOwner = useRef(owner);
   currentOwner.current = owner;
@@ -121,7 +137,7 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
       institution: institution.trim(),
       kind,
       name: name.trim(),
-      provider: "manual" as const,
+      provider,
     };
     const earlier = unconfirmed.current;
     if (earlier) {
@@ -132,7 +148,7 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
         recorded = (await api.listFinanceAccounts()).accounts.some(
           (item) =>
             !knownIds.includes(item.id) &&
-            item.provider === "manual" &&
+            item.provider === earlier.provider &&
             item.name === earlier.name &&
             item.institution === earlier.institution,
         );
@@ -164,7 +180,7 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
       if (!current()) return void toast.dismiss(id);
       unconfirmed.current = confirmedRejection(error)
         ? null
-        : { name: input.name, institution: input.institution };
+        : { name: input.name, institution: input.institution, provider: input.provider };
       toast.error(
         unconfirmed.current
           ? "Couldn’t confirm the account was added. Your draft is still here; saving again checks Accounts first."
@@ -283,6 +299,16 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
               onChange={(value) => edit(setKind)(value as FinanceAccountKind)}
             />
             {!snapshot && (
+              <EnumChoice
+                label="Records from"
+                icon="receipt"
+                value={provider}
+                disabled={pending}
+                options={sources}
+                onChange={(value) => edit(setProvider)(value as AccountSource)}
+              />
+            )}
+            {!snapshot && (
               <TextRow
                 label="Currency"
                 value={currency}
@@ -311,12 +337,15 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
         <Copy secondary>
           Name and Institution are required.{" "}
           {!snapshot
-            ? "A manual account holds a balance you maintain yourself. Leave Balance or Currency blank when unknown."
+            ? `An account you add holds a balance you maintain yourself. Leave Balance or Currency blank when unknown.${provider === "manual" ? " Choose PayPal, Venmo or Zelle under Records from to import that service’s CSV exports into it; a CSV can only be imported into an account of the same service." : ` Use Import CSV in this account’s actions to import ${csvProviders[provider]} exports.`}`
             : manual
               ? "Leave Balance blank when it is unavailable."
-              : "Balances for a connected account come from its institution."}
+              : snapshot.provider === "plaid"
+                ? "Balances for a connected account come from its institution."
+                : "This account takes CSV imports from its service. Its balance is not edited here."}
         </Copy>
-        <View style={{ height: 80 }} />
+        {/* Clears the floating Save, also when it rides above the keyboard. */}
+        <View style={{ height: 120 + keyboardOffset }} />
       </FinanceScreen>
       <FormSave
         workspace="finances"

@@ -903,3 +903,116 @@ it("explains why a duplicate cannot be resolved yet", async () => {
   mount(<FinanceAccountDuplicate />);
   await screen.findByText(`${linked.name} no longer has a possible duplicate.`);
 });
+
+it("offers CSV import only on an account whose provider has a CSV export", async () => {
+  const venmo = { ...manual, id: "00000000-0000-4000-8000-0000000000c5", provider: "venmo" };
+  h.params = { id: venmo.id };
+  h.api.listFinanceAccounts.mockResolvedValue(accounts([venmo, manual]));
+  const view = mount(<FinanceAccountScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: "Import CSV" }));
+  expect(h.push).toHaveBeenCalledWith({
+    pathname: "/finance-import",
+    params: { accountId: venmo.id },
+  });
+  view.unmount();
+  h.params = { id: manual.id };
+  mount(<FinanceAccountScreen />);
+  await screen.findByRole("button", { name: "Edit account" });
+  expect(screen.queryByRole("button", { name: "Import CSV" })).toBeNull();
+});
+
+it("adds an account for a service's CSV exports, so an import has somewhere to go", async () => {
+  h.api.createFinanceAccount.mockResolvedValue({ ...manual, id: "venmo-1", provider: "venmo" });
+  mount(<FinanceAccountEditor />);
+  await screen.findByLabelText("Name");
+  expect(screen.getByRole("button", { name: "Records from, Entered by hand" })).toBeTruthy();
+  expect(
+    screen.getByText(/a CSV can only be imported into an account of the same service/),
+  ).toBeTruthy();
+  type("Name", "Venmo");
+  type("Institution", "Venmo");
+  press("Records from, Entered by hand");
+  press("Venmo CSV exports");
+  expect(
+    screen.getByText(/Use Import CSV in this account’s actions to import Venmo exports/),
+  ).toBeTruthy();
+  press("Save changes");
+  await waitFor(() => expect(h.success).toHaveBeenCalledWith("Account added", { id: "feedback" }));
+  expect(h.api.createFinanceAccount).toHaveBeenCalledWith({
+    balance: null,
+    currencyCode: null,
+    institution: "Venmo",
+    kind: "cash",
+    name: "Venmo",
+    provider: "venmo",
+  });
+  expectNoInlineResult();
+});
+
+it("looks for an unconfirmed service account under the service it was sent with", async () => {
+  h.api.createFinanceAccount.mockRejectedValueOnce(new Error("offline"));
+  mount(<FinanceAccountEditor />);
+  await screen.findByLabelText("Name");
+  type("Name", "Venmo");
+  type("Institution", "Venmo");
+  press("Records from, Entered by hand");
+  press("Venmo CSV exports");
+  press("Save changes");
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  // A manual account of the same name is not the earlier attempt; the Venmo one is.
+  h.api.listFinanceAccounts.mockResolvedValue(
+    accounts([
+      manual,
+      { ...manual, id: "other", name: "Venmo", institution: "Venmo", provider: "manual" },
+      { ...manual, id: "venmo-1", name: "Venmo", institution: "Venmo", provider: "venmo" },
+    ]),
+  );
+  press("Save changes");
+  await waitFor(() => expect(h.success).toHaveBeenCalledWith("Account added", { id: "feedback" }));
+  expect(h.api.createFinanceAccount).toHaveBeenCalledTimes(1);
+});
+
+it("does not call a CSV account's balance an institution's", async () => {
+  const venmo = { ...manual, id: "00000000-0000-4000-8000-0000000000c6", provider: "venmo" };
+  h.params = { id: venmo.id };
+  h.api.listFinanceAccounts.mockResolvedValue(accounts([venmo]));
+  mount(<FinanceAccountEditor />);
+  expect(await screen.findByText(/takes CSV imports from its service/)).toBeTruthy();
+  expect(screen.queryByLabelText("Balance")).toBeNull();
+});
+
+it("presents a CSV account as kept by hand, never as needing a reconnect", async () => {
+  const venmo = {
+    ...manual,
+    id: "00000000-0000-4000-8000-0000000000c7",
+    name: "Venmo wallet",
+    institution: "Venmo",
+    provider: "venmo",
+    // The server files a CSV account under a connection status it can never leave.
+    status: "needs_reauth",
+    balance: null,
+    lastSyncedAt: null,
+  };
+  h.api.listFinanceAccounts.mockResolvedValue(accounts([venmo]));
+  const list = mount(<FinanceAccountsScreen />);
+  const row = await screen.findByRole("button", { name: /Venmo wallet/ });
+  expect(row.textContent).toContain("CSV imports");
+  expect(row.textContent).toContain("Not set");
+  expect(row.textContent).not.toContain("Reconnect needed");
+  expect(row.textContent).not.toContain("Unavailable");
+  list.unmount();
+  h.params = { id: venmo.id };
+  const page = mount(<FinanceAccountScreen />);
+  expect(await screen.findByText("Venmo CSV imports")).toBeTruthy();
+  expect(screen.getByText("Added by CSV import")).toBeTruthy();
+  expect(screen.getByText("Not set")).toBeTruthy();
+  for (const absent of ["Reconnect needed", "Not synced", "Status", "Updated", "Unavailable"])
+    expect(screen.queryByText(absent)).toBeNull();
+  page.unmount();
+  // A balance that was entered is shown as usual.
+  h.api.listFinanceAccounts.mockResolvedValue(
+    accounts([{ ...venmo, balance: 42.17, currencyCode: "USD" }]),
+  );
+  mount(<FinanceAccountScreen />);
+  expect(await screen.findByText("$42.17")).toBeTruthy();
+});

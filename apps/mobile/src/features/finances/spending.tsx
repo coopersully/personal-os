@@ -19,6 +19,7 @@ import { useFinance, useFinanceRead, useSpending } from "./data";
 import { financeLabel, formatLocalDate, formatMoney, recordAmount } from "./presentation";
 import { SpendingChart } from "./spending-chart";
 import { selectionLimit, useBulkCategorize } from "./transaction-bulk";
+import { ExportTransactions } from "./transaction-export";
 import {
   defaultTransactionView,
   reviewLabel,
@@ -237,6 +238,13 @@ export function Transactions({
                   accessibilityLabel="Select transactions"
                   disabled={bulk.pending || !selectable}
                   onPress={() => setSelection([])}
+                />
+                <ExportTransactions
+                  view={filterKey}
+                  disabled={bulk.pending || query.isPending}
+                  page={(cursor) =>
+                    api.listFinanceTransactions({ ...filters, accountId, cursor, limit: 100 })
+                  }
                 />
                 <Action
                   label="Filters"

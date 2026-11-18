@@ -69,19 +69,24 @@ export function useSettled(...queries: { data: unknown; isFetching: boolean }[])
   }, [ready]);
   return settled;
 }
-/** A read shown as loading until `settled`. */
-export const until = <T extends { isPending: boolean }>(query: T, settled: boolean): T => ({
+/** A read shown as loading until `settled`, unless it has failed. */
+export const until = <T extends { isPending: boolean; isError: boolean }>(
+  query: T,
+  settled: boolean,
+): T => ({
   ...query,
-  isPending: query.isPending || !settled,
+  // A read that failed is shown as failed, with its retry, not as still loading.
+  isPending: query.isPending || (!settled && !query.isError),
 });
 
-export interface WriteCopy {
+export interface WriteCopy<T = unknown> {
   loading: string;
-  done: string;
+  /** The confirmed result, in words; a function when it depends on what the server answered. */
+  done: string | ((data: T) => string);
   /** The server answered 409: something this write depends on changed. */
   conflict: string;
-  /** The server refused the write: nothing was changed. */
-  rejected: string;
+  /** The server refused the write: nothing was changed. A function may add the server's reason. */
+  rejected: string | ((error: ApiClientError) => string);
   /** No answer arrived: the write may or may not have been recorded. */
   unknown: string;
 }
@@ -123,13 +128,14 @@ export function useFinanceWrite() {
     });
   }, [unread, client, owner]);
 
-  async function run(
+  async function run<T = unknown>(
     input: object,
     send: (idempotencyKey: string) => Promise<{
       outcome: string;
+      data?: T;
       communication: { headline: string };
     }>,
-    copy: WriteCopy,
+    copy: WriteCopy<T>,
   ): Promise<boolean> {
     if (lock.current || !owner) return false;
     lock.current = true;
@@ -154,7 +160,9 @@ export function useFinanceWrite() {
         else toast.info(result.communication.headline, { id });
         return false;
       }
-      toast.success(copy.done, { id });
+      toast.success(typeof copy.done === "string" ? copy.done : copy.done(result.data as T), {
+        id,
+      });
       return true;
     } catch (error) {
       if (!current()) return gone();
@@ -167,7 +175,9 @@ export function useFinanceWrite() {
         error instanceof ApiClientError && error.status === 409
           ? copy.conflict
           : rejected
-            ? copy.rejected
+            ? typeof copy.rejected === "string"
+              ? copy.rejected
+              : copy.rejected(error)
             : copy.unknown,
         { id },
       );

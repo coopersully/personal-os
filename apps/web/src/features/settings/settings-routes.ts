@@ -11,7 +11,6 @@ export const settingsParents: Record<string, string> = {
   invitations: "security",
 };
 export function settingsPath(section: string): string {
-  if (section === "memory") return "/settings?section=memory";
   if (section === "ritual-data") section = "rituals";
   if (section === "motives") section = "goals";
   const parent = settingsParents[section];

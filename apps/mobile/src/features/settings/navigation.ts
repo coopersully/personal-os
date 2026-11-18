@@ -46,13 +46,6 @@ export const settingsDestinations = [
     keywords: "morning evening history",
   },
   {
-    id: "memory",
-    label: "Memory",
-    group: "Personal",
-    icon: "history",
-    keywords: "knowledge preferences export trash delete",
-  },
-  {
     id: "tasks",
     label: "Tasks",
     group: "Workspaces",
@@ -116,10 +109,8 @@ export const settingsDestinations = [
   keywords: string;
 }[];
 export type SettingsDestinationId = (typeof settingsDestinations)[number]["id"];
-export function settingsPath(
-  id: SettingsDestinationId,
-): "/memory" | `/settings/${SettingsDestinationId}` {
-  return id === "memory" ? "/memory" : `/settings/${id}`;
+export function settingsPath(id: SettingsDestinationId): `/settings/${SettingsDestinationId}` {
+  return `/settings/${id}`;
 }
 export function findSettingsDestination(id: string | undefined) {
   return settingsDestinations.find((destination) => destination.id === id);

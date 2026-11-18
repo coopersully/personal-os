@@ -77,7 +77,6 @@ vi.mock("./appearance", () => ({ AppearanceSettingsScreen: () => <p>Appearance c
 vi.mock("./about", () => ({ AboutSettingsScreen: () => <p>About content</p> }));
 vi.mock("../goals/settings", () => ({ GoalsSettingsScreen: () => <p>Goals content</p> }));
 vi.mock("../rituals/settings", () => ({ RitualsSettingsScreen: () => <p>Rituals content</p> }));
-vi.mock("../knowledge/screen", () => ({ MemoryScreen: () => <p>Memory content</p> }));
 vi.mock("./agents", () => ({ AgentsSettingsScreen: () => <p>Agents content</p> }));
 vi.mock("./connections", () => ({ ConnectionsSettingsScreen: () => <p>Connections content</p> }));
 vi.mock("./notifications", () => ({

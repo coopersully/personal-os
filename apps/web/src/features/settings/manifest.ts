@@ -1,4 +1,4 @@
-import { MemoryIcon, SettingsIcon } from "@/components/icons";
+import { SettingsIcon } from "@/components/icons";
 
 /** Settings-owned navigation metadata. The shell decides placement. */
 export const settingsNavigationItem = {
@@ -6,5 +6,3 @@ export const settingsNavigationItem = {
   label: "Settings",
   path: "/settings",
 };
-
-export const memorySettingsSection = { icon: MemoryIcon, id: "memory", label: "Memory" } as const;

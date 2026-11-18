@@ -18,15 +18,21 @@ export function normalizeKnowledgeTag(raw: string): string | null {
     .trim()
     .replace(/[\s_]+/gu, "-")
     .replace(/[^\p{L}\p{M}\p{N}-]/gu, "")
-    .replace(/-{2,}/gu, "-")
-    .replace(/^-+|-+$/gu, "");
-  const tag = Array.from(hyphenated)
-    .slice(0, knowledgeTagMaxLength)
-    .join("")
-    .replace(/-+$/u, "")
-    .normalize("NFC");
+    .replace(/-{2,}/gu, "-");
+  const tag = trimHyphens(
+    Array.from(trimHyphens(hyphenated)).slice(0, knowledgeTagMaxLength).join(""),
+  ).normalize("NFC");
   // A tag needs a letter or number; a lone combining mark or hyphen is not a tag.
   return /[\p{L}\p{N}]/u.test(tag) ? tag : null;
+}
+
+/** Strips leading and trailing hyphens in linear time (an anchored `-+$` regex backtracks). */
+function trimHyphens(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start] === "-") start += 1;
+  while (end > start && value[end - 1] === "-") end -= 1;
+  return value.slice(start, end);
 }
 
 /** One tag as a caller writes it; parses to its normalized form. */

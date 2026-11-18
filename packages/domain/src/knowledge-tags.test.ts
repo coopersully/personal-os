@@ -17,6 +17,8 @@ describe("knowledge tags", () => {
     expect(normalizeKnowledgeTag("a".repeat(41))).toHaveLength(40);
     expect(normalizeKnowledgeTag("money - planning")).toBe("money-planning");
     expect(normalizeKnowledgeTag(`${"a".repeat(39)} b`)).toBe("a".repeat(39));
+    // The cap counts code points, not UTF-16 units: 𐐨 is one letter outside the BMP.
+    expect(normalizeKnowledgeTag("𐐨".repeat(41))).toBe("𐐨".repeat(40));
   });
 
   it("rejects_empty_normalized_tag", () => {

@@ -4,6 +4,7 @@ import {
   accessTokens,
   createDatabaseClient,
   type DatabaseClient,
+  knowledgeRecords,
   migrateDatabase,
   sessions,
   users,
@@ -392,6 +393,17 @@ describe("session-start memory core", () => {
     const memory = await f.core.build(f.agent);
     expect(ids(memory)).toEqual([owned.id, stated.id, inferred.id]);
     expect(memory.records[2]).toMatchObject({ origin: "inferred", ownerHeld: false });
+    // Within one rank the fresher record leads.
+    const newer = await f.save(f.agent, fact("Agent stated later"));
+    // The older one gets the smaller ID, so the ID tie-break alone would put it first.
+    const [older, fresher] = [stated.id, newer.id].sort() as [string, string];
+    await database.db
+      .update(knowledgeRecords)
+      .set({ updatedAt: new Date(now().getTime() - 60_000) })
+      .where(eq(knowledgeRecords.id, older));
+    const ranked = ids(await f.core.build(f.agent));
+    expect(ranked.indexOf(fresher)).toBeLessThan(ranked.indexOf(older));
+    expect(ranked.indexOf(fresher)).toBeGreaterThan(ranked.indexOf(owned.id));
   });
 
   it("core_discloses_a_source_chain_in_linear_work", async () => {

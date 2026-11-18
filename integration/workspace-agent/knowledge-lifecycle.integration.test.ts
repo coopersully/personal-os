@@ -6,6 +6,8 @@ import {
   accessTokens,
   createDatabaseClient,
   type DatabaseClient,
+  knowledgeRecords,
+  knowledgeTombstones,
   migrateDatabase,
   sessions,
   users,
@@ -358,10 +360,32 @@ describe.sequential("registered memory lifecycle", () => {
         id: savedId,
         state: "forgotten",
       });
+      // Delete now already erased the record; give the background pass one of its own to purge.
+      const expiring = input("expired trash");
+      expiring.evidence = [{ type: "statement", wording: "expired trash" }];
+      const { recordId: expiredId } = knowledgeReceiptSchema.parse(
+        await f.owner.saveKnowledge(expiring),
+      );
+      await f.owner.updateKnowledge({
+        recordId: expiredId,
+        expectedRevision: 1,
+        action: "trash",
+        mutationKey: randomUUID(),
+      });
+      await database.db
+        .update(knowledgeRecords)
+        .set({ trashedAt: new Date(now().getTime() - 31 * 24 * 60 * 60_000) })
+        .where(eq(knowledgeRecords.id, expiredId));
       expect(
         f.runtimeLifecycle.startBackgroundTask("knowledge-purge", () => f.app.runKnowledgePurge()),
       ).toBe(true);
       await f.runtimeLifecycle.waitForIdle();
+      expect(
+        await database.db
+          .select({ id: knowledgeTombstones.recordId })
+          .from(knowledgeTombstones)
+          .where(eq(knowledgeTombstones.recordId, expiredId)),
+      ).toEqual([{ id: expiredId }]);
       const exported = await f.owner.exportKnowledge();
       expect(exported.items.some((row) => row.id === savedId)).toBe(false);
       expect(JSON.stringify(exported)).not.toContain("Thursday");
@@ -559,7 +583,8 @@ describe.sequential("registered memory lifecycle", () => {
       revision: 1,
       content: original.content,
     });
-  });
+    // Longer than the five-second lock poll, so setup plus a slow poll can still finish.
+  }, 20_000);
 
   it("denies memory reads and writes outside the credential's grant", async () => {
     const f = await fixture();

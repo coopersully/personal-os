@@ -464,6 +464,93 @@ describe("knowledge lifecycle", () => {
     });
   });
 
+  it("keeps a stated agent memory stated when the agent only retags it", async () => {
+    const { agent } = await fixture();
+    const chat = {
+      type: "statement" as const,
+      wording: "I prefer Tuesday.",
+      sessionRef: "chat-session",
+      messageRef: "chat-message",
+    };
+    const saved = await save(agent, input("Tuesday", { evidence: [chat] }));
+    expect(saved.record).toMatchObject({ origin: "stated", content: input("Tuesday").content });
+    const retagged = await lifecycle().mutate(agent, {
+      action: "revise",
+      recordId: saved.recordId,
+      expectedRevision: 1,
+      mutationKey: randomUUID(),
+      content: input("Tuesday").content,
+      tags: ["weekly-planning"],
+    });
+    expect(retagged).toMatchObject({
+      record: {
+        revision: 2,
+        origin: "stated",
+        content: input("Tuesday").content,
+        sources: saved.record.sources,
+        tags: ["weekly-planning"],
+      },
+    });
+  });
+
+  it("accepts the stored inference back on a retag and keeps its sources", async () => {
+    const { agent } = await fixture();
+    const saved = await save(
+      agent,
+      input("Tuesday", { evidence: [{ type: "observation", reference: "calendar:event-1" }] }),
+    );
+    expect(saved.record).toMatchObject({ origin: "inferred", content: { kind: "inference" } });
+    const retagged = await lifecycle().mutate(agent, {
+      action: "revise",
+      recordId: saved.recordId,
+      expectedRevision: 1,
+      mutationKey: randomUUID(),
+      content: saved.record.content,
+      tags: ["calendar"],
+    });
+    expect(retagged).toMatchObject({
+      record: {
+        revision: 2,
+        origin: "inferred",
+        content: saved.record.content,
+        sources: saved.record.sources,
+        claimKey: saved.record.claimKey,
+        tags: ["calendar"],
+      },
+    });
+  });
+
+  it("keeps the effective validity of unchanged routine content on a retag", async () => {
+    const { human } = await fixture();
+    const routine = {
+      kind: "routine" as const,
+      value: {
+        subject: "Weekly review",
+        recurrence: "Fridays",
+        classification: "stated" as const,
+        validFrom: "2026-11-01T00:00:00.000Z",
+        validUntil: "2026-12-01T00:00:00.000Z",
+      },
+    };
+    const saved = await save(
+      human,
+      input("unused", {
+        content: routine,
+        validity: { validFrom: "2026-11-01T00:00:00.000Z", validUntil: "2026-11-20T00:00:00.000Z" },
+      }),
+    );
+    expect(saved.record.validUntil).toBe("2026-11-20T00:00:00.000Z");
+    const retagged = await lifecycle().mutate(human, {
+      action: "revise",
+      recordId: saved.recordId,
+      expectedRevision: 1,
+      mutationKey: randomUUID(),
+      content: routine,
+      tags: ["review"],
+    });
+    expect(retagged).toMatchObject({ record: { validUntil: "2026-11-20T00:00:00.000Z" } });
+  });
+
   it("projects legacy origin on read and preserves the raw revision when adding a sidecar", async () => {
     const { human, agent } = await fixture();
     const saved = await save(agent, input("Tuesday", { evidence: [] }));

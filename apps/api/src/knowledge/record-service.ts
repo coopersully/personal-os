@@ -30,7 +30,7 @@ import {
   knowledgeRecordSnapshotSchema,
   knowledgeValiditySchema,
 } from "@personal-os/domain";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
@@ -48,6 +48,7 @@ import {
   knowledgeRevisionDerivations,
   knowledgeSourceReferences,
   ownedKnowledgeRevision,
+  sameKnowledgeId,
 } from "./access.js";
 import { replaceKnowledgeRecordTags, resolveKnowledgeTagRows } from "./tag-service.js";
 
@@ -218,12 +219,18 @@ export async function prepareKnowledgeRevision({
     "knowledge:read",
     ...(snapshot?.requiredReadScopes ?? []),
   ]);
-  const { content: submitted } = input;
+  const currentClaim = current
+    ? knowledgeClaimContent(current.snapshot, current.metadata.generatedInference)
+    : undefined;
+  // The same claim, whether sent as the typed claim or as the stored inference a read returns.
   const sameContent =
     current !== undefined &&
-    JSON.stringify(knowledgeClaimContent(current.snapshot, current.metadata.generatedInference)) ===
-      JSON.stringify(submitted);
+    (JSON.stringify(currentClaim) === JSON.stringify(input.content) ||
+      JSON.stringify(current.snapshot.content) === JSON.stringify(input.content));
+  const submitted = sameContent && currentClaim ? currentClaim : input.content;
   const retainSupport = sameContent && !replaceEvidence && !asProposal;
+  // Unchanged content keeping its support keeps how it was stated: origin and representation.
+  const retainedClaim = retainSupport ? current : undefined;
   const inheritedEdges = current
     ? await knowledgeRevisionDerivations(tx, principal.userId, current)
     : [];
@@ -295,8 +302,15 @@ export async function prepareKnowledgeRevision({
     if (!snapshot?.relatedRecordIds.includes(id)) await reference(id);
   }
   if (submitted.kind === "relationship") {
-    await reference(submitted.value.subjectId, "content_evidence");
-    await reference(submitted.value.objectId, "content_evidence");
+    const previous = currentClaim?.kind === "relationship" ? currentClaim.value : undefined;
+    for (const id of [submitted.value.subjectId, submitted.value.objectId]) {
+      // An unchanged endpoint that was trashed or purged stays named, as it reads: forgotten.
+      const unchanged =
+        previous &&
+        [previous.subjectId, previous.objectId].some((prior) => sameKnowledgeId(prior, id));
+      if (unchanged && !(await findOwnedKnowledgeRevision(tx, principal.userId, id))) continue;
+      await reference(id, "content_evidence");
+    }
   }
   if (submitted.kind === "goal") {
     await access.authorize(tx, principal, ["goals:read"]);
@@ -309,7 +323,7 @@ export async function prepareKnowledgeRevision({
   if (submitted.kind === "decision" || submitted.kind === "inference") {
     for (const id of submitted.value.evidenceIds) {
       if (sources.some((source) => source.id === id)) continue;
-      if (!input.relatedRecordIds.includes(id))
+      if (!input.relatedRecordIds.some((related) => sameKnowledgeId(related, id)))
         throw new AppError("invalid_request", "Evidence must name an owned related record.");
       await reference(id, "content_evidence");
     }
@@ -334,17 +348,17 @@ export async function prepareKnowledgeRevision({
     principal.actorType === "user" &&
     current.metadata.generatedInference;
   const origin =
-    retainedInference !== undefined ||
-    sameGeneratedInference ||
+    retainedClaim?.metadata.origin ??
+    (sameGeneratedInference ||
     submitted.kind === "inference" ||
     (principal.actorType === "agent" && !stated)
       ? "inferred"
-      : "stated";
+      : "stated");
   const generatedInference =
-    retainedInference?.metadata.generatedInference ??
+    retainedClaim?.metadata.generatedInference ??
     (origin === "inferred" && submitted.kind !== "inference");
   const content: KnowledgeRecordSnapshot["content"] =
-    retainedInference?.snapshot.content ??
+    retainedClaim?.snapshot.content ??
     (generatedInference
       ? {
           kind: "inference",
@@ -391,7 +405,9 @@ export async function prepareKnowledgeRevision({
       kind: "revision_proposal",
     });
   }
+  // Unchanged content keeps its dates; only an explicit validity or new dated content moves them.
   const validity = input.validity ??
+    (sameContent ? snapshot : null) ??
     (submitted.kind === "constraint" || submitted.kind === "routine" ? submitted.value : null) ??
     snapshot ?? { validFrom: null, validUntil: null };
   const dates = knowledgeValiditySchema.parse({
@@ -412,7 +428,7 @@ export async function prepareKnowledgeRevision({
     scope: input.scope,
     sensitivity: input.sensitivity,
     purposes: input.purposes ?? [...knowledgePurposeSchema.options],
-    confidence: retainedInference?.snapshot.confidence ?? (stated ? 1 : 0),
+    confidence: retainedClaim?.snapshot.confidence ?? (stated ? 1 : 0),
     status,
     revision: asProposal ? 1 : (snapshot?.revision ?? 0) + 1,
     sources,
@@ -500,12 +516,23 @@ export async function writeKnowledgeRevision(
     await tx
       .insert(knowledgeSources)
       .values(newSources.map((source) => ({ id: source.id, userId, recordId, source })));
-  if (snapshot.relatedRecordIds.length)
+  // A purged target keeps its ID in the immutable snapshot, where it reads as forgotten, but
+  // has no row left to link; only targets that still exist (live or in Trash) are indexed.
+  const linked = snapshot.relatedRecordIds.length
+    ? await tx
+        .select({ id: knowledgeRecords.id })
+        .from(knowledgeRecords)
+        .where(
+          and(
+            eq(knowledgeRecords.userId, userId),
+            inArray(knowledgeRecords.id, snapshot.relatedRecordIds),
+          ),
+        )
+    : [];
+  if (linked.length)
     await tx
       .insert(knowledgeRelationships)
-      .values(
-        snapshot.relatedRecordIds.map((relatedRecordId) => ({ userId, recordId, relatedRecordId })),
-      );
+      .values(linked.map(({ id: relatedRecordId }) => ({ userId, recordId, relatedRecordId })));
 }
 
 export async function writeKnowledgeReceipt(

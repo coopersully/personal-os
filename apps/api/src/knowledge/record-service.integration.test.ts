@@ -156,17 +156,38 @@ describe.sequential("persistent scoped knowledge", () => {
     const related = await save(f.human, input());
     const before = await persistedKnowledge();
 
-    await expect(
-      save(f.human, input({ relatedRecordIds: [related.record.id, related.record.id] })),
-    ).rejects.toMatchObject({
-      issues: [
-        {
-          path: ["relatedRecordIds"],
-          message: "Relationships must be unique.",
-        },
-      ],
-    });
+    for (const duplicate of [related.record.id, related.record.id.toUpperCase()])
+      await expect(
+        save(f.human, input({ relatedRecordIds: [related.record.id, duplicate] })),
+      ).rejects.toMatchObject({
+        issues: [
+          {
+            path: ["relatedRecordIds"],
+            message: "Relationships must be unique.",
+          },
+        ],
+      });
     expect(await persistedKnowledge()).toEqual(before);
+  });
+  it("matches decision evidence to related records by UUID identity", async () => {
+    const f = await fixture();
+    const cited = await save(f.human, input());
+    const saved = await save(
+      f.human,
+      input({
+        content: {
+          kind: "decision",
+          value: {
+            subject: "Weekly planning",
+            option: "Plan on Tuesdays",
+            reason: "The owner prefers Tuesday.",
+            evidenceIds: [cited.record.id],
+          },
+        },
+        relatedRecordIds: [cited.record.id.toUpperCase()],
+      }),
+    );
+    expect(saved.record.content).toMatchObject({ kind: "decision" });
   });
   it("records_user_fact_and_rejects_forged_source", async () => {
     const f = await fixture(),

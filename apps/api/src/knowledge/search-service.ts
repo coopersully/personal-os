@@ -158,7 +158,10 @@ export async function selectKnowledgeCandidates(
   const { tx, access, at, authorizedScopes } = session;
   // `trashed` selects the owner's Trash (row selection enforces owner-only); it is a record
   // state, not a revision status.
-  const status = query.status === "trashed" ? undefined : query.status;
+  const trashView = query.status === "trashed";
+  const status = trashView ? undefined : query.status;
+  // Archived memory is left out unless asked for; Trash lists whatever the person trashed.
+  const hiddenByDefault = (recordStatus: string) => !trashView && recordStatus === "archived";
   const refs = new Set(query.entityRefs);
   await validateEntityRefs(session, principal, refs);
   // Requested tags resolve through aliases and plurals; so do the words of the text, which
@@ -205,7 +208,7 @@ export async function selectKnowledgeCandidates(
         matchesTags(revision.tags) &&
         (status
           ? status === snapshot.status || status === "disputed"
-          : snapshot.status !== "archived") &&
+          : !hiddenByDefault(snapshot.status)) &&
         (!query.origin || query.origin === metadata.origin) &&
         query.hasConflict !== true
       )
@@ -224,8 +227,7 @@ export async function selectKnowledgeCandidates(
     if (
       (refs.size && !exact && !related) ||
       !matchesTags(record.tags) ||
-      // Archived memory is left out unless the caller asks for it.
-      (status ? status !== record.status : record.status === "archived") ||
+      (status ? status !== record.status : hiddenByDefault(record.status)) ||
       (query.origin && query.origin !== record.origin) ||
       !matchesReviewView(record, query.reviewView, at) ||
       (query.hasConflict !== undefined && query.hasConflict !== record.conflictRecordIds.length > 0)

@@ -668,11 +668,16 @@ export async function knowledgeRevisionDerivations(
   return edges;
 }
 
+/** UUIDs compare by identity: PostgreSQL accepts either case and returns lowercase. */
+export function sameKnowledgeId(left: string, right: string) {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
 function copiedRecordIds(content: KnowledgeRecordSnapshot["content"], relatedRecordIds: string[]) {
   if (content.kind === "entity_meaning") return [content.value.recordId];
   if (content.kind === "decision" || content.kind === "inference")
     return content.value.evidenceIds.filter((id) =>
-      relatedRecordIds.some((relatedId) => relatedId.toLowerCase() === id.toLowerCase()),
+      relatedRecordIds.some((relatedId) => sameKnowledgeId(relatedId, id)),
     );
   return [];
 }
@@ -1016,7 +1021,19 @@ export function createKnowledgeAccess(now: () => Date) {
     // revision's supporting sources decide whether the claim remains eligible. A pending
     // proposal's link to its original narrows disclosure (above) but is not evidence: it tracks
     // the original's current revision, so a later change to the original never makes it stale.
-    const activeEdges = edges.filter((edge) => edge.kind !== "revision_proposal");
+    // A relationship's endpoints are linked, not derived (R8): they narrow disclosure and must
+    // exist structurally, but editing or trashing one never disputes the relationship. An
+    // explicit citation of an endpoint is a separate `source_record` edge and still counts.
+    const endpointIds = new Set(
+      content.kind === "relationship"
+        ? [content.value.subjectId, content.value.objectId].map((id) => id.toLowerCase())
+        : [],
+    );
+    const activeEdges = edges.filter(
+      (edge) =>
+        edge.kind !== "revision_proposal" &&
+        !(edge.kind === "content_evidence" && endpointIds.has(edge.sourceRecordId.toLowerCase())),
+    );
     const implicitCopies = copiedRecordIds(content, snapshot.relatedRecordIds).filter(
       (id) => !activeEdges.some((edge) => edge.sourceRecordId === id),
     );

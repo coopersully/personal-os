@@ -188,7 +188,9 @@ export const knowledgeEvidenceListSchema = z.array(knowledgeEvidenceSchema).max(
 export const knowledgeRelatedIdsSchema = z
   .array(idSchema)
   .max(20)
-  .refine((ids) => new Set(ids).size === ids.length, { message: "Relationships must be unique." });
+  .refine((ids) => new Set(ids.map((id) => id.toLowerCase())).size === ids.length, {
+    message: "Relationships must be unique.",
+  });
 export const knowledgeSensitivitySchema = z.enum(["standard", "sensitive"]);
 export const knowledgeAgentAccessSchema = z.enum(["allowed", "blocked"]);
 export type KnowledgeAgentAccess = z.infer<typeof knowledgeAgentAccessSchema>;

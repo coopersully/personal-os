@@ -256,6 +256,129 @@ describe("memory trash and purge", () => {
     });
   });
 
+  it("relationship_endpoint_edits_and_trash_never_dispute_it", async () => {
+    const f = await fixture();
+    const chat = (wording: string) => ({
+      type: "statement" as const,
+      wording,
+      sessionRef: "chat-session",
+      messageRef: "chat-message",
+    });
+    const person = await f.save(fact("endpoint-person", { evidence: [chat("person")] }), f.agent);
+    const other = await f.save(fact("endpoint-other", { evidence: [chat("other")] }), f.agent);
+    const relationship = await f.save(
+      fact("unused", {
+        evidence: [chat("They are partners.")],
+        content: {
+          kind: "relationship",
+          value: {
+            subjectId: person.id,
+            objectId: other.id,
+            relationship: "partner",
+            direction: "bidirectional",
+          },
+        },
+      }),
+      f.agent,
+    );
+    await f.lifecycle.mutate(f.agent, {
+      action: "revise",
+      recordId: person.id,
+      expectedRevision: 1,
+      mutationKey: randomUUID(),
+      content: fact("endpoint-person-corrected").content,
+    });
+    const searched = async () =>
+      (await f.search.search(f.agent, { ...planning, limit: 50 })).items.find(
+        ({ id }) => id === relationship.id,
+      );
+    expect(await f.records.get(f.agent, { id: relationship.id })).toMatchObject({
+      status: "active",
+      evidenceAvailable: true,
+    });
+    expect(await searched()).toMatchObject({ status: "active" });
+    await f.act("trash", { id: person.id, revision: 2 });
+    await f.act("trash", other);
+    expect(await searched()).toMatchObject({ status: "active", evidenceAvailable: true });
+  });
+
+  it("archive_works_after_a_linked_record_is_purged", async () => {
+    const f = await fixture();
+    const target = await f.save(fact("purged-link-target"));
+    const linked = await f.save(fact("purged-link-holder", { relatedRecordIds: [target.id] }));
+    await f.act("delete_now", target);
+    const archived = await f.lifecycle.mutate(f.owner, {
+      action: "archive",
+      recordId: linked.id,
+      expectedRevision: 1,
+      mutationKey: randomUUID(),
+    });
+    expect(archived).toMatchObject({ record: { revision: 2, status: "archived" } });
+    const [snapshot] = await database.db
+      .select({ snapshot: knowledgeRevisions.snapshot })
+      .from(knowledgeRevisions)
+      .where(and(eq(knowledgeRevisions.recordId, linked.id), eq(knowledgeRevisions.revision, 2)));
+    // History stays immutable: the purged ID is still named and reads as forgotten.
+    expect(snapshot?.snapshot.relatedRecordIds).toEqual([target.id]);
+    expect(
+      await database.db
+        .select()
+        .from(knowledgeRelationships)
+        .where(eq(knowledgeRelationships.recordId, linked.id)),
+    ).toEqual([]);
+  });
+
+  it("relationship_metadata_edit_keeps_a_forgotten_endpoint", async () => {
+    const f = await fixture();
+    const person = await f.save(fact("forgotten-endpoint"));
+    const other = await f.save(fact("kept-endpoint"));
+    const content = {
+      kind: "relationship" as const,
+      value: {
+        subjectId: person.id,
+        objectId: other.id,
+        relationship: "partner",
+        direction: "bidirectional" as const,
+      },
+    };
+    const relationship = await f.save(fact("unused", { content }));
+    await f.act("delete_now", person);
+    expect(
+      await f.lifecycle.mutate(f.owner, {
+        action: "revise",
+        recordId: relationship.id,
+        expectedRevision: 1,
+        mutationKey: randomUUID(),
+        content,
+        tags: ["family"],
+      }),
+    ).toMatchObject({ record: { revision: 2, tags: ["family"], content } });
+    // A newly named endpoint must still exist.
+    await expect(
+      f.lifecycle.mutate(f.owner, {
+        action: "revise",
+        recordId: relationship.id,
+        expectedRevision: 2,
+        mutationKey: randomUUID(),
+        content: { ...content, value: { ...content.value, objectId: randomUUID() } },
+      }),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("trash_view_lists_archived_records", async () => {
+    const f = await fixture();
+    const archived = await f.save(fact("archived-then-trashed"));
+    await f.lifecycle.mutate(f.owner, {
+      action: "archive",
+      recordId: archived.id,
+      expectedRevision: 1,
+      mutationKey: randomUUID(),
+    });
+    await f.act("trash", { id: archived.id, revision: 2 });
+    const trashed = await f.search.search(f.owner, { status: "trashed", limit: 50 });
+    expect(trashed.items).toMatchObject([{ id: archived.id, status: "archived" }]);
+  });
+
   it("restore_returns_only_its_trash_group", async () => {
     const f = await fixture();
     const a = await f.save(fact("restore-source"));

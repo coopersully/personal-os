@@ -50,7 +50,11 @@ import {
   ownedKnowledgeRevision,
   sameKnowledgeId,
 } from "./access.js";
-import { replaceKnowledgeRecordTags, resolveKnowledgeTagRows } from "./tag-service.js";
+import {
+  knowledgeAliasGate,
+  replaceKnowledgeRecordTags,
+  resolveKnowledgeTagRows,
+} from "./tag-service.js";
 
 type KnowledgeAccess = ReturnType<typeof createKnowledgeAccess>;
 type StoredReceipt = typeof knowledgeReceipts.$inferSelect;
@@ -435,7 +439,14 @@ export async function prepareKnowledgeRevision({
     relatedRecordIds: input.relatedRecordIds,
     createdAt: asProposal ? at.toISOString() : (snapshot?.createdAt ?? at.toISOString()),
   });
-  const tags = await resolveKnowledgeTagRows(tx, principal.userId, input.tags);
+  // An agent never files memory under a tag only hidden memory carries, even through an alias.
+  const followAlias = knowledgeAliasGate(
+    tx,
+    principal,
+    access,
+    (await access.authorize(tx, principal, ["knowledge:read"])).scopes,
+  );
+  const tags = await resolveKnowledgeTagRows(tx, principal.userId, input.tags, followAlias);
   return {
     snapshot: record,
     metadata,

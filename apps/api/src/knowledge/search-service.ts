@@ -28,7 +28,7 @@ import {
   knowledgeQueryFilter,
   pageRecords,
 } from "./retrieval-session.js";
-import { lookupKnowledgeTags } from "./tag-service.js";
+import { knowledgeAliasGate, lookupKnowledgeTags } from "./tag-service.js";
 
 function sourcePriority(record: KnowledgeRecord) {
   let priority = 0;
@@ -166,18 +166,33 @@ export async function selectKnowledgeCandidates(
   await validateEntityRefs(session, principal, refs);
   // Requested tags resolve through aliases and plurals; so do the words of the text, which
   // rank a record above text-only matches when one of them is exactly a tag it carries.
-  const requested = query.tags ? await lookupKnowledgeTags(tx, principal.userId, query.tags) : [];
-  const textWords = query.text
-    ? [
-        ...new Set(
-          [query.text, ...query.text.split(/\s+/u)].flatMap(
-            (word) => normalizeKnowledgeTag(word) ?? [],
-          ),
-        ),
-      ].slice(0, textTagCandidates)
+  // An agent follows an alias only to a tag it can see, so a hidden target reads as unknown.
+  const followAlias = knowledgeAliasGate(tx, principal, access, authorizedScopes);
+  const requested = query.tags
+    ? await lookupKnowledgeTags(tx, principal.userId, query.tags, followAlias)
     : [];
+  // A word the text excludes (`-decaf`) never matches as a tag, and a record carrying it as a
+  // tag is excluded like one whose content contains it.
+  const words = query.text?.split(/\s+/u) ?? [];
+  const negated = words.filter((word) => word.length > 1 && word.startsWith("-"));
+  const tagNames = (candidates: string[]) => [
+    ...new Set(candidates.flatMap((word) => normalizeKnowledgeTag(word) ?? [])),
+  ];
+  const textWords = tagNames(
+    negated.length
+      ? words.filter((word) => !word.startsWith("-"))
+      : query.text
+        ? [query.text, ...words]
+        : [],
+  ).slice(0, textTagCandidates);
+  const excludedWords = tagNames(negated).slice(0, textTagCandidates);
   const textTags = new Set(
-    textWords.length ? await lookupKnowledgeTags(tx, principal.userId, textWords) : [],
+    textWords.length ? await lookupKnowledgeTags(tx, principal.userId, textWords, followAlias) : [],
+  );
+  const excludedTags = new Set(
+    excludedWords.length
+      ? await lookupKnowledgeTags(tx, principal.userId, excludedWords, followAlias)
+      : [],
   );
   const carriedTags = (tags: readonly string[]) =>
     requested.filter((tag) => tags.includes(tag)).length;
@@ -249,7 +264,11 @@ export async function selectKnowledgeCandidates(
 
   const ranks = query.text ? await fullTextRanks(session, candidates, query.text) : null;
   const matches = ranks
-    ? candidates.filter(({ record, textTags }) => textTags > 0 || ranks.has(record.id))
+    ? candidates.filter(
+        ({ record, textTags }) =>
+          ranks.has(record.id) ||
+          (textTags > 0 && !record.tags.some((tag) => excludedTags.has(tag))),
+      )
     : candidates;
   matches.sort(
     (a, b) =>

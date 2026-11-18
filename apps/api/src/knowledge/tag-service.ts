@@ -35,6 +35,12 @@ import {
 } from "./access.js";
 
 type TagRow = { id: string; name: string };
+/**
+ * Whether this caller may follow an alias to the tag it names. Owners always may. An agent
+ * follows an alias only to a tag some memory it can read carries; otherwise the alias reads as
+ * an ordinary name, so an alias filed under hidden memory never reveals its target (R14).
+ */
+export type KnowledgeAliasGate = (target: TagRow) => Promise<boolean>;
 const tagWriteScopes: AccessScope[] = ["knowledge:read", "knowledge:write"];
 /** The core reserves room for this many tags; the app may ask for more. */
 const defaultIndexLimit = 100;
@@ -69,9 +75,16 @@ async function findAliasTarget(tx: KnowledgeTransaction, userId: string, alias: 
   return tag;
 }
 
-/** An alias or existing tag with this exact name. */
-async function findKnownTag(tx: KnowledgeTransaction, userId: string, name: string) {
-  return (await findAliasTarget(tx, userId, name)) ?? (await findTag(tx, userId, name));
+/** An alias this caller may follow, or an existing tag with this exact name. */
+async function findKnownTag(
+  tx: KnowledgeTransaction,
+  userId: string,
+  name: string,
+  followAlias?: KnowledgeAliasGate,
+) {
+  const target = await findAliasTarget(tx, userId, name);
+  if (target && (!followAlias || (await followAlias(target)))) return target;
+  return findTag(tx, userId, name);
 }
 
 /** The only similarity rule: a name that differs from a known owner tag by a trailing `s`. */
@@ -90,6 +103,7 @@ async function resolveTag(
   userId: string,
   raw: string,
   create: boolean,
+  followAlias?: KnowledgeAliasGate,
 ): Promise<TagRow | { id: null; name: string }> {
   const name = normalizeKnowledgeTag(raw);
   if (name === null)
@@ -97,10 +111,10 @@ async function resolveTag(
       "invalid_request",
       `The tag ${JSON.stringify(raw)} has no letters or numbers.`,
     );
-  const known = await findKnownTag(tx, userId, name);
+  const known = await findKnownTag(tx, userId, name, followAlias);
   if (known) return known;
   const variant = pluralVariant(name);
-  const similar = variant ? await findKnownTag(tx, userId, variant) : undefined;
+  const similar = variant ? await findKnownTag(tx, userId, variant, followAlias) : undefined;
   if (similar) return similar;
   if (!create) return { id: null, name };
   await tx.insert(knowledgeTags).values({ userId, name }).onConflictDoNothing();
@@ -114,10 +128,11 @@ export async function resolveKnowledgeTagRows(
   tx: KnowledgeTransaction,
   userId: string,
   names: readonly string[],
+  followAlias?: KnowledgeAliasGate,
 ): Promise<TagRow[]> {
   const rows = new Map<string, TagRow>();
   for (const name of names) {
-    const tag = await resolveTag(tx, userId, name, true);
+    const tag = await resolveTag(tx, userId, name, true, followAlias);
     if (tag.id !== null) rows.set(tag.id, tag);
   }
   return [...rows.values()];
@@ -128,10 +143,44 @@ export async function lookupKnowledgeTags(
   tx: KnowledgeTransaction,
   userId: string,
   names: readonly string[],
+  followAlias?: KnowledgeAliasGate,
 ): Promise<string[]> {
   const resolved = new Set<string>();
-  for (const name of names) resolved.add((await resolveTag(tx, userId, name, false)).name);
+  for (const name of names)
+    resolved.add((await resolveTag(tx, userId, name, false, followAlias)).name);
   return [...resolved];
+}
+
+/**
+ * The alias gate for one caller in one transaction: none for the owner; for an agent, a tag
+ * counts as visible when one current record it can read carries it. Disclosure runs only when
+ * an alias is actually hit, and stops at the first readable record.
+ */
+export function knowledgeAliasGate(
+  tx: KnowledgeTransaction,
+  principal: Principal,
+  access: ReturnType<typeof createKnowledgeAccess>,
+  authorizedScopes: AccessScope[],
+): KnowledgeAliasGate | undefined {
+  if (principal.actorType === "user") return undefined;
+  let rows: Promise<Awaited<ReturnType<typeof currentKnowledgeForRetrieval>>> | undefined;
+  const visible = new Map<string, Promise<boolean>>();
+  return (target) => {
+    let answer = visible.get(target.id);
+    if (!answer) {
+      rows ??= currentKnowledgeForRetrieval(tx, principal, {}, authorizedScopes).then((r) => r);
+      answer = rows.then(async (current) => {
+        for (const row of current) {
+          if (!row.tags.includes(target.name)) continue;
+          if (await access.visibleDisclosure(tx, principal, projectKnowledgeRevision(row)))
+            return true;
+        }
+        return false;
+      });
+      visible.set(target.id, answer);
+    }
+    return answer;
+  };
 }
 
 /** Replaces a record's tag links. Tags are record state: this never writes a revision. */

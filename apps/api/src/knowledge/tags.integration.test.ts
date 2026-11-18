@@ -54,6 +54,8 @@ function fact(
   };
 }
 
+const observed = { evidence: [{ type: "observation" as const, reference: "calendar:event" }] };
+
 describe("memory tags", () => {
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
@@ -357,6 +359,32 @@ describe("memory tags", () => {
     expect(await f.merge("x", "fresh")).toMatchObject({ from: "x", into: "fresh" });
   });
 
+  it("agent_save_never_files_under_a_hidden_alias_target", async () => {
+    const f = await fixture();
+    const hidden = await f.save(fact("Session", ["appointments"]));
+    await f.act(hidden, { action: "set_access", agentAccess: "blocked" });
+    // The owner files the old name under a tag only blocked memory carries.
+    await f.merge("appointments", "therapy-sessions", f.owner);
+    const saved = await f.save(fact("Dentist on Monday", ["appointments"], observed), f.agent);
+    expect(saved.tags).toEqual(["appointments"]);
+    expect(JSON.stringify(saved)).not.toContain("therapy");
+    expect((await f.tags.index(f.agent)).tags).toEqual([{ name: "appointments", count: 1 }]);
+    // Search treats the alias the same way: the agent finds its own record by the literal name.
+    const found = await f.search.search(f.agent, { tags: ["appointments"] });
+    expect(found.items.map(({ id }) => id)).toEqual([saved.id]);
+    // The person still files the name under its target.
+    const owned = await f.save(fact("Checkup", ["appointments"]));
+    expect(owned.tags).toEqual(["therapy-sessions"]);
+  });
+
+  it("agent_save_follows_an_alias_to_a_visible_tag", async () => {
+    const f = await fixture();
+    await f.save(fact("Rent", ["money"]));
+    await f.merge("money", "finances", f.owner);
+    const saved = await f.save(fact("Utilities", ["money"], observed), f.agent);
+    expect(saved.tags).toEqual(["finances"]);
+  });
+
   it("concurrent_saves_share_a_new_tag", async () => {
     const f = await fixture();
     const [first, second] = await Promise.all([
@@ -461,6 +489,14 @@ describe("memory tags", () => {
     expect(all.items).toEqual([]);
     const any = await f.search.search(f.agent, { tags: ["partner", "work"] });
     expect(any.items.map(({ id }) => id).sort()).toEqual([tagged.id, textOnly.id].sort());
+  });
+
+  it("tag_match_respects_an_excluded_word", async () => {
+    const f = await fixture();
+    const regular = await f.save(fact("Morning coffee", ["coffee"]));
+    await f.save(fact("Evening coffee", ["coffee", "decaf"]));
+    const page = await f.search.search(f.agent, { text: "coffee -decaf" });
+    expect(page.items.map(({ id }) => id)).toEqual([regular.id]);
   });
 
   it("revise_sets_tags_and_agent_changes_to_owner_memory_are_proposals", async () => {

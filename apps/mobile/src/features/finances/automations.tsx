@@ -160,8 +160,8 @@ function Automation({
                       label,
                     }),
                   "Automation name saved.",
-                ).then((saved) => {
-                  if (saved) setName(null);
+                ).then((outcome) => {
+                  if (outcome === "saved") setName(null);
                 })
               }
             />

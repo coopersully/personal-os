@@ -99,7 +99,7 @@ describe.sequential("persistent scoped knowledge", () => {
       }),
     });
   }
-  it("grants knowledge only by explicit OAuth consent and preserves legacy grants on refresh", async () => {
+  it("grants memory by default OAuth consent, honours narrower requests and preserves grants on refresh", async () => {
     const f = await fixture([]);
     await database.db
       .update(users)
@@ -143,13 +143,12 @@ describe.sequential("persistent scoped knowledge", () => {
       });
       expect(consent.status).toBe(200);
       const html = await consent.text();
-      if (scope?.includes("knowledge:")) {
-        expect(html).toContain("Read saved personal knowledge for authorized purposes");
-        expect(html).toContain("Save personal knowledge with source attribution");
+      if (scope === undefined || scope.includes("knowledge:")) {
+        expect(html).toContain("Memory: read and save what nohmi knows about you");
       } else {
         expect(html).not.toContain("knowledge:read");
         expect(html).not.toContain("knowledge:write");
-        expect(html).not.toContain("Read saved personal knowledge");
+        expect(html).not.toContain("Memory:");
       }
       const authorization = await apiApp.request("/oauth/authorize", {
         ...form(params),
@@ -182,24 +181,33 @@ describe.sequential("persistent scoped knowledge", () => {
       "x-personal-os-mcp-resource": resource,
       "x-personal-os-mcp-key": "knowledge-test-internal-secret-32-chars",
     };
-    for (const scope of [undefined, "tasks:read"]) {
-      const legacy = await grant(scope);
-      expect(legacy.scope.split(" ")).not.toContain("knowledge:read");
-      expect(legacy.scope.split(" ")).not.toContain("knowledge:write");
+    const refresh = async (issued: { refresh_token: string }) => {
       const refreshed = await apiApp.request(
         "/oauth/token",
         form(
           new URLSearchParams({
             client_id,
-            refresh_token: legacy.refresh_token,
+            refresh_token: issued.refresh_token,
             grant_type: "refresh_token",
             resource,
           }),
         ),
       );
       expect(refreshed.status).toBe(200);
-      const tokens = (await refreshed.json()) as { access_token: string; scope: string };
-      expect(tokens.scope).toBe(legacy.scope);
+      return (await refreshed.json()) as { access_token: string; scope: string };
+    };
+    // Spec §5.11: a default consent includes both memory scopes, and refresh keeps them.
+    const defaults = await grant();
+    expect(defaults.scope.split(" ")).toEqual(
+      expect.arrayContaining(["knowledge:read", "knowledge:write"]),
+    );
+    expect((await refresh(defaults)).scope).toBe(defaults.scope);
+    // An explicit narrower request without memory still yields a token without memory.
+    {
+      const narrow = await grant("tasks:read");
+      expect(narrow.scope).toBe("tasks:read");
+      const tokens = await refresh(narrow);
+      expect(tokens.scope).toBe(narrow.scope);
       const denied = await apiApp.request("/v1/knowledge", {
         method: "POST",
         headers: {

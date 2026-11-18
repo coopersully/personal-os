@@ -327,6 +327,17 @@ it("groups shared presentation choices and disables snap sensitivity when follow
   expect(following.getByLabelText("Snap sensitivity")).toBeDisabled();
   expect(h.write).toHaveBeenLastCalledWith({ snapToFollow: false });
 });
+it("presents the Spending defaults as applying on iPhone too", () => {
+  h.domain = "finances";
+  render(<FinanceSettingsScreen />);
+  const defaults = within(screen.getByRole("region", { name: "Spending defaults" }));
+  expect(defaults.getByText("These apply to Spending on iPhone, web and desktop.")).toBeVisible();
+  expect(
+    screen.queryByRole("region", { name: "Spending defaults on other devices" }),
+  ).not.toBeInTheDocument();
+  // Layout choices that the iPhone does not follow keep saying so.
+  expect(screen.getByRole("region", { name: "Finance layout on other devices" })).toBeVisible();
+});
 it("resets rejected numeric text only after reviewed reload and does not replay it on blur", async () => {
   h.reload.mockResolvedValue({
     workspace: "mail",

@@ -20,7 +20,7 @@ import { useFinanceRefresh } from "./data";
 
 const refreshKeys: Record<string, readonly string[]> = {
   Overview: ["spending", "upcoming", "accounts", "recent-activity"],
-  Spending: ["spending", "transactions"],
+  Spending: ["spending", "transactions", "spending-preferences"],
   Accounts: ["accounts"],
   Plan: ["budget-status", "budget", "upcoming", "accounts", "goals"],
   Assistant: [
@@ -30,6 +30,7 @@ const refreshKeys: Record<string, readonly string[]> = {
     "status",
     "activity",
     "conversation",
+    "conversation-unread",
   ],
 };
 const noKeys: readonly string[] = [];

@@ -682,6 +682,57 @@ Approvals, and a Reviews and checks list. Every page behind that list is the sin
 - **A split transaction under review** reads "Split in N parts". Approve splits keeps the
   parts. Choosing one category asks "Replace N parts?" first, because it removes them.
 
+### Finance spending views, saved defaults and Assistant state
+
+Spending reads on the account's saved Spending defaults: accounting basis, whether pending is
+included, whether matched refunds are subtracted and whether uncategorized spending is included.
+The line under the total states what it counts, written from those defaults ("Full outflow · pending
+left out · …"), and uncategorized spending that was left out is stated with its amount. Spending
+waits for the defaults and the saved week start before it reads: a total is never shown on an
+assumed basis, and a failed read of the defaults offers Retry instead of falling back to product
+defaults. The iPhone applies these defaults and does not change them; they are edited in Finance
+settings, whose "Spending defaults" group says they apply on iPhone, web and desktop. The saved
+view, grouping and selected accounts remain web and desktop layout choices.
+
+The period control offers Today, Week, Month and Custom. A visit opens on the saved
+default period unless a link names one; choosing another period lasts for the visit and is not
+saved. The week follows the account's "Week starts on" choice. Custom shows From and Through date
+fields and starts as today; a range that is incomplete, reversed or longer than the API's ten-year
+limit is explained beside the fields and is not read. Dates are days in the account timezone.
+
+Summary has three views, chosen with a segmented control:
+
+- **List** keeps the daily bars and the category or bucket rows.
+- **Trends** shows the period so far as bars (days up to a month, weeks counted from the range
+  start up to half a year, then months), the equal span before it with the difference, and one row
+  per day, week or month. A comparison that rests on incomplete or out-of-date data says so. When
+  only the comparison period fails, the trend stays and the comparison offers Retry.
+- **Rhythm** is a grid whose colour strength is the amount: hours for a single day, days under
+  their weekday for up to two months, then calendar weeks, months or years. Choosing a block names
+  it, its amount and its state below the grid. An hour is assigned only from a source timestamp;
+  purchases without a time are one "Time not provided" block.
+
+Every bar and block carries its amount and state in its accessible label, so coverage, pending,
+refunds and future days are not carried by colour. A group, a trend row and a chosen rhythm block
+open the transactions behind them with the exact query and server revision that produced the
+summary; an hour of the day never does, because a date-only record cannot select an hour. Without
+a server revision nothing offers a drill-down. Bubbles is not offered on iPhone (open decision).
+
+A recorded activity row opens its evidence in place: who acted and when, the explanation, the
+records it concerns, source messages, the audited before and after of each changed field, the
+authority it ran under and its identifiers. Records this app can open are links (transaction,
+account, review case, question, the conversation); any other record, and any reference whose stated
+source disagrees with its kind, is shown as text. Further evidence loads on request through one
+Sonner toast and is refused whole if it does not continue the loaded evidence; evidence the account
+may no longer read is dropped from the screen.
+
+The Assistant tab carries the unread count of the Finance conversation as a native tab badge, named
+for a screen reader ("assistant, 3 unread messages"), and the conversation row says the same. An
+unknown count shows no badge; it is never shown as zero. Messages are recorded as read when the
+transcript is on screen, at its latest message, with every unread message loaded: opening the tab,
+a mounted but hidden transcript, or a page that stops short of older unread messages marks nothing.
+A failed mark is silent and is taken again at the next chance.
+
 ### Workspace conversations
 
 Chat uses a bounded, flex-sized transcript beneath fixed page controls. Only the transcript

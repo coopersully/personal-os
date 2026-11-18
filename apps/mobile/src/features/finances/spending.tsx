@@ -1,4 +1,8 @@
-import type { FinanceSpendingReferenceFilter } from "@personal-os/domain";
+import type {
+  FinanceSpendingQuery,
+  FinanceSpendingReferenceFilter,
+  FinanceSpendingScope,
+} from "@personal-os/domain";
 import {
   type InfiniteData,
   keepPreviousData,
@@ -15,9 +19,24 @@ import { Action, Actions } from "../../components/forms/form-rows";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import { radius, spacing, useTheme, workspaceColor } from "../../theme";
 import { categoryIcon, categoryLabel } from "./category-presentation";
-import { useFinance, useFinanceRead, useSpending } from "./data";
+import { useFinance, useFinanceRead } from "./data";
 import { financeLabel, formatLocalDate, formatMoney, recordAmount } from "./presentation";
 import { SpendingChart } from "./spending-chart";
+import { spendingBasisLine, useSpendingPreferences } from "./spending-data";
+import {
+  customRangeProblem,
+  type SpendingPeriod,
+  spendingComparisonScopes,
+  spendingRange,
+  spendingToday,
+} from "./spending-math";
+import {
+  CustomRange,
+  type OpenSpendingEvidence,
+  SpendingList,
+  SpendingRhythm,
+  SpendingTrends,
+} from "./spending-views";
 import { selectionLimit, useBulkCategorize } from "./transaction-bulk";
 import { ExportTransactions } from "./transaction-export";
 import {
@@ -371,10 +390,26 @@ export function Transactions({
     </>
   );
 }
+const periodLabels = {
+  today: "Today",
+  week: "Week",
+  month: "Month",
+  custom: "Custom",
+} as const satisfies Record<SpendingPeriod, string>;
+const periods = Object.keys(periodLabels) as SpendingPeriod[];
+const views = ["List", "Trends", "Rhythm"] as const;
+type SpendingView = (typeof views)[number];
+const isPeriod = (value: unknown): value is SpendingPeriod =>
+  periods.includes(value as SpendingPeriod);
+
 export function FinanceSpendingScreen() {
+  const { timezone } = useFinance();
   const [mode, setMode] = useState<"Summary" | "Transactions">("Summary");
-  const [period, setPeriod] = useState<"This week" | "This month">("This week");
-  const [group, setGroup] = useState<{
+  const [view, setView] = useState<SpendingView>("List");
+  // Null follows the saved default period; a choice here lasts for this visit only.
+  const [chosen, setChosen] = useState<SpendingPeriod | null>(null);
+  const [custom, setCustom] = useState<{ from: string; through: string } | null>(null);
+  const [evidence, setEvidence] = useState<{
     title: string;
     reference: FinanceSpendingReferenceFilter;
   } | null>(null);
@@ -383,13 +418,80 @@ export function FinanceSpendingScreen() {
     mode?: string;
   }>();
   useEffect(() => {
-    if (routePeriod === "month" || routePeriod === "week") {
-      setPeriod(routePeriod === "month" ? "This month" : "This week");
-      setGroup(null);
+    if (isPeriod(routePeriod)) {
+      setChosen(routePeriod);
+      setEvidence(null);
     }
     if (routeMode === "Summary" || routeMode === "Transactions") setMode(routeMode);
   }, [routePeriod, routeMode]);
-  const query = useSpending(period === "This week" ? "week" : "month");
+  const preferences = useSpendingPreferences();
+  const saved = preferences.data;
+  const period = chosen ?? saved?.period ?? "week";
+  const today = timezone ? spendingToday(timezone) : null;
+  const dates = custom ?? (today ? { from: today, through: today } : null);
+  const problem =
+    period === "custom" && dates ? customRangeProblem(dates.from, dates.through) : null;
+  const range =
+    today && saved && !problem
+      ? spendingRange(period, today, saved.weekStartsOn, dates ?? undefined)
+      : null;
+  const scope: FinanceSpendingScope | null =
+    range && saved && timezone
+      ? {
+          ...range,
+          timezone,
+          accountIds: null,
+          categoryIds: null,
+          basis: saved.basis,
+          includePending: saved.includePending,
+          subtractRefunds: saved.subtractRefunds,
+        }
+      : null;
+  // Trends measures the period so far against the equal span before it.
+  const comparison =
+    scope && today && mode === "Summary" && view === "Trends"
+      ? spendingComparisonScopes(scope, period, today)
+      : null;
+  const request: FinanceSpendingQuery | null =
+    scope && saved
+      ? {
+          scope: comparison?.current ?? scope,
+          grouping: "auto",
+          includeUncategorized: saved.includeUncategorized,
+        }
+      : null;
+  const query = useFinanceRead(
+    ["spending", request],
+    (api) => {
+      if (!request) throw new Error("Spending needs a period.");
+      return api.getFinanceSpending(request);
+    },
+    !!request,
+  );
+  const previousRequest = request && comparison ? { ...request, scope: comparison.previous } : null;
+  const previous = useFinanceRead(
+    ["spending", previousRequest],
+    (api) => {
+      if (!previousRequest) throw new Error("Spending needs a comparison period.");
+      return api.getFinanceSpending(previousRequest);
+    },
+    !!previousRequest,
+  );
+  const revision = query.data?.referenceRevision;
+  const open: OpenSpendingEvidence | undefined =
+    request && revision
+      ? (title, from, through, groupId) =>
+          setEvidence({
+            title,
+            reference: {
+              query: request,
+              referenceRevision: revision,
+              groupId: groupId ?? null,
+              from,
+              through,
+            },
+          })
+      : undefined;
   const add = () => router.push("/finance-transaction-edit");
   // Adding needs nothing from the spending read, so it stays reachable while that loads or fails.
   const addAction = (
@@ -399,6 +501,12 @@ export function FinanceSpendingScreen() {
       </Actions>
     </SettingsAccentProvider>
   );
+  // Preferences come first: without them there is no honest period or basis to read.
+  const waiting = !timezone
+    ? { ...preferences, configurationMissing: true }
+    : !saved
+      ? preferences
+      : null;
   return (
     <FinanceScreen title="Spending" tabBar>
       <Segments
@@ -410,99 +518,101 @@ export function FinanceSpendingScreen() {
         }}
       />
       <Segments
-        value={period}
-        options={["This week", "This month"]}
+        value={periodLabels[period]}
+        options={periods.map((item) => periodLabels[item])}
         onChange={(next) => {
-          setPeriod(next);
-          router.setParams({ period: next === "This month" ? "month" : "week" });
-          setGroup(null);
+          const value = periods.find((item) => periodLabels[item] === next) ?? "week";
+          setChosen(value);
+          router.setParams({ period: value });
+          setEvidence(null);
         }}
       />
-
-      {mode === "Transactions" ? (
-        query.scope ? (
-          <Transactions from={query.scope.from} through={query.scope.through} onAdd={add} />
-        ) : (
-          <>
-            {addAction}
-            <ReadState query={query}>{null}</ReadState>
-          </>
-        )
+      {period === "custom" && dates && (
+        <CustomRange
+          from={dates.from}
+          through={dates.through}
+          problem={problem}
+          onChange={(from, through) => {
+            setCustom({ from, through });
+            setEvidence(null);
+          }}
+        />
+      )}
+      {mode === "Summary" && (
+        <Segments
+          value={view}
+          options={views}
+          onChange={(next) => {
+            setView(next);
+            setEvidence(null);
+          }}
+        />
+      )}
+      {mode === "Transactions" && range ? (
+        <Transactions from={range.from} through={range.through} onAdd={add} />
       ) : (
         <>
           {addAction}
-          <ReadState query={query}>
-            {query.data && query.scope && (
-              <>
-                <Metric
-                  accent
-                  label={`${formatLocalDate(query.scope.from)} – ${formatLocalDate(query.scope.through)}`}
-                  value={formatMoney(query.data.snapshot.netCents / 100, "USD")}
-                  hint="Your share · pending included · refunds subtracted"
-                >
-                  <SpendingChart bins={query.data.snapshot.bins} />
-                </Metric>
-                <Copy secondary>
-                  {financeLabel(query.data.snapshot.coverage)} coverage ·{" "}
-                  {query.data.source.freshness === "unknown"
-                    ? "freshness not confirmed"
-                    : financeLabel(query.data.source.freshness)}
-                  {query.data.currency.unsupported.length ? " · other currencies excluded" : ""}
-                </Copy>
-                {group ? (
-                  <>
-                    <FinanceRow
-                      title="All categories"
-                      icon="views"
-                      onPress={() => setGroup(null)}
+          {waiting ? (
+            <ReadState query={waiting}>{null}</ReadState>
+          ) : mode === "Summary" && !problem ? (
+            <ReadState query={query}>
+              {query.data && saved && request && (
+                <>
+                  <Metric
+                    accent
+                    label={
+                      request.scope.from === request.scope.through
+                        ? formatLocalDate(request.scope.from)
+                        : `${formatLocalDate(request.scope.from)} – ${formatLocalDate(request.scope.through)}`
+                    }
+                    value={formatMoney(query.data.snapshot.netCents / 100, "USD")}
+                    hint={spendingBasisLine(saved)}
+                  >
+                    {view === "List" && <SpendingChart bins={query.data.snapshot.bins} />}
+                  </Metric>
+                  <Copy secondary>
+                    {financeLabel(query.data.snapshot.coverage)} coverage ·{" "}
+                    {query.data.source.freshness === "unknown"
+                      ? "freshness not confirmed"
+                      : financeLabel(query.data.source.freshness)}
+                    {query.data.currency.unsupported.length ? " · other currencies excluded" : ""}
+                  </Copy>
+                  {evidence ? (
+                    <>
+                      <FinanceRow
+                        title={view === "List" ? "All categories" : `Back to ${view.toLowerCase()}`}
+                        icon="views"
+                        onPress={() => setEvidence(null)}
+                      />
+                      <Copy>{evidence.title}</Copy>
+                      <Transactions reference={evidence.reference} />
+                    </>
+                  ) : view === "Trends" ? (
+                    <SpendingTrends
+                      dashboard={query.data}
+                      previous={previous}
+                      comparisonLabel={comparison?.label ?? "Previous period"}
+                      onOpen={open}
                     />
-                    <Copy>{group.title}</Copy>
-                    <Transactions reference={group.reference} />
-                  </>
-                ) : (
-                  <Card rows={query.data.groups.length > 0}>
-                    {query.data.groups.length ? (
-                      query.data.groups.map((item) => (
-                        <FinanceRow
-                          key={item.id}
-                          title={item.label}
-                          icon={categoryIcon(
-                            item.label,
-                            item.visual?.icon,
-                            item.kind ?? "category",
-                          )}
-                          value={formatMoney(item.netCents / 100, "USD")}
-                          onPress={
-                            query.data?.referenceRevision
-                              ? () => {
-                                  if (!query.scope || !query.data?.referenceRevision) return;
-                                  setGroup({
-                                    title: item.label,
-                                    reference: {
-                                      query: {
-                                        scope: query.scope,
-                                        grouping: "auto",
-                                        includeUncategorized: true,
-                                      },
-                                      referenceRevision: query.data.referenceRevision,
-                                      groupId: item.id,
-                                      from: query.scope.from,
-                                      through: query.scope.through,
-                                    },
-                                  });
-                                }
-                              : undefined
-                          }
-                        />
-                      ))
-                    ) : (
-                      <Copy secondary>No spending in this period.</Copy>
-                    )}
-                  </Card>
-                )}
-              </>
-            )}
-          </ReadState>
+                  ) : view === "Rhythm" ? (
+                    <SpendingRhythm
+                      dashboard={query.data}
+                      weekStartsOn={saved.weekStartsOn}
+                      onOpen={open}
+                    />
+                  ) : (
+                    <SpendingList
+                      dashboard={query.data}
+                      from={request.scope.from}
+                      through={request.scope.through}
+                      onOpen={open}
+                    />
+                  )}
+                </>
+              )}
+            </ReadState>
+          ) : null}
         </>
       )}
     </FinanceScreen>

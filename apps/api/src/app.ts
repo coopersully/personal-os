@@ -639,6 +639,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   };
   const knowledgePurge = createKnowledgePurgeService(knowledgePersistence);
   let knowledgePurgedAt = Number.NEGATIVE_INFINITY;
+  let knowledgePurgeRunning = false;
   const goalService = createGoalsService({ db: dependencies.db, now });
   const maintenance = createWorkspaceMaintenanceService({ db: dependencies.db, now });
   const mailMaintenance = createMailMaintenanceService({
@@ -1294,7 +1295,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     context.header("Cache-Control", "no-store");
     return authenticate(context, next);
   };
-  app.use("/v1/knowledge", authenticateKnowledge);
+  // Hono's `/v1/knowledge/*` also matches the collection itself; one registration authenticates
+  // each request once.
   app.use("/v1/knowledge/*", authenticateKnowledge);
   app.use("/v1/rituals", authenticate);
   app.use("/v1/rituals/*", authenticate);
@@ -1756,18 +1758,24 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
      * on the next scheduler tick. */
     async runKnowledgePurge() {
       const startedAt = now().getTime();
-      if (startedAt - knowledgePurgedAt < knowledgePurgeIntervalMs) return;
-      const signal = dependencies.runtimeLifecycle?.signal;
-      for (let batch = 0; batch < 10 && !signal?.aborted; batch++) {
-        const { selected } = await knowledgePurge.purgeExpired({
-          limit: knowledgePurgeBatchSize,
-          ...(signal ? { signal } : {}),
-        });
-        // A short selection means nothing past retention remained when this batch began.
-        if (selected < knowledgePurgeBatchSize && !signal?.aborted) {
-          knowledgePurgedAt = startedAt;
-          break;
+      // One pass at a time: a tick that arrives while the previous pass runs leaves it alone.
+      if (knowledgePurgeRunning || startedAt - knowledgePurgedAt < knowledgePurgeIntervalMs) return;
+      knowledgePurgeRunning = true;
+      try {
+        const signal = dependencies.runtimeLifecycle?.signal;
+        for (let batch = 0; batch < 10 && !signal?.aborted; batch++) {
+          const { selected } = await knowledgePurge.purgeExpired({
+            limit: knowledgePurgeBatchSize,
+            ...(signal ? { signal } : {}),
+          });
+          // A short selection means nothing past retention remained when this batch began.
+          if (selected < knowledgePurgeBatchSize && !signal?.aborted) {
+            knowledgePurgedAt = startedAt;
+            break;
+          }
         }
+      } finally {
+        knowledgePurgeRunning = false;
       }
     },
     dispatchNativePush() {

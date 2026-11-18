@@ -158,6 +158,9 @@ export function createKnowledgePurgeService({ db, now }: { db: Database; now: ()
         purged += await db
           .transaction(async (tx) => {
             await lockKnowledgeOwner(tx, userId);
+            // Shutdown may have begun while this waited for the lock; a purge not yet started
+            // is left for the next pass, and one already started finishes atomically.
+            if (signal?.aborted) return 0;
             // Take the account row before record rows, matching owner sessions, so account
             // deletion waits for this purge instead of deadlocking with it.
             const [owner] = await tx

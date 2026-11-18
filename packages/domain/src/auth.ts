@@ -252,5 +252,13 @@ export const createAccessTokenInputSchema = z
         path: ["scopes"],
       });
     }
+    // Every memory save also reads, so a write-only memory grant could never be used.
+    if (input.scopes.includes("knowledge:write") && !input.scopes.includes("knowledge:read")) {
+      context.addIssue({
+        code: "custom",
+        message: "The knowledge:write scope requires knowledge:read.",
+        path: ["scopes"],
+      });
+    }
   });
 export type CreateAccessTokenInput = z.infer<typeof createAccessTokenInputSchema>;

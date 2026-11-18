@@ -1,0 +1,1 @@
+ALTER TABLE finance_budget_start_previews ADD COLUMN projected_attention jsonb;

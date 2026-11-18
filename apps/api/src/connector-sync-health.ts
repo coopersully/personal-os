@@ -1,7 +1,12 @@
-import { ConnectorError } from "@personal-os/connectors";
+import {
+  ConnectorError,
+  type TransportDiagnostics,
+  transportDiagnostics,
+} from "@personal-os/connectors";
 import type {
   CalendarProvider,
   ConnectedAccountHealth,
+  ConnectorCapabilities,
   ConnectorFailureCategory,
   ConnectorSyncRecovery,
   ConnectorSyncStatus,
@@ -10,7 +15,7 @@ import { AppError } from "./errors.js";
 
 type ExternalConnectorProvider = Extract<CalendarProvider, "google" | "icloud"> | "plaid";
 
-export type ConnectorSyncFailure = {
+export type ConnectorSyncFailure = TransportDiagnostics & {
   category: ConnectorFailureCategory;
   code: string;
   message: string;
@@ -31,15 +36,21 @@ export function classifyConnectorSyncFailure(
           ? "operator"
           : "automatic";
     return {
+      transportCode: error.transportCode,
+      transportPhase: error.transportPhase,
       category: error.category,
       code: error.code,
-      message: safeConnectorMessage(provider, error.category, recovery),
+      message:
+        error.code === "google_permission_missing"
+          ? "Google needs additional permissions. Reconnect and grant access to this capability."
+          : safeConnectorMessage(provider, error.category, recovery),
       recovery,
       retryAfterMs: error.retryAfterMs,
       status: error.status,
     };
   }
   return {
+    ...transportDiagnostics(error),
     category: "unknown",
     code: "connector_unknown_failure",
     message: `${providerLabel(provider)} is temporarily unavailable. nohmi will retry automatically.`,
@@ -64,12 +75,45 @@ export function connectorRetryAt(input: {
   return new Date(input.now.getTime() + Math.max(policyDelayMs, providerDelayMs));
 }
 
-export function connectionHealthForAccount(account: {
-  nextSyncAt: Date | null;
-  syncError: string | null;
-  syncRecovery: ConnectorSyncRecovery | null;
-  syncStatus: ConnectorSyncStatus;
-}): ConnectedAccountHealth {
+export function connectionHealthForAccount(
+  account: {
+    syncCapabilities?: ConnectorCapabilities | null;
+    calendarEnabled?: boolean;
+    mailEnabled?: boolean;
+    nextSyncAt: Date | null;
+    syncError: string | null;
+    syncRecovery: ConnectorSyncRecovery | null;
+    syncStatus: ConnectorSyncStatus;
+  },
+  capability?: "calendar" | "mail",
+): ConnectedAccountHealth {
+  const scoped = capability ? account.syncCapabilities?.[capability] : null;
+  if (scoped && account.syncStatus !== "syncing") return scoped.health;
+  const escalated = Object.values(account.syncCapabilities ?? {}).find(
+    (value) => value.health.state === "service_attention" && value.health.recovery === "automatic",
+  );
+  if (
+    !capability &&
+    account.syncStatus !== "syncing" &&
+    account.syncRecovery === "automatic" &&
+    escalated
+  ) {
+    return { ...escalated.health, nextSyncAt: account.nextSyncAt?.toISOString() ?? null };
+  }
+  if (!capability && account.syncStatus !== "syncing" && account.syncRecovery === null) {
+    const enabled = Object.entries(account.syncCapabilities ?? {})
+      .filter(([name]) =>
+        name === "mail" ? account.mailEnabled !== false : account.calendarEnabled !== false,
+      )
+      .map(([, value]) => value);
+    const unavailable =
+      enabled.find((value) => value.health.state === "reconnect") ??
+      enabled.find((value) => value.health.state === "service_attention") ??
+      enabled.find((value) => value.health.state === "retrying");
+    if (unavailable) return unavailable.health;
+    const pending = enabled.find((value) => value.health.state === "syncing");
+    if (pending) return pending.health;
+  }
   const state =
     account.syncStatus === "syncing"
       ? "syncing"

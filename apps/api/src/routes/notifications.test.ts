@@ -15,6 +15,7 @@ it("maps bounded notification operations and rejects authority and input expansi
   const status = { capability: "unavailable", reason: "producer_not_registered" };
   const notifications = {
     status: vi.fn(async () => status),
+    resetFinancePreferences: vi.fn(async () => ({ scope: "finances", inherited: true })),
     savePreferences: vi.fn(async () => ({})),
     publish: vi.fn(async () => status),
     drain: vi.fn(async () => status),
@@ -38,7 +39,7 @@ it("maps bounded notification operations and rejects authority and input expansi
     (await app.request("/v1/texting/notifications/preferences/global", json("PATCH", input)))
       .status,
   ).toBe(200);
-  expect(notifications.savePreferences).toHaveBeenCalledWith(principal, "global", input);
+  expect(notifications.savePreferences).toHaveBeenCalledWith(principal, "global", input, "test");
   expect(
     (await app.request("/v1/texting/notifications/preferences/foreign", json("PATCH", input)))
       .status,
@@ -50,16 +51,128 @@ it("maps bounded notification operations and rejects authority and input expansi
   }
   expect(notifications.publish).not.toHaveBeenCalled();
   expect(notifications.drain).not.toHaveBeenCalled();
+  expect(
+    (
+      await app.request(
+        "/v1/texting/notifications/preferences/finances",
+        json("DELETE", { expectedRevision: 2 }),
+      )
+    ).status,
+  ).toBe(200);
+  expect(notifications.resetFinancePreferences).toHaveBeenCalledWith(
+    principal,
+    { expectedRevision: 2 },
+    "test",
+  );
+  for (const body of [{}, { expectedRevision: null }, { expectedRevision: 2, scope: "global" }]) {
+    expect(
+      (await app.request("/v1/texting/notifications/preferences/finances", json("DELETE", body)))
+        .status,
+    ).toBe(400);
+  }
+  expect(
+    (
+      await app.request(
+        "/v1/texting/notifications/preferences/global",
+        json("DELETE", { expectedRevision: 2 }),
+      )
+    ).status,
+  ).toBe(404);
+  principal.actorType = "agent";
+  expect(
+    (
+      await app.request(
+        "/v1/texting/notifications/preferences/finances",
+        json("DELETE", { expectedRevision: 2 }),
+      )
+    ).status,
+  ).toBe(200);
+  expect(
+    (await app.request("/v1/texting/notifications/preferences/global", json("PATCH", input)))
+      .status,
+  ).toBe(200);
+  // Execution grants and bypass are revalidated by the real notification service.
+  expect(notifications.savePreferences).toHaveBeenLastCalledWith(
+    principal,
+    "global",
+    input,
+    "test",
+  );
+  principal.scopes = new Set(["texting:read", "texting:write"]);
+  expect((await app.request("/v1/texting/notifications")).status).toBe(403);
+  principal.actorType = "user";
+  principal.scopes = new Set(["texting:read", "finances:read"]);
+  expect(
+    (
+      await app.request(
+        "/v1/texting/notifications/preferences/finances",
+        json("DELETE", { expectedRevision: 2 }),
+      )
+    ).status,
+  ).toBe(403);
   principal.actorType = "agent";
   expect(
     (await app.request("/v1/texting/notifications/preferences/global", json("PATCH", input)))
       .status,
   ).toBe(403);
-  principal.scopes = new Set(["texting:read", "texting:write"]);
-  expect((await app.request("/v1/texting/notifications")).status).toBe(403);
-  principal.scopes = new Set(["texting:read", "finances:read"]);
-  expect(
-    (await app.request("/v1/texting/notifications/preferences/global", json("PATCH", input)))
-      .status,
-  ).toBe(403);
+});
+
+it("reads an exact attempt with both read scopes, strict path input and no-store without invoking reconciliation or writers", async () => {
+  type Service = ReturnType<typeof createNotificationService>;
+  const principal: Principal = {
+    userId: "11111111-1111-4111-8111-111111111111",
+    actorId: "inspection-agent",
+    actorType: "agent",
+    scopes: new Set(["texting:read", "finances:read"]),
+  };
+  const notifications = {
+    getAttempt: vi.fn<Service["getAttempt"]>(),
+    status: vi.fn<Service["status"]>(),
+    savePreferences: vi.fn<Service["savePreferences"]>(),
+    resetFinancePreferences: vi.fn<Service["resetFinancePreferences"]>(),
+    publish: vi.fn<Service["publish"]>(),
+    claim: vi.fn<Service["claim"]>(),
+    deliver: vi.fn<Service["deliver"]>(),
+    drain: vi.fn<Service["drain"]>(),
+  } satisfies Service;
+  const { AppError } = await import("../errors.js");
+  notifications.getAttempt.mockRejectedValue(
+    new AppError("not_found", "Notification attempt not found."),
+  );
+  const app = new Hono<AppEnv>();
+  app.onError(errorResponse);
+  app.use("*", async (context, next) => {
+    context.set("principal", principal);
+    context.set("requestId", "attempt-read");
+    await next();
+  });
+  registerNotificationRoutes({ app, notifications });
+  const id = "22222222-2222-4222-8222-222222222222";
+  const path = `/v1/texting/notifications/attempts/${id}`;
+  const result = await app.request(path);
+  expect(result.status).toBe(404);
+  expect(result.headers.get("Cache-Control")).toBe("no-store");
+  expect(notifications.getAttempt).toHaveBeenLastCalledWith(principal, id);
+  for (const invalid of [
+    "invalid-id",
+    `${id}?ownerId=${principal.userId}`,
+    `${id}?attemptId=${principal.userId}`,
+  ]) {
+    expect((await app.request(`/v1/texting/notifications/attempts/${invalid}`)).status).toBe(400);
+  }
+  for (const scopes of [["texting:read"], ["finances:read"]] as const) {
+    principal.scopes = new Set(scopes);
+    expect((await app.request(path)).status).toBe(403);
+  }
+  expect(notifications.getAttempt).toHaveBeenCalledTimes(1);
+  for (const name of [
+    "status",
+    "publish",
+    "claim",
+    "deliver",
+    "drain",
+    "savePreferences",
+    "resetFinancePreferences",
+  ] as const)
+    expect(notifications[name]).not.toHaveBeenCalled();
 });

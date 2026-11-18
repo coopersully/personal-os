@@ -38,7 +38,7 @@ it("rejects sub-cent income and preserves the entered value", async () => {
   const submit = mount("planning:recurringIncome");
   await userEvent.type(screen.getByLabelText("Reliable monthly take-home (USD)"), "1.001");
   await userEvent.click(screen.getByRole("button", { name: "Save answer" }));
-  expect(await screen.findByText(/at most two decimal/)).toBeInTheDocument();
+  expect(screen.getByLabelText("Reliable monthly take-home (USD)")).toBeInvalid();
   expect(submit).not.toHaveBeenCalled();
   expect(screen.getByLabelText("Reliable monthly take-home (USD)")).toHaveValue("1.001");
 });

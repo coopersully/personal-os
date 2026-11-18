@@ -3,14 +3,15 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
+import { PetOverlay } from "./features/desktop/pet-overlay.js";
 import { RitualOverlay } from "./features/tracking/ritual-overlay.js";
 import "@fontsource-variable/geist";
 import { App } from "./app.js";
 import { MotionProvider } from "./components/motion-provider.js";
+import { PortfolioCursor } from "./components/portfolio-cursor/portfolio-cursor.js";
 import { queryWindowFocusPolicy } from "./features/desktop/query-policy.js";
 import { DesktopStartupGate } from "./features/desktop/updates.js";
 import { createAppQueryClient } from "./lib/query-client.js";
-import "./styles.css";
 
 const desktop = "__TAURI_INTERNALS__" in window;
 document.documentElement.classList.toggle("desktop", desktop);
@@ -50,12 +51,18 @@ if (!root) throw new Error("The application root is missing.");
 if (desktop && window.location.hash === "#ritual")
   document.documentElement.classList.add("ritual-window");
 
+if (desktop && window.location.hash === "#pet")
+  document.documentElement.classList.add("pet-window");
+
 createRoot(root).render(
   <StrictMode>
     <MotionProvider>
+      <PortfolioCursor />
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          {desktop && window.location.hash === "#ritual" ? (
+          {desktop && window.location.hash === "#pet" ? (
+            <PetOverlay />
+          ) : desktop && window.location.hash === "#ritual" ? (
             <RitualOverlay />
           ) : (
             <DesktopStartupGate>

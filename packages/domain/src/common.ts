@@ -9,7 +9,12 @@ export const semanticVersionSchema = z
   .regex(semanticVersionPattern, "Use a valid semantic version.");
 
 export const idSchema = z.uuid();
-export const isoDateTimeSchema = z.iso.datetime({ offset: true });
+// Preserve ISO 8601 minute precision alongside seconds after Zod's RFC 3339 default change.
+export const isoDateTimeSchema = z.union([
+  z.iso.datetime({ offset: true }),
+  z.iso.datetime({ offset: true, precision: -1 }),
+]);
+export const utcIsoDateTimeSchema = z.union([z.iso.datetime(), z.iso.datetime({ precision: -1 })]);
 export const timeZoneSchema = z.string().trim().min(1).max(100);
 export const completeInputSchema = z.object({ completed: z.boolean() });
 

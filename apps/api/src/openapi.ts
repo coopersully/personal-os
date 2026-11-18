@@ -1,13 +1,43 @@
 import {
+  agentAccountLinkSchema,
+  agentAccountRegistrationSchema,
+  agentAccountSchema,
+  agentAccountUpdateSchema,
+  applyFinanceBudgetStartInputSchema,
+  approveFinanceReviewBatchInputSchema,
+  confirmFinanceOpeningStatementInputSchema,
+  executeFinanceReviewBatchInputSchema,
+  financeAttentionSnapshotSchema,
+  financeBudgetStartPolicySchema,
+  financeBudgetStartPreviewSchema,
+  financeConversationAgentCardInputSchema,
+  financeConversationHistoryPageSchema,
+  financeConversationMessageSchema,
+  financeDecisionDeclineSchema,
+  financeEvidenceRefreshSchema,
   financeMaintenanceInputSchema,
   financeMaintenancePayloadSchema,
+  financeOpeningPositionSchema,
+  financeOpeningStatementSchema,
+  financeReviewBacklogAssessmentSchema,
+  financeReviewBacklogPageSchema,
+  financeReviewBatchContinuationSchema,
+  financeReviewBatchRunSchema,
+  financeReviewBatchUndoSchema,
   financeToolResultSchema,
   idSchema,
   maintenanceRunStatusSchema,
+  prepareFinanceEvidenceRefreshInputSchema,
+  previewFinanceBudgetStartInputSchema,
+  previewFinanceReviewBatchInputSchema,
+  previewFinanceReviewBatchUndoInputSchema,
+  resetFinanceNotificationPreferencesSchema,
   ritualActionInputSchema,
   ritualDefinitionInputSchema,
   ritualResponseInputSchema,
   taskWorkspacePageSchema,
+  updateWorkspaceSettingsSchema,
+  workspaceSettingsSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
 
@@ -46,10 +76,86 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     responses: { [status]: { description } },
     "x-required-scopes": taskWriteScope,
   });
+  const financeOperation = (
+    description: string,
+    response: string,
+    scopes: string[],
+    input?: string,
+    status = 200,
+    id = false,
+  ) => ({
+    description,
+    security,
+    "x-required-scopes": scopes,
+    ...(id ? { parameters: [taskIdParameter] } : {}),
+    ...(input ? { requestBody: jsonRequest(input) } : {}),
+    responses: {
+      [status]: {
+        description,
+        content: { "application/json": { schema: { $ref: `#/components/schemas/${response}` } } },
+      },
+      403: { description: "Authorization unavailable" },
+      409: {
+        description: "Current evidence or intent changed; inspect saved state before retrying",
+      },
+    },
+  });
   const financeMaintenanceResultSchema = z.toJSONSchema(financeToolResultSchema, { io: "input" });
   return {
     components: {
       schemas: {
+        FinanceAttention: z.toJSONSchema(financeAttentionSnapshotSchema, { io: "input" }),
+        FinanceBudgetStart: z.toJSONSchema(financeBudgetStartPolicySchema.nullable(), {
+          io: "input",
+        }),
+        FinanceBudgetStartPreview: z.toJSONSchema(financeBudgetStartPreviewSchema, { io: "input" }),
+        PreviewFinanceBudgetStart: z.toJSONSchema(previewFinanceBudgetStartInputSchema, {
+          io: "input",
+        }),
+        ApplyFinanceBudgetStart: z.toJSONSchema(applyFinanceBudgetStartInputSchema, {
+          io: "input",
+        }),
+        FinanceOpeningPosition: z.toJSONSchema(financeOpeningPositionSchema, { io: "input" }),
+        ConfirmFinanceOpeningStatement: z.toJSONSchema(confirmFinanceOpeningStatementInputSchema, {
+          io: "input",
+        }),
+        FinanceOpeningStatement: z.toJSONSchema(financeOpeningStatementSchema, { io: "input" }),
+        PrepareFinanceEvidenceRefresh: z.toJSONSchema(prepareFinanceEvidenceRefreshInputSchema, {
+          io: "input",
+        }),
+        FinanceEvidenceRefresh: z.toJSONSchema(financeEvidenceRefreshSchema, { io: "input" }),
+        PreviewFinanceBatchUndo: z.toJSONSchema(previewFinanceReviewBatchUndoInputSchema, {
+          io: "input",
+        }),
+        FinanceBatchUndo: z.toJSONSchema(financeReviewBatchUndoSchema, { io: "input" }),
+        ApproveFinanceBatch: z.toJSONSchema(approveFinanceReviewBatchInputSchema, { io: "input" }),
+        FinanceBatchContinuation: z.toJSONSchema(financeReviewBatchContinuationSchema.nullable(), {
+          io: "input",
+        }),
+        FinanceDecisionDecline: z.toJSONSchema(financeDecisionDeclineSchema, { io: "input" }),
+        FinanceAgentCardInput: z.toJSONSchema(financeConversationAgentCardInputSchema, {
+          io: "input",
+        }),
+        FinanceAgentCardResult: z.toJSONSchema(
+          z.object({ message: financeConversationMessageSchema }),
+          { io: "input" },
+        ),
+        FinanceChatHistory: z.toJSONSchema(financeConversationHistoryPageSchema, { io: "input" }),
+
+        FinanceReviewBacklog: z.toJSONSchema(financeReviewBacklogAssessmentSchema, { io: "input" }),
+        FinanceReviewBacklogPage: z.toJSONSchema(financeReviewBacklogPageSchema, { io: "input" }),
+        FinanceReviewBatch: z.toJSONSchema(financeReviewBatchRunSchema, { io: "input" }),
+        PreviewFinanceReviewBatch: z.toJSONSchema(previewFinanceReviewBatchInputSchema, {
+          io: "input",
+        }),
+        ExecuteFinanceReviewBatch: z.toJSONSchema(executeFinanceReviewBatchInputSchema, {
+          io: "input",
+        }),
+
+        AgentAccount: z.toJSONSchema(agentAccountSchema),
+        AgentAccountRegistration: z.toJSONSchema(agentAccountRegistrationSchema),
+        AgentAccountUpdate: z.toJSONSchema(agentAccountUpdateSchema),
+        AgentAccountLink: z.toJSONSchema(agentAccountLinkSchema),
         RitualDefinitionInput: z.toJSONSchema(ritualDefinitionInputSchema, { io: "input" }),
         RitualResponseInput: z.toJSONSchema(ritualResponseInputSchema, { io: "input" }),
         RitualActionInput: z.toJSONSchema(ritualActionInputSchema, { io: "input" }),
@@ -263,6 +369,474 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     },
     openapi: "3.1.0",
     paths: {
+      "/v1/finances/attention": {
+        get: financeOperation(
+          "Canonical maintained-period attention and readiness",
+          "FinanceAttention",
+          ["finances:read"],
+        ),
+      },
+      "/v1/finances/budget-start": {
+        get: financeOperation("Approved first maintained month or null", "FinanceBudgetStart", [
+          "finances:read",
+        ]),
+      },
+      "/v1/finances/budget-start/previews": {
+        post: financeOperation(
+          "Exact before/after visibility preview without financial effects",
+          "FinanceBudgetStartPreview",
+          ["finances:read", "finances:write"],
+          "PreviewFinanceBudgetStart",
+          201,
+        ),
+      },
+      "/v1/finances/budget-start/previews/{id}": {
+        get: financeOperation(
+          "Owner or originating agent preview",
+          "FinanceBudgetStartPreview",
+          ["finances:read"],
+          undefined,
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/budget-start/approve": {
+        post: financeOperation(
+          "Authenticated owner approval only; no agent self-approval",
+          "FinanceBudgetStart",
+          ["finances:write"],
+          "ApplyFinanceBudgetStart",
+        ),
+      },
+      "/v1/finances/budget-start/previews/{id}/decline": {
+        post: financeOperation(
+          "Authenticated owner decline only; the preview can no longer be approved",
+          "FinanceDecisionDecline",
+          ["finances:read", "finances:write"],
+          undefined,
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/opening-position": {
+        get: {
+          ...financeOperation(
+            "Qualified opening balances and exact missing evidence",
+            "FinanceOpeningPosition",
+            ["finances:read"],
+          ),
+          parameters: [
+            {
+              ...queryParameter("month", { type: "string", pattern: "^[0-9]{4}-[0-9]{2}$" }),
+              required: true,
+            },
+          ],
+        },
+      },
+      "/v1/finances/opening-statements": {
+        post: financeOperation(
+          "Owner confirms explicit opening evidence; never rewrites current balance",
+          "FinanceOpeningStatement",
+          ["finances:write"],
+          "ConfirmFinanceOpeningStatement",
+          201,
+        ),
+      },
+      "/v1/finances/evidence-refresh": {
+        post: financeOperation(
+          "Persist exact-source refresh through existing provider scheduler",
+          "FinanceEvidenceRefresh",
+          ["finances:read", "finances:write", "finances:maintain"],
+          "PrepareFinanceEvidenceRefresh",
+          202,
+        ),
+      },
+      "/v1/finances/evidence-refresh/{id}": {
+        get: financeOperation(
+          "Timestamped refresh receipt; freshness is separate from coverage",
+          "FinanceEvidenceRefresh",
+          ["finances:read"],
+          undefined,
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/review-batch-corrections": {
+        post: financeOperation(
+          "Exact revision-safe compensating preview",
+          "FinanceBatchUndo",
+          ["finances:read", "finances:write"],
+          "PreviewFinanceBatchUndo",
+          201,
+        ),
+      },
+      "/v1/finances/review-batch-corrections/{id}": {
+        get: financeOperation(
+          "Saved correction outcomes",
+          "FinanceBatchUndo",
+          ["finances:read"],
+          undefined,
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/review-batch-corrections/{id}/execute": {
+        post: financeOperation(
+          "Owner execution, or the agent whose own authority applied every targeted effect",
+          "FinanceBatchUndo",
+          ["finances:read", "finances:write"],
+          "ExecuteFinanceReviewBatch",
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/review-batch-corrections/{id}/decline": {
+        post: financeOperation(
+          "Authenticated owner decline only; the correction can no longer be applied",
+          "FinanceDecisionDecline",
+          ["finances:read", "finances:write"],
+          undefined,
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/review-batches/{id}/decline": {
+        post: financeOperation(
+          "Authenticated owner decline of an unapproved batch; approved batches are cancelled instead",
+          "FinanceDecisionDecline",
+          ["finances:read", "finances:write"],
+          undefined,
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/review-batches/{id}/approval": {
+        get: financeOperation(
+          "Durable exact-batch continuation state or null",
+          "FinanceBatchContinuation",
+          ["finances:read"],
+          undefined,
+          200,
+          true,
+        ),
+        post: financeOperation(
+          "Owner-only bounded one-batch approval; accepted is not executed",
+          "FinanceBatchContinuation",
+          ["finances:read", "finances:write"],
+          "ApproveFinanceBatch",
+          202,
+          true,
+        ),
+      },
+      "/v1/finances/review-batches/{id}/approval/cancel": {
+        post: financeOperation(
+          "Owner cancellation stops uncommitted work; applied effects remain",
+          "FinanceBatchContinuation",
+          ["finances:write"],
+          undefined,
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/conversation/agent/messages": {
+        get: {
+          ...financeOperation(
+            "Bounded shared chat history for an authorized agent; no read acknowledgment",
+            "FinanceChatHistory",
+            ["finances:read"],
+          ),
+          parameters: [
+            queryParameter("after", { type: "string" }),
+            queryParameter("before", { type: "string" }),
+            queryParameter("latest", { type: "string", enum: ["true"] }),
+            queryParameter("limit", { type: "integer", minimum: 1, maximum: 100 }),
+          ],
+        },
+      },
+      "/v1/finances/conversation/agent/cards": {
+        post: financeOperation(
+          "Attributed linked annotation; never a human message or financial authorization",
+          "FinanceAgentCardResult",
+          ["finances:read", "finances:write", "finances:maintain"],
+          "FinanceAgentCardInput",
+          201,
+        ),
+      },
+
+      "/v1/finances/review-backlog": {
+        get: {
+          security,
+          "x-required-scopes": ["finances:read"],
+          responses: {
+            200: {
+              description: "Complete historical assessment; flags and cases counted separately",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/FinanceReviewBacklog" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/finances/review-backlog/items": {
+        get: {
+          security,
+          "x-required-scopes": ["finances:read"],
+          parameters: [
+            ...paginationParameters,
+            queryParameter("group", {
+              type: "string",
+              enum: [
+                "roundups",
+                "internal_movements",
+                "card_payments",
+                "ambiguous_payments",
+                "other_categorization",
+              ],
+            }),
+          ],
+          responses: {
+            200: {
+              description: "Snapshot-bound evidence page",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/FinanceReviewBacklogPage" },
+                },
+              },
+            },
+            409: { description: "Evidence changed; restart pagination" },
+          },
+        },
+      },
+      "/v1/finances/review-batches": {
+        get: {
+          security,
+          "x-required-scopes": ["finances:read"],
+          parameters: [queryParameter("limit", { type: "integer", minimum: 1, maximum: 50 })],
+          responses: {
+            200: {
+              description: "Recent batches visible to this owner or originating agent",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/FinanceReviewBatch" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        post: {
+          security,
+          "x-required-scopes": ["finances:read", "finances:write"],
+          requestBody: jsonRequest("PreviewFinanceReviewBatch"),
+          responses: {
+            201: {
+              description: "Durably saved exact manifest, without applying its decisions",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/FinanceReviewBatch" } },
+              },
+            },
+            409: { description: "Stale evidence or reused key with another manifest" },
+          },
+        },
+      },
+      "/v1/finances/review-batches/{id}": {
+        get: {
+          security,
+          "x-required-scopes": ["finances:read"],
+          parameters: [taskIdParameter],
+          responses: {
+            200: {
+              description: "Persisted decisions and per-item outcomes",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/FinanceReviewBatch" } },
+              },
+            },
+            404: { description: "Batch not visible to this authorization" },
+          },
+        },
+      },
+      "/v1/finances/review-batches/{id}/execute": {
+        post: {
+          security,
+          "x-required-scopes": ["finances:read", "finances:write"],
+          description:
+            "Owner confirmation or originating agent with finances:execute and current execution policy. Authority is rechecked for every item.",
+          parameters: [taskIdParameter],
+          requestBody: jsonRequest("ExecuteFinanceReviewBatch"),
+          responses: {
+            200: {
+              description:
+                "At most ten decisions processed; pending and exception outcomes remain explicit",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/FinanceReviewBatch" } },
+              },
+            },
+            403: { description: "Execution authority unavailable or revoked" },
+            409: { description: "Manifest fingerprint changed" },
+          },
+        },
+      },
+      "/v1/agent-accounts": {
+        get: {
+          security: [{ cookieAuth: [] }, { sessionAuth: [] }],
+          summary: "List the owner's shared agent profiles and connections",
+          responses: {
+            200: { description: "Owner-scoped directory" },
+            403: { description: "Human session required" },
+          },
+        },
+      },
+      "/v1/agent-accounts/current": {
+        get: {
+          security: [{ bearerAuth: [] }],
+          summary: "Read the authenticated connection's agent identity",
+          responses: { 200: { description: "Agent account or null" } },
+        },
+        post: {
+          security: [{ bearerAuth: [] }],
+          summary: "Register or reuse the authenticated connection's identity",
+          requestBody: jsonRequest("AgentAccountRegistration"),
+          responses: { 200: { description: "Idempotently registered agent account" } },
+        },
+      },
+      "/v1/agent-accounts/{id}": {
+        patch: {
+          security: [{ cookieAuth: [] }, { sessionAuth: [] }],
+          parameters: [taskIdParameter],
+          summary: "Update an owner-controlled agent profile",
+          requestBody: jsonRequest("AgentAccountUpdate"),
+          responses: { 200: { description: "Updated profile; connection authority unchanged" } },
+        },
+      },
+      "/v1/agent-accounts/connections/{id}": {
+        put: {
+          security: [{ cookieAuth: [] }, { sessionAuth: [] }],
+          parameters: [taskIdParameter],
+          summary: "Link a connection to an account or create a separate identity",
+          requestBody: jsonRequest("AgentAccountLink"),
+          responses: { 200: { description: "Linked account; connection authority unchanged" } },
+        },
+      },
+      "/v1/workspaces/{workspace}/search": {
+        get: {
+          security,
+          summary: "Search all available synced workspace content, independent of view filters",
+          parameters: [
+            {
+              name: "workspace",
+              in: "path",
+              required: true,
+              schema: { type: "string", enum: ["calendar", "tasks", "mail", "finances"] },
+            },
+            {
+              name: "q",
+              in: "query",
+              required: true,
+              schema: { type: "string", minLength: 1, maxLength: 200 },
+            },
+            {
+              name: "offset",
+              in: "query",
+              schema: { type: "integer", minimum: 0, maximum: 10000 },
+            },
+            {
+              name: "limit",
+              in: "query",
+              schema: { type: "integer", minimum: 1, maximum: 50, default: 20 },
+            },
+            { name: "includeArchived", in: "query", schema: { type: "boolean", default: true } },
+            {
+              name: "kind",
+              in: "query",
+              schema: { type: "string", enum: ["all", "content", "reviews"], default: "all" },
+            },
+          ],
+          responses: {
+            200: {
+              description:
+                "Ranked items with bounded previews, internal destinations, nextOffset, synced coverage and any unavailable review source",
+            },
+            400: { description: "Invalid search" },
+            401: { description: "Authentication required" },
+            403: { description: "Workspace read scope required" },
+          },
+        },
+      },
+      "/v1/texting/notifications/preferences/finances": {
+        delete: {
+          security,
+          summary: "Reset Finance notification overrides to global preferences; human session only",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: z.toJSONSchema(resetFinanceNotificationPreferencesSchema),
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Finance now inherits global notification preferences",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: { scope: { const: "finances" }, inherited: { const: true } },
+                    required: ["scope", "inherited"],
+                  },
+                },
+              },
+            },
+            403: { description: "Interactive Texting write and Finance read access required" },
+            409: { description: "Override missing or revision changed" },
+          },
+        },
+      },
+      "/v1/workspaces/{workspace}/settings": {
+        parameters: [
+          {
+            name: "workspace",
+            in: "path",
+            required: true,
+            schema: { type: "string", enum: ["calendar", "tasks", "mail", "finances"] },
+          },
+        ],
+        get: {
+          security,
+          summary: "Read account-owned workspace preferences",
+          responses: {
+            200: {
+              description:
+                "Resolved workspace-specific preferences and revision; revision zero denotes untouched defaults",
+              content: { "application/json": { schema: z.toJSONSchema(workspaceSettingsSchema) } },
+            },
+          },
+        },
+        patch: {
+          security,
+          summary: "Update preferences with optimistic concurrency; human session only",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: z.toJSONSchema(updateWorkspaceSettingsSchema, { io: "input" }),
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Saved preferences and incremented revision",
+              content: { "application/json": { schema: z.toJSONSchema(workspaceSettingsSchema) } },
+            },
+            403: { description: "Interactive workspace write access required" },
+            409: { description: "Preferences changed; reload before retrying" },
+          },
+        },
+      },
       "/v1/desktop-release": {
         get: {
           summary: "Published official desktop installers and release notes",
@@ -688,7 +1262,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
             }),
             queryParameter("status", {
               type: "string",
-              enum: ["all", "open", "completed", "cancelled", "archived"],
+              enum: ["all", "open", "open_and_completed", "completed", "cancelled", "archived"],
             }),
             queryParameter("listId", { format: "uuid", type: "string" }),
             queryParameter("projectId", { format: "uuid", type: "string" }),
@@ -928,7 +1502,37 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         post: { security, responses: { 201: { description: "iCloud connected" } } },
       },
       "/v1/connectors/{id}/sync": {
-        post: { security, responses: { 200: { description: "Connection synchronized" } } },
+        post: {
+          security,
+          responses: {
+            200: {
+              description: "Synchronization pass completed; pending work continues at nextSyncAt",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["result"],
+                    properties: {
+                      result: {
+                        type: "object",
+                        required: ["changed"],
+                        properties: {
+                          changed: { type: "integer", minimum: 0 },
+                          pending: { type: "boolean", default: false },
+                          nextSyncAt: {
+                            type: ["string", "null"],
+                            format: "date-time",
+                            default: null,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
       "/v1/connectors/{id}": {
         delete: { security, responses: { 204: { description: "Connection removed" } } },
@@ -982,6 +1586,12 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         post: {
           security,
           responses: { 204: { description: "Exact confirmed draft submitted once" } },
+        },
+      },
+      "/v1/mail/thread-summaries": {
+        get: {
+          security,
+          responses: { 200: { description: "Body-free mail conversation summaries" } },
         },
       },
       "/v1/mail/threads": {
@@ -1075,6 +1685,12 @@ export function createOpenApiDocument(apiBaseUrl: string) {
             queryParameter("kind", { type: "string", enum: ["morning", "night"] }),
             queryParameter("dateFrom", { type: "string", format: "date" }),
             queryParameter("dateTo", { type: "string", format: "date" }),
+            queryParameter("status", {
+              type: "string",
+              enum: ["pending", "completed", "skipped", "missed", "cancelled_configuration"],
+            }),
+            queryParameter("search", { type: "string", maxLength: 200 }),
+            queryParameter("sort", { type: "string", enum: ["newest", "oldest"] }),
           ],
           "x-required-scopes": ["tracking:read"],
           responses: { 200: { description: "Paginated ritual history" } },

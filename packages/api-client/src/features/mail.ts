@@ -9,10 +9,13 @@ import type {
   MailDraft,
   MailListQuery,
   MailMessage,
+  MailNavigationCounts,
   MailRule,
   MailRulePreview,
   MailSetupContext,
+  MailSummaryQuery,
   MailThread,
+  MailThreadSummary,
   PreviewMailRuleInput,
   ReconcileMailDraftInput,
   SendMailDraftInput,
@@ -22,7 +25,20 @@ import type {
   UpsertMailAttentionItemInput,
 } from "@personal-os/domain";
 
+export type MailAttachmentContent = {
+  filename: string;
+  contentType: string;
+  data: string;
+  size: number;
+};
+
 export type MailApiClient = {
+  getMailNavigationCounts(accountIds?: string[]): Promise<MailNavigationCounts>;
+  downloadMailAttachment(
+    messageId: string,
+    attachmentId: string,
+    signal?: AbortSignal,
+  ): Promise<MailAttachmentContent>;
   activateMailRule(
     id: string,
     input: ActivateMailRuleInput,
@@ -37,6 +53,8 @@ export type MailApiClient = {
   listMailRules(): Promise<MailRule[]>;
   getMailSetupContext(): Promise<MailSetupContext>;
   listMailboxes(): Promise<Mailbox[]>;
+  /** Body-free list rows; the only Mail thread read a client may cache. */
+  listMailThreadSummaries(query?: Partial<MailSummaryQuery>): Promise<MailThreadSummary[]>;
   listMailThreads(query?: Partial<MailListQuery>): Promise<MailThread[]>;
   snoozeMailThread(id: string, until: string): Promise<void>;
   previewMailRule(input: PreviewMailRuleInput): Promise<MailRulePreview>;
@@ -60,6 +78,19 @@ export function createMailApiClient(
   toQuery: (query: object) => string,
 ): MailApiClient {
   return {
+    async getMailNavigationCounts(accountIds) {
+      const result = await request<{ counts: MailNavigationCounts }>(
+        `/v1/mail/counts?${toQuery(accountIds?.length ? { accountIds: accountIds.join(",") } : {})}`,
+      );
+      return result.counts;
+    },
+    async downloadMailAttachment(messageId, attachmentId, signal) {
+      const result = await request<{ attachment: MailAttachmentContent }>(
+        `/v1/mail/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+        signal ? { signal } : {},
+      );
+      return result.attachment;
+    },
     async activateMailRule(id, input) {
       return request<{ preview: MailRulePreview; rule: MailRule }>(
         `/v1/mail/rules/${id}/activate`,
@@ -91,7 +122,9 @@ export function createMailApiClient(
       await request<void>(`/v1/mail/drafts/${id}`, { method: "DELETE" });
     },
     async getMailThread(id) {
-      const response = await request<{ thread: MailThread }>(`/v1/mail/threads/${id}`);
+      const response = await request<{ thread: MailThread }>(
+        `/v1/mail/threads/${encodeURIComponent(id)}`,
+      );
       return response.thread;
     },
     async getMailSetupContext() {
@@ -100,7 +133,7 @@ export function createMailApiClient(
     },
     async listMailMessages(threadId) {
       const response = await request<{ messages: MailMessage[] }>(
-        `/v1/mail/threads/${threadId}/messages`,
+        `/v1/mail/threads/${encodeURIComponent(threadId)}/messages`,
       );
       return response.messages;
     },
@@ -139,6 +172,12 @@ export function createMailApiClient(
         body: JSON.stringify(input),
         method: "POST",
       });
+    },
+    async listMailThreadSummaries(query = {}) {
+      const response = await request<{ threads: MailThreadSummary[] }>(
+        `/v1/mail/thread-summaries?${toQuery(query)}`,
+      );
+      return response.threads;
     },
     async listMailThreads(query = {}) {
       const response = await request<{ threads: MailThread[] }>(

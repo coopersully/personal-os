@@ -3,6 +3,7 @@ import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createPlaidConnector } from "@personal-os/connectors";
 import {
+  accessTokens,
   attentionItems,
   auditEvents,
   createDatabaseClient,
@@ -22,6 +23,7 @@ import {
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
   financeMerchants,
+  financeMutationRecords,
   financePeriodReviews,
   financeProfiles,
   financeProviderItems,
@@ -31,19 +33,25 @@ import {
   financeReviewCases,
   financeSetupBackfillState,
   financeTransactionAllocations,
+  financeTransactionRevisions,
   financeTransactions,
   goals,
   migrateDatabase,
+  sessions,
   users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
+import { financeProviderSourceAdmissionResultSchema } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
 import { loadFinanceAuthorization } from "./finance/context.js";
+import { financeActionFingerprint, stableFinanceActionInput } from "./finance-action-identity.js";
+import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
+import { decryptJson, hashToken } from "./security.js";
 import { migrationsWithout } from "./test-migrations.js";
 import type { Principal } from "./types.js";
 
@@ -113,7 +121,11 @@ function plaidFetch(): typeof globalThis.fetch {
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     if (path === "/link/token/create") {
       expect(body.link_customization_name).toBe("default");
-      return Response.json({ link_token: "link-token" });
+      return Response.json({
+        link_token: "link-token",
+        hosted_link_url: "https://secure.plaid.com/hl/fixture",
+        expiration: "2026-07-19T12:30:00.000Z",
+      });
     }
     if (path === "/item/public_token/exchange") {
       expect(body.public_token).toBe("public-token");
@@ -350,6 +362,49 @@ function plaidFetch(): typeof globalThis.fetch {
 describe.sequential("finance service", () => {
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
+
+  // These persistence tests exercise the semantic writer inside the already-reviewed
+  // transaction. Public review/revision/replay behavior is covered by action-service tests.
+  function reviewedSetBudgetPlan(
+    service: ReturnType<typeof createFinanceService>,
+    input: Parameters<typeof service.setBudgetPlan>[0],
+    context: Parameters<typeof service.setBudgetPlan>[1],
+  ) {
+    return database.db.transaction((tx) =>
+      service.setBudgetPlan(
+        input,
+        {
+          ...context,
+          financeBudgetApproval: {
+            principal: context.principal,
+            reviewId: context.requestId,
+            fingerprint: financeActionFingerprint("budget_plan", input),
+          },
+        },
+        tx,
+      ),
+    );
+  }
+  function reviewedCreateBudget(
+    service: ReturnType<typeof createFinanceService>,
+    input: Parameters<typeof service.createBudget>[0],
+    context: Parameters<typeof service.createBudget>[1],
+  ) {
+    return database.db.transaction((tx) =>
+      service.createBudget(
+        input,
+        {
+          ...context,
+          financeBudgetApproval: {
+            principal: context.principal,
+            reviewId: context.requestId,
+            fingerprint: financeActionFingerprint("budget_plan", input),
+          },
+        },
+        tx,
+      ),
+    );
+  }
   let userId: string;
 
   it("keeps import errors useful even for non-Error throws", () => {
@@ -930,12 +985,7 @@ describe.sequential("finance service", () => {
       executionPolicy.update({ expectedVersion: 1, reviewBypassEnabled: false }, context),
     ).rejects.toMatchObject({ code: "conflict" });
     await expect(service.getGuidedSetupContext(userId)).resolves.toMatchObject({
-      humanOnlyActions: [
-        "connect_or_disconnect_source",
-        "import_transactions",
-        "manage_accounts",
-        "refresh_provider_data",
-      ],
+      humanOnlyActions: ["provider_authorization"],
     });
     await expect(
       database.db
@@ -1041,7 +1091,7 @@ describe.sequential("finance service", () => {
       scenarioFingerprint: `sha256:${"a".repeat(64)}`,
     };
 
-    await expect(service.setBudgetPlan(input, context)).resolves.toEqual(input);
+    await expect(reviewedSetBudgetPlan(service, input, context)).resolves.toEqual(input);
     await expect(
       database.db
         .select({ category: financeBudgets.category, limit: financeBudgets.limit })
@@ -1063,7 +1113,8 @@ describe.sequential("finance service", () => {
       },
     ]);
     await expect(
-      service.setBudgetPlan(
+      reviewedSetBudgetPlan(
+        service,
         { ...input, allocations: [{ categoryId: category.id, limit: 6_000 }] },
         context,
       ),
@@ -1114,7 +1165,7 @@ describe.sequential("finance service", () => {
     };
     const context = { principal: financePrincipal(owner.id), requestId: "budget-plan-metadata" };
 
-    await expect(service.setBudgetPlan(input, context)).resolves.toEqual(input);
+    await expect(reviewedSetBudgetPlan(service, input, context)).resolves.toEqual(input);
     await expect(
       database.db
         .select({
@@ -1152,7 +1203,7 @@ describe.sequential("finance service", () => {
         .where(eq(auditEvents.requestId, context.requestId)),
     ).resolves.toEqual([
       {
-        after: {
+        after: expect.objectContaining({
           allocationCount: 1,
           assumptionsCount: 2,
           goalCount: 1,
@@ -1160,8 +1211,13 @@ describe.sequential("finance service", () => {
           planVersion: 1,
           rationaleProvided: true,
           scenarioFingerprint: input.scenarioFingerprint,
+        }),
+        before: {
+          allocations: [],
+          allocationCount: 0,
+          month: input.month,
+          priorAllocationCount: 0,
         },
-        before: { allocationCount: 0, month: input.month, priorAllocationCount: 0 },
       },
     ]);
 
@@ -1178,13 +1234,15 @@ describe.sequential("finance service", () => {
     const auditCount = await database.db.$count(auditEvents, eq(auditEvents.userId, owner.id));
 
     await expect(
-      service.setBudgetPlan(
+      reviewedSetBudgetPlan(
+        service,
         { ...input, allocations: [{ categoryId: foreignCategory.id, limit: 100 }] },
         { ...context, requestId: "budget-plan-foreign-category" },
       ),
     ).rejects.toMatchObject({ code: "not_found" });
     await expect(
-      service.setBudgetPlan(
+      reviewedSetBudgetPlan(
+        service,
         { ...input, goalIds: [foreignGoal.id] },
         { ...context, requestId: "budget-plan-foreign-goal" },
       ),
@@ -1226,7 +1284,8 @@ describe.sequential("finance service", () => {
     try {
       let allocationFailure: unknown;
       try {
-        await service.setBudgetPlan(
+        await reviewedSetBudgetPlan(
+          service,
           {
             ...input,
             allocations: [
@@ -1318,13 +1377,13 @@ describe.sequential("finance service", () => {
     let first: ReturnType<ReturnType<typeof createFinanceService>["setBudgetPlan"]> | undefined;
     let second: ReturnType<ReturnType<typeof createFinanceService>["setBudgetPlan"]> | undefined;
     try {
-      first = service.setBudgetPlan(firstPlan, {
+      first = reviewedSetBudgetPlan(service, firstPlan, {
         principal: financePrincipal(owner.id),
         requestId: "concurrent-budget-plan-first",
       });
       void first.catch(() => undefined);
       await waitForPostgresSleep(database.pool);
-      second = service.setBudgetPlan(secondPlan, {
+      second = reviewedSetBudgetPlan(service, secondPlan, {
         principal: financePrincipal(owner.id),
         requestId: "concurrent-budget-plan-second",
       });
@@ -2125,18 +2184,85 @@ describe.sequential("finance service", () => {
     ).toEqual([]);
   });
 
-  it("manages manual finances, review decisions, budgets, and safe unavailable Plaid state", async () => {
+  it("creates reusable categories without transactions and isolates owners", async () => {
     const service = createFinanceService({ db: database.db, now: () => now });
-    const context = { principal: financePrincipal(userId), requestId: "manual-finance" };
+    const context = { principal: financePrincipal(userId), requestId: "category-create" };
+    const first = await service.createCategory({ name: "Custom hobby supplies" }, context);
+    const repeated = await service.createCategory({ name: "custom hobby supplies" }, context);
+    expect(repeated.id).toBe(first.id);
+    expect(await service.listCategories(userId)).toContainEqual(first);
+    expect(await service.listCategories("00000000-0000-4000-8000-000000000000")).not.toContainEqual(
+      first,
+    );
+  });
+
+  it("keeps colliding and non-ASCII category names distinct without renaming", async () => {
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(userId), requestId: "category-collision" };
+    const names = ["R&D", "R and D", "食費", "交通"];
+    const created = await Promise.all(
+      names.map((name) => service.createCategory({ name }, context)),
+    );
+    expect(new Set(created.map((category) => category.id)).size).toBe(names.length);
+    const stored = await service.listCategories(userId);
+    for (const category of created) expect(stored).toContainEqual(category);
+    const original = created[0];
+    if (!original) throw new Error("Missing category");
+    await database.db
+      .update(financeCategories)
+      .set({ name: "Renamed research" })
+      .where(eq(financeCategories.id, original.id));
+    const recreated = await service.createCategory({ name: "R&D" }, context);
+    expect(recreated.id).not.toBe(original.id);
+    expect(recreated.name).toBe("R&D");
+    expect(await service.listCategories(userId)).toContainEqual(
+      expect.objectContaining({ id: original.id, name: "Renamed research" }),
+    );
+    const repeated = await Promise.all([
+      service.createCategory({ name: "Concurrent custom" }, context),
+      service.createCategory({ name: "Concurrent custom" }, context),
+    ]);
+    expect(repeated[0]?.id).toBe(repeated[1]?.id);
+  });
+
+  async function manualFinanceFixture(label: string) {
+    const userId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: userId,
+      displayName: "Manual Finance scenario",
+      email: `manual-finance-${userId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(userId), requestId: `manual-finance-${label}` };
+    const agentContext = {
+      principal: financeAgentPrincipal(userId),
+      requestId: `agent-finance-${label}`,
+    };
+    // The original scenario inherited this owner's approval from a sibling test.
+    await createExecutionPolicyService({ db: database.db, now: () => now }).update(
+      { expectedVersion: 1, reviewBypassEnabled: true },
+      context,
+    );
+    const account = await service.createAccount(
+      { balance: 1500, institution: "Cash", name: "Wallet", provider: "manual" },
+      context,
+    );
+    const shopping = (await service.listCategories(userId)).find(
+      (item) => item.slug === "shopping",
+    );
+    if (!shopping) throw new Error("Shopping category was not seeded.");
+    return { service, context, agentContext, userId, account, shopping };
+  }
+
+  it("keeps manual account availability and wealth independent of other scenarios", async () => {
+    const { service, context, userId } = await manualFinanceFixture("accounts");
     await expect(service.listMerchants("00000000-0000-4000-8000-000000000000")).resolves.toEqual(
       [],
     );
     expect(service.plaidAvailable()).toBe(false);
     await expect(service.createPlaidLinkToken(userId)).rejects.toThrow("Plaid is not configured");
-    const account = await service.createAccount(
-      { balance: 1500, institution: "Cash", name: "Wallet", provider: "manual" },
-      context,
-    );
     const wealthAccounts = await Promise.all(
       [
         { balance: 250, kind: "debt" as const, name: "Card" },
@@ -2157,6 +2283,11 @@ describe.sequential("finance service", () => {
     for (const wealthAccount of wealthAccounts) {
       await service.deleteAccount(wealthAccount.id, context);
     }
+  });
+
+  it("preserves categorization authority, stale previews and deferred-review replay", async () => {
+    const { service, context, agentContext, userId, account, shopping } =
+      await manualFinanceFixture("categorization");
     const categorized = await service.createTransaction(
       {
         accountId: account.id,
@@ -2189,10 +2320,6 @@ describe.sequential("finance service", () => {
       needsReview: false,
     });
     expect(review.needsReview).toBe(true);
-    const shopping = (await service.listCategories(userId)).find(
-      (item) => item.slug === "shopping",
-    );
-    if (!shopping) throw new Error("Shopping category was not seeded.");
     const [pendingCandidate] = await database.db
       .insert(financeTransactions)
       .values({
@@ -2236,10 +2363,6 @@ describe.sequential("finance service", () => {
         .from(financeClassificationDecisions)
         .where(eq(financeClassificationDecisions.transactionId, pendingCandidate.id)),
     ).resolves.toHaveLength(0);
-    const agentContext = {
-      principal: financeAgentPrincipal(userId),
-      requestId: "agent-finance",
-    };
     await expect(
       service.applyCategorizations(
         {
@@ -2500,6 +2623,24 @@ describe.sequential("finance service", () => {
         expectedTransactionUpdatedAt: lowConfidenceReview.transaction.updatedAt,
         learnMerchant: "never",
         rationale: "The user accepted the individual category.",
+      },
+      context,
+    );
+  });
+
+  it("fences concurrent category evidence and reviewed mutations with paginated reads", async () => {
+    const { service, context, agentContext, userId, account, shopping } =
+      await manualFinanceFixture("evidence");
+    const review = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 6,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Mystery Shop",
+        notes: null,
       },
       context,
     );
@@ -2862,6 +3003,11 @@ describe.sequential("finance service", () => {
           staleAgentReviewCandidate.id,
         ]),
       );
+  });
+
+  it("keeps transfer guidance, human decisions and concurrent review outcomes together", async () => {
+    const { service, context, agentContext, userId, account, shopping } =
+      await manualFinanceFixture("transfers");
     const transferCandidate = await service.createTransaction(
       {
         accountId: account.id,
@@ -3036,6 +3182,96 @@ describe.sequential("finance service", () => {
         (item) => item.transaction.id === recategorizedTransfer.id,
       ),
     ).toBe(false);
+  });
+
+  it("preserves the manual ledger through learning, import, budgets and guidance-fenced deletion", async () => {
+    const { service, context, userId, account, shopping } = await manualFinanceFixture("ledger");
+    const review = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 6,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Mystery Shop",
+        notes: null,
+      },
+      context,
+    );
+    // Preserve the same posted/pending and transfer contributions as the original journey.
+    // Their edge-case mutations are covered above; this fixture makes the aggregate explicit.
+    for (const item of [
+      { amount: 12.5, category: null, merchant: "Trader Joe's" },
+      { amount: 7, category: null, merchant: "Revision Race" },
+      { amount: 1, category: "Shopping", merchant: "Single Evidence" },
+      { amount: 2, category: "Shopping", merchant: "Single Evidence" },
+      { amount: 3, category: "Shopping", merchant: "Everyday Supplies" },
+      { amount: 4, category: "Shopping", merchant: "Everyday Supplies" },
+      { amount: 5, category: "Shopping", merchant: "Everyday Supplies" },
+    ]) {
+      await service.createTransaction(
+        {
+          ...item,
+          accountId: account.id,
+          categoryConfidence: null,
+          date: "2026-07-19",
+          direction: "expense",
+          notes: item.merchant === "Revision Race" ? "Changed after preview" : null,
+        },
+        context,
+      );
+    }
+    await database.db.insert(financeTransactions).values({
+      accountId: account.id,
+      amount: 800,
+      category: "Shopping",
+      categoryId: shopping.id,
+      direction: "expense",
+      merchant: "Pending Card Hold",
+      needsReview: false,
+      pending: true,
+      transactionDate: "2026-07-19",
+      userId,
+    });
+    // Exercise transfer recognition and both human decisions before the aggregate read.
+    for (const [amount, merchant, action] of [
+      [25, "Account movement", "confirm_transfer"],
+      [18, "Misclassified purchase", "recategorize"],
+    ] as const) {
+      const candidate = await service.createTransaction(
+        {
+          accountId: account.id,
+          amount,
+          category: null,
+          categoryConfidence: null,
+          date: "2026-07-19",
+          direction: "transfer",
+          merchant,
+          notes: null,
+        },
+        context,
+      );
+      await service.reconcileTransfers(userId);
+      const queued = (await service.listReviewQueue(userId)).find(
+        (item) => item.transaction.id === candidate.id,
+      );
+      if (!queued) throw new Error("Ledger transfer was not queued for review.");
+      await service.resolveReview(
+        queued.id,
+        {
+          action,
+          ...(action === "recategorize"
+            ? { categoryId: shopping.id, nonTransferDirection: "expense" as const }
+            : {}),
+          expectedTransactionUpdatedAt: queued.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: "Preserve the ledger fixture's human transfer decision.",
+        },
+        context,
+      );
+      await service.reconcileTransfers(userId);
+    }
     await service.updateTransaction(
       review.id,
       { category: "Shopping", learnMerchant: true },
@@ -3168,7 +3404,11 @@ describe.sequential("finance service", () => {
     await expect(
       service.updateTransaction("00000000-0000-4000-8000-000000000000", { notes: "Nope" }, context),
     ).rejects.toThrow("transaction was not found");
-    await service.createBudget({ category: "Groceries", limit: 400, month: "2026-07" }, context);
+    await reviewedCreateBudget(
+      service,
+      { category: "Groceries", limit: 400, month: "2026-07" },
+      context,
+    );
     const overview = await service.listOverview(userId);
     expect(overview).toMatchObject({ reviewCount: 3, spendingThisMonth: 97.75 });
     expect(overview.budgets).toHaveLength(1);
@@ -3259,6 +3499,456 @@ describe.sequential("finance service", () => {
     await expect(
       database.db.select().from(financeAccounts).where(eq(financeAccounts.userId, atomicUserId)),
     ).resolves.toHaveLength(0);
+  });
+
+  it("reconnects an owned existing Plaid Item without exchanging tokens or resetting its ledger cursors", async () => {
+    const userId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: userId,
+      displayName: "Update mode",
+      email: `update-mode-${userId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const exchangePublicToken = vi
+      .fn()
+      .mockResolvedValue({ accessToken: "existing-access", itemId: "existing-item" });
+    const createLinkToken = vi.fn().mockResolvedValue("update-link");
+    const getItem = vi.fn().mockResolvedValue({ itemId: "existing-item" });
+    const getAccounts = vi.fn().mockResolvedValue([
+      {
+        accountId: "existing-account",
+        balanceCurrent: 10,
+        currencyCode: "USD",
+        name: "Provider checking",
+        officialName: null,
+      },
+    ]);
+    const plaid = {
+      createLinkToken,
+      validateCredentials: async () => undefined,
+      exchangePublicToken,
+      getItem,
+      getAccounts,
+      syncTransactions: async () => ({
+        added: [],
+        modified: [],
+        removed: [],
+        hasMore: false,
+        nextCursor: "unused",
+        transactionsUpdateStatus: null,
+      }),
+    };
+    const service = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid,
+    });
+    const context = { principal: financePrincipal(userId), requestId: "update-mode" };
+    const [account] = await service.exchangePlaidToken(
+      { publicToken: "initial-token", institution: "Fixture" },
+      context,
+    );
+    if (!account) throw new Error("Reconnect fixture missing.");
+    const [item] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.userId, userId));
+    if (!item) throw new Error("Reconnect Item missing.");
+    await database.db
+      .update(financeProviderItems)
+      .set({ syncCursor: "preserved-item-cursor", syncState: "current", nextSyncAt: null })
+      .where(eq(financeProviderItems.id, item.id));
+    await database.db
+      .update(financeAccounts)
+      .set({
+        syncCursor: "preserved-account-cursor",
+        name: "My renamed checking",
+        status: "needs_reauth",
+        nextSyncAt: null,
+      })
+      .where(eq(financeAccounts.id, account.id));
+    await expect(service.createPlaidLinkToken(userId, account.id)).resolves.toBe("update-link");
+    expect(createLinkToken).toHaveBeenCalledWith(
+      expect.objectContaining({ accessToken: "existing-access" }),
+    );
+    // Without the iPhone redirect setting, naming the iPhone app changes nothing in the request.
+    const unset = createLinkToken.mock.calls.at(-1)?.[0];
+    await service.createPlaidLinkToken(userId, account.id, "ios");
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual(unset);
+    await service.createPlaidLinkToken(userId);
+    const unsetConnect = createLinkToken.mock.calls.at(-1)?.[0];
+    await service.createPlaidLinkToken(userId, undefined, "ios");
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual(unsetConnect);
+    expect(unset).not.toHaveProperty("redirectUri");
+    expect(unsetConnect).not.toHaveProperty("redirectUri");
+    // With it, only the iPhone app's tokens carry the redirect, in connect and update mode.
+    const redirectUri = "https://app.example.com/plaid/return";
+    const configured = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid,
+      plaidIosRedirectUri: redirectUri,
+    });
+    await configured.createPlaidLinkToken(userId, account.id);
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual(unset);
+    await configured.createPlaidLinkToken(userId);
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual(unsetConnect);
+    await configured.createPlaidLinkToken(userId, account.id, "ios");
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual({ ...unset, redirectUri });
+    await configured.createPlaidLinkToken(userId, undefined, "ios");
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual({ ...unsetConnect, redirectUri });
+    await expect(
+      service.createPlaidLinkToken(crypto.randomUUID(), account.id),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const authorization = await loadFinanceAuthorization({
+      db: database.db,
+      principal: financePrincipal(userId),
+      requestId: "update-complete",
+    });
+    const input = { idempotencyKey: "update-completion" };
+    await expect(service.completePlaidReconnect(account.id, input, authorization)).resolves.toEqual(
+      { accountId: account.id, authorizationVerified: true, synchronizationScheduled: true },
+    );
+    await service.completePlaidReconnect(account.id, input, authorization);
+    expect(exchangePublicToken).toHaveBeenCalledExactlyOnceWith("initial-token");
+    expect(getItem).toHaveBeenCalledOnce();
+    const [savedItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.id, item.id));
+    const [savedAccount] = await database.db
+      .select()
+      .from(financeAccounts)
+      .where(eq(financeAccounts.id, account.id));
+    expect(savedItem).toMatchObject({
+      syncCursor: "preserved-item-cursor",
+      nextSyncAt: now,
+      syncState: "stale",
+    });
+    expect(savedAccount).toMatchObject({
+      syncCursor: "preserved-account-cursor",
+      name: "My renamed checking",
+      status: "connected",
+    });
+    const otherOwnerId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: otherOwnerId,
+      displayName: "Other reconnect owner",
+      email: `other-reconnect-${otherOwnerId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    await expect(
+      service.completePlaidReconnect(
+        account.id,
+        { idempotencyKey: "other-owner" },
+        { ...authorization, userId: otherOwnerId, actorId: otherOwnerId },
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await database.db.delete(users).where(eq(users.id, otherOwnerId));
+    getAccounts.mockResolvedValueOnce([]);
+    await expect(
+      service.completePlaidReconnect(
+        account.id,
+        { idempotencyKey: "missing-account" },
+        authorization,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    getItem.mockResolvedValueOnce({ itemId: "wrong-item" });
+    await expect(
+      service.completePlaidReconnect(account.id, { idempotencyKey: "wrong-item" }, authorization),
+    ).rejects.toMatchObject({ code: "conflict" });
+    getItem.mockRejectedValueOnce(new Error("Synthetic provider unavailable"));
+    await expect(
+      service.completePlaidReconnect(
+        account.id,
+        { idempotencyKey: "provider-failure" },
+        authorization,
+      ),
+    ).rejects.toThrow("Synthetic provider unavailable");
+    const claimId = crypto.randomUUID();
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        syncClaimId: claimId,
+        syncClaimOwner: "worker",
+        syncClaimGeneration: 1,
+        syncClaimStartedAt: now,
+        syncClaimExpiresAt: new Date(now.getTime() + 60_000),
+      })
+      .where(eq(financeProviderItems.id, item.id));
+    await expect(
+      service.completePlaidReconnect(account.id, { idempotencyKey: "active-claim" }, authorization),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await database.db
+      .update(financeProviderItems)
+      .set({ syncClaimExpiresAt: new Date(now.getTime() - 1) })
+      .where(eq(financeProviderItems.id, item.id));
+    await expect(
+      service.completePlaidReconnect(
+        account.id,
+        { idempotencyKey: "expired-claim" },
+        authorization,
+      ),
+    ).resolves.toMatchObject({ synchronizationScheduled: true });
+    const [recovered] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.id, item.id));
+    expect(recovered).toMatchObject({
+      syncClaimId: null,
+      syncClaimOwner: null,
+      syncClaimGeneration: null,
+      syncCursor: "preserved-item-cursor",
+    });
+    await database.db.delete(users).where(eq(users.id, userId));
+  });
+
+  it("rejects known Link account metadata before a duplicate public token is exchanged", async () => {
+    const userId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: userId,
+      displayName: "Duplicate preflight",
+      email: `preflight-${userId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const exchangePublicToken = vi
+      .fn()
+      .mockResolvedValue({ accessToken: "preflight-access", itemId: "preflight-item" });
+    const service = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid: {
+        createLinkToken: async () => "unused",
+        validateCredentials: async () => undefined,
+        exchangePublicToken,
+        getItem: async () => ({ itemId: "preflight-item" }),
+        getAccounts: async () => [
+          {
+            accountId: "preflight-account",
+            balanceCurrent: 10,
+            currencyCode: "USD",
+            name: "Checking",
+            officialName: null,
+            institutionId: "ins-fixture",
+            mask: "0042",
+          },
+        ],
+        syncTransactions: async () => ({
+          added: [],
+          modified: [],
+          removed: [],
+          hasMore: false,
+          nextCursor: "unused",
+          transactionsUpdateStatus: null,
+        }),
+      },
+    });
+    const context = { principal: financePrincipal(userId), requestId: "duplicate-preflight" };
+    const [saved] = await service.exchangePlaidToken(
+      { publicToken: "first-token", institution: "Fixture" },
+      context,
+    );
+    await expect(
+      service.exchangePlaidToken(
+        {
+          publicToken: "must-not-exchange",
+          institution: "Fixture",
+          metadata: {
+            institutionId: "ins-fixture",
+            accounts: [{ name: " checking ", mask: "0042" }],
+          },
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      details: { reason: "duplicate_bank_accounts", accountIds: [saved?.id] },
+    });
+    expect(exchangePublicToken).toHaveBeenCalledExactlyOnceWith("first-token");
+    await database.db.delete(users).where(eq(users.id, userId));
+  });
+
+  it("retains direct Plaid exchanges across duplicate and account-read failures without repeating consent", async () => {
+    const ownerId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: ownerId,
+      displayName: "Exchange recovery",
+      email: `${ownerId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    let remoteId = "first-account";
+    const getAccounts = vi.fn(async () => [
+      {
+        accountId: remoteId,
+        balanceCurrent: 10,
+        currencyCode: "USD",
+        name: "Checking",
+        officialName: null,
+        institutionId: "ins-recovery",
+        mask: "0042",
+      },
+    ]);
+    const exchangePublicToken = vi.fn(async (token: string) => ({
+      accessToken: `access-${token}`,
+      itemId: `item-${token}`,
+    }));
+    const recoveryLogs: unknown[] = [];
+    const service = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      log: (entry) => recoveryLogs.push(entry),
+      plaid: {
+        createLinkToken: async () => "unused",
+        validateCredentials: async () => undefined,
+        exchangePublicToken,
+        getAccounts,
+        getItem: async () => ({ itemId: "unused" }),
+        syncTransactions: async () => ({
+          added: [],
+          modified: [],
+          removed: [],
+          hasMore: false,
+          nextCursor: "unused",
+          transactionsUpdateStatus: null,
+        }),
+      },
+    });
+    const context = { principal: financePrincipal(ownerId), requestId: "direct-recovery" };
+    await service.exchangePlaidToken({ institution: null, publicToken: "first" }, context);
+    remoteId = "duplicate-account";
+    const duplicate = await service
+      .exchangePlaidToken({ institution: null, publicToken: "duplicate" }, context)
+      .catch((error: unknown) => error);
+    expect(duplicate).toMatchObject({
+      code: "conflict",
+      details: {
+        reason: "duplicate_bank_accounts",
+        recovery: "complete_connection",
+        connectionId: expect.any(String),
+      },
+    });
+    const retained = await database.db
+      .select()
+      .from(financeAccountConnections)
+      .where(eq(financeAccountConnections.userId, ownerId));
+    const duplicateReceipt = retained.find((row) => row.status === "failed");
+    if (!duplicateReceipt?.encryptedHandoffState)
+      throw new Error("Missing retained duplicate exchange");
+    expect(decryptJson(duplicateReceipt.encryptedHandoffState, key)).toMatchObject({
+      phase: "exchanged",
+      accessToken: "access-duplicate",
+      itemId: "item-duplicate",
+    });
+    expect(JSON.stringify(duplicate)).not.toContain("access-duplicate");
+    const outsider = await loadFinanceAuthorization({
+      db: database.db,
+      principal: financePrincipal(userId),
+      requestId: "foreign-recovery",
+    });
+    await expect(
+      service.completeFinanceAccountConnection(duplicateReceipt.id, outsider),
+    ).rejects.toMatchObject({ code: "not_found" });
+    remoteId = "recoverable-account";
+    let retainedBeforeRead: unknown;
+    getAccounts.mockImplementationOnce(async () => {
+      const [receiptBeforeRead] = await database.db
+        .select()
+        .from(financeAccountConnections)
+        .where(
+          and(
+            eq(financeAccountConnections.userId, ownerId),
+            eq(financeAccountConnections.status, "pending"),
+          ),
+        );
+      if (!receiptBeforeRead?.encryptedHandoffState)
+        throw new Error("Exchange was not durable before provider read");
+      retainedBeforeRead = decryptJson(receiptBeforeRead.encryptedHandoffState, key);
+      throw new Error("provider-read-canary access-secret");
+    });
+    const failed = await service
+      .exchangePlaidToken({ institution: null, publicToken: "read-failure" }, context)
+      .catch((error: unknown) => error);
+    expect(failed).toMatchObject({
+      code: "service_unavailable",
+      details: { connectionId: expect.any(String), recovery: "complete_connection" },
+    });
+    expect(retainedBeforeRead).toMatchObject({
+      phase: "exchanged",
+      accessToken: "access-read-failure",
+    });
+    expect(JSON.stringify(failed)).not.toContain("access-secret");
+    const [pending] = await database.db
+      .select()
+      .from(financeAccountConnections)
+      .where(
+        and(
+          eq(financeAccountConnections.userId, ownerId),
+          eq(financeAccountConnections.status, "pending"),
+        ),
+      );
+    if (!pending?.encryptedHandoffState) throw new Error("Missing retained provider-read exchange");
+    const authorization = await loadFinanceAuthorization({ db: database.db, ...context });
+    // The next snapshot is a distinct account, so completion can commit its projection.
+    getAccounts.mockResolvedValueOnce([
+      {
+        accountId: remoteId,
+        balanceCurrent: 10,
+        currencyCode: "USD",
+        name: "Checking",
+        officialName: null,
+        institutionId: "ins-recovery",
+        mask: "9999",
+      },
+    ]);
+    const completed = await service.completeFinanceAccountConnection(pending.id, authorization);
+    expect(completed.data.status).toBe("connected");
+    expect(completed.data.accountIds).toHaveLength(1);
+    const [settled] = await database.db
+      .select()
+      .from(financeAccountConnections)
+      .where(eq(financeAccountConnections.id, pending.id));
+    expect(settled?.encryptedHandoffState).toBeNull();
+    expect(exchangePublicToken).toHaveBeenCalledTimes(3);
+    await database.pool.query(`CREATE SEQUENCE direct_receipt_failures;
+      CREATE FUNCTION reject_direct_receipt() RETURNS trigger AS $$ BEGIN
+        PERFORM nextval('direct_receipt_failures');
+        RAISE EXCEPTION 'synthetic credential storage outage';
+      END; $$ LANGUAGE plpgsql;
+      CREATE TRIGGER reject_direct_receipt BEFORE INSERT ON finance_account_connections
+      FOR EACH ROW EXECUTE FUNCTION reject_direct_receipt();`);
+    const readsBeforeOutage = getAccounts.mock.calls.length;
+    try {
+      await expect(
+        service.exchangePlaidToken(
+          { institution: null, publicToken: "persistence-outage" },
+          context,
+        ),
+      ).rejects.toMatchObject({ code: "service_unavailable" });
+      const attempts = await database.pool.query("SELECT last_value FROM direct_receipt_failures");
+      expect(Number(attempts.rows[0]?.last_value)).toBe(3);
+      expect(getAccounts).toHaveBeenCalledTimes(readsBeforeOutage);
+      expect(exchangePublicToken).toHaveBeenCalledTimes(4);
+      expect(recoveryLogs).toContainEqual(
+        expect.objectContaining({
+          event: "connector_handoff_failed",
+          code: "exchange_persistence_failed",
+        }),
+      );
+      expect(JSON.stringify(recoveryLogs)).not.toContain("access-persistence-outage");
+    } finally {
+      await database.pool.query(
+        "DROP TRIGGER reject_direct_receipt ON finance_account_connections; DROP FUNCTION reject_direct_receipt(); DROP SEQUENCE direct_receipt_failures;",
+      );
+    }
+    await database.db.delete(users).where(eq(users.id, ownerId));
   });
 
   it("commits Plaid categories, Item, accounts, and audits atomically", async () => {
@@ -3659,8 +4349,13 @@ describe.sequential("finance service", () => {
         context,
       ),
     ).rejects.toMatchObject({ code: "conflict" });
-    await service.createBudget({ category: "Health", limit: 100, month: "2026-07" }, context);
-    await service.createBudget(
+    await reviewedCreateBudget(
+      service,
+      { category: "Health", limit: 100, month: "2026-07" },
+      context,
+    );
+    await reviewedCreateBudget(
+      service,
       { category: "Personal Care", limit: 100, month: "2026-07" },
       context,
     );
@@ -3676,6 +4371,50 @@ describe.sequential("finance service", () => {
         }),
       ]),
     );
+    const healthBudget = (await service.getBudgetStatus(owner.id, "2026-07")).find(
+      (item) => item.budget.category === "Health",
+    )?.budget;
+    if (!healthBudget) throw new Error("Health budget was not created.");
+    const contributing = await service.listTransactions(owner.id, {
+      budgetId: healthBudget.id,
+      limit: 50,
+      review: "all",
+    });
+    expect(contributing.items.map((item) => item.id)).toContain(transaction.id);
+    await expect(
+      service.listTransactions(other.id, { budgetId: healthBudget.id, limit: 50, review: "all" }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const changed = await reviewedCreateBudget(
+      service,
+      {
+        budgetId: healthBudget.id,
+        expectedBudgetUpdatedAt: healthBudget.updatedAt,
+        category: healthBudget.category,
+        month: healthBudget.month,
+        limit: 125,
+      },
+      context,
+    );
+    expect(changed.id).toBe(healthBudget.id);
+    expect(changed.limit).toBe(125);
+    expect(
+      (await service.getBudgetStatus(owner.id, "2026-07")).filter(
+        (item) => item.budget.category === "Health",
+      ),
+    ).toHaveLength(1);
+    await expect(
+      reviewedCreateBudget(
+        service,
+        {
+          budgetId: healthBudget.id,
+          expectedBudgetUpdatedAt: "2020-01-01T00:00:00.000Z",
+          category: healthBudget.category,
+          month: healthBudget.month,
+          limit: 999,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
     await expect(service.listOverview(owner.id, "2026-07")).resolves.toMatchObject({
       spendingThisMonth: 62.14,
       transactions: expect.arrayContaining([
@@ -5004,6 +5743,96 @@ describe.sequential("finance service", () => {
     }
   });
 
+  it("leaves a card payment out of spending and refunds only when a connected card received it", async () => {
+    const [cardUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Card payer",
+        email: "card-payer@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!cardUser) throw new Error("Card user was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(cardUser.id), requestId: "card-payment" };
+    const checking = await service.createAccount(
+      { balance: 5000, institution: "Test bank", name: "Checking", provider: "manual" },
+      context,
+    );
+    const card = await service.createAccount(
+      { balance: 300, institution: "Test bank", name: "Card", provider: "manual" },
+      context,
+    );
+    const observe = (status: "connected" | "needs_reauth") =>
+      database.db
+        .update(financeAccounts)
+        .set({ kind: "debt", providerType: "credit", status })
+        .where(eq(financeAccounts.id, card.id));
+    await observe("connected");
+    const add = async (
+      accountId: string,
+      amount: number,
+      direction: "expense" | "income",
+      category: string,
+      date: string,
+      cardPayment: boolean,
+    ) => {
+      const created = await service.createTransaction(
+        {
+          accountId,
+          amount,
+          category,
+          categoryConfidence: null,
+          date,
+          direction,
+          merchant: `${category} ${amount}`,
+          notes: null,
+        },
+        context,
+      );
+      if (cardPayment)
+        await database.db
+          .update(financeTransactions)
+          .set({ providerCategoryDetailed: "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT" })
+          .where(eq(financeTransactions.id, created.id));
+    };
+    await add(card.id, 40, "expense", "Shopping", "2026-07-08", false);
+    await add(checking.id, 300, "expense", "LOAN_PAYMENTS", "2026-07-10", true);
+    await add(card.id, 300, "income", "LOAN_PAYMENTS", "2026-07-11", true);
+    // No observed card received this one: it paid a card nohmi cannot see.
+    await add(checking.id, 77, "expense", "LOAN_PAYMENTS", "2026-07-12", true);
+    await reviewedCreateBudget(
+      service,
+      { category: "LOAN_PAYMENTS", limit: 500, month: "2026-07" },
+      context,
+    );
+
+    await expect(service.listOverview(cardUser.id, "2026-07")).resolves.toMatchObject({
+      refundCreditsThisMonth: 0,
+      spendingThisMonth: 117,
+    });
+    await expect(service.getBudgetStatus(cardUser.id, "2026-07")).resolves.toEqual([
+      expect.objectContaining({ spent: 77 }),
+    ]);
+    await expect(service.getBudgetPace(cardUser.id, "month")).resolves.toMatchObject({
+      cells: expect.arrayContaining([
+        // Cumulative: the settled payment and its receipt add nothing on the 10th and 11th.
+        expect.objectContaining({ date: "2026-07-11", spent: 40 }),
+        expect.objectContaining({ date: "2026-07-12", spent: 117 }),
+      ]),
+    });
+
+    // A card awaiting re-authentication observes no purchases, so nothing is left out.
+    await observe("needs_reauth");
+    await expect(service.listOverview(cardUser.id, "2026-07")).resolves.toMatchObject({
+      refundCreditsThisMonth: 300,
+    });
+    await expect(service.getBudgetStatus(cardUser.id, "2026-07")).resolves.toEqual([
+      expect.objectContaining({ spent: 77 }),
+    ]);
+  });
+
   it("uses posted net spending, preserves refunds, and exposes complete ledger health and export data", async () => {
     const [integrityUser] = await database.db
       .insert(users)
@@ -5061,7 +5890,11 @@ describe.sequential("finance service", () => {
       },
       context,
     );
-    await service.createBudget({ category: "Shopping", limit: 90, month: "2026-07" }, context);
+    await reviewedCreateBudget(
+      service,
+      { category: "Shopping", limit: 90, month: "2026-07" },
+      context,
+    );
 
     await expect(service.getBudgetStatus(integrityId, "2026-07")).resolves.toEqual([
       expect.objectContaining({ remaining: 10, spent: 80 }),
@@ -5757,7 +6590,11 @@ describe.sequential("finance service", () => {
       { balance: 5_000, institution: "Bank", kind: "cash", name: "Checking", provider: "manual" },
       context,
     );
-    await service.createBudget({ category: "Dining", limit: 310, month: "2026-07" }, context);
+    await reviewedCreateBudget(
+      service,
+      { category: "Dining", limit: 310, month: "2026-07" },
+      context,
+    );
     for (const [date, amount] of [
       ["2026-07-01", 100],
       ["2026-07-19", 150],
@@ -5866,7 +6703,7 @@ describe.sequential("finance service", () => {
       data: {
         connectionId: expect.any(String),
         externalHandoff: {
-          artifact: "link-token",
+          artifact: "https://secure.plaid.com/hl/fixture",
           expiresAt: "2026-07-19T12:30:00.000Z",
         },
         status: "pending",
@@ -5878,7 +6715,7 @@ describe.sequential("finance service", () => {
       .from(financeAccountConnections)
       .where(eq(financeAccountConnections.id, connectionResult.data.connectionId));
     expect(persistedConnection).toMatchObject({
-      externalHandoffUrl: "link-token",
+      externalHandoffUrl: "https://secure.plaid.com/hl/fixture",
       status: "pending",
     });
     const accounts = await service.exchangePlaidToken(
@@ -6454,7 +7291,8 @@ describe.sequential("finance service", () => {
       },
       context,
     );
-    await service.createBudget(
+    await reviewedCreateBudget(
+      service,
       { category: firstCategory.name, limit: 100, month: "2026-07" },
       context,
     );
@@ -10549,6 +11387,916 @@ describe.sequential("finance service", () => {
     await expect(service.importFinanceTransactions(importInput, context)).resolves.toMatchObject({
       outcome: "completed",
       data: { imported: 1, skipped: 0 },
+    });
+  });
+  it("qualifies Wealth and Accounts consistently for renamed matching provider identities", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Renamed duplicate fixture",
+        email: `renamed-${crypto.randomUUID()}@example.test`,
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing fixture");
+    const provider = createFinanceProviderItemService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+    });
+    await provider.upsertConnection({
+      accessToken: "synthetic-only",
+      itemId: `fixture-${owner.id}`,
+      institution: "Fixture bank",
+      context: { principal: financePrincipal(owner.id), requestId: "fixture" },
+      accounts: [
+        {
+          accountId: `one-${owner.id}`,
+          balanceCurrent: 100,
+          currencyCode: "USD",
+          name: "Original one",
+          officialName: null,
+        },
+        {
+          accountId: `two-${owner.id}`,
+          balanceCurrent: 100,
+          currencyCode: "USD",
+          name: "Original two",
+          officialName: null,
+        },
+      ],
+    });
+    await database.db
+      .update(financeAccounts)
+      .set({
+        providerPersistentAccountId: "same-provider-identity",
+        ownershipType: "individual",
+        ownershipShareBps: 10_000,
+        lastSyncedAt: now,
+        syncState: "current",
+      })
+      .where(eq(financeAccounts.userId, owner.id));
+    await database.db
+      .update(financeProviderItems)
+      .set({ syncState: "current", lastSyncedAt: now })
+      .where(eq(financeProviderItems.userId, owner.id));
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const accounts = await service.listFinanceAccounts(owner.id, { includeExcluded: true });
+    expect(accounts.accountSemantics.trustworthy).toBe(false);
+    expect(accounts.accountSemantics.possibleDuplicateGroups).toHaveLength(1);
+    const wealth = await service.getWealthSummary(owner.id);
+    expect(wealth.accountSemantics).toEqual(accounts.accountSemantics);
+  });
+  describe("historical provider evidence composition", () => {
+    async function historyCompositionFixture() {
+      const [owner] = await database.db
+        .insert(users)
+        .values({
+          displayName: "History composition owner",
+          email: `history-composition-${crypto.randomUUID()}@example.com`,
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        })
+        .returning();
+      if (!owner) throw new Error("History composition owner missing.");
+      const historyOwnerId = owner.id;
+      const providerItems = createFinanceProviderItemService({
+        db: database.db,
+        encryptionKey: key,
+        now: () => now,
+      });
+      const [savedAccount] = await providerItems.upsertConnection({
+        accessToken: "composition-secret-canary",
+        itemId: "composition-private-item",
+        institution: "Synthetic history bank",
+        accounts: [
+          {
+            accountId: "composition-private-account",
+            balanceCurrent: 100,
+            currencyCode: "EUR",
+            name: "Synthetic history account",
+            officialName: null,
+          },
+        ],
+        context: { principal: financePrincipal(owner.id), requestId: "history-composition-setup" },
+      });
+      if (!savedAccount) throw new Error("History composition account missing.");
+      const [account] = await database.db
+        .select()
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, savedAccount.id));
+      const [item] = await database.db
+        .select()
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.userId, owner.id));
+      if (!account || !item) throw new Error("History composition native source missing.");
+      const [transaction] = await database.db
+        .insert(financeTransactions)
+        .values({
+          userId: owner.id,
+          accountId: account.id,
+          amount: 901,
+          direction: "expense",
+          currencyCode: "EUR",
+          merchant: "Synthetic merchant",
+          notes: "Preserve native notes",
+          transactionDate: "2026-07-19",
+          providerTransactionId: "composition-private-transaction",
+        })
+        .returning();
+      if (!transaction) throw new Error("History composition transaction missing.");
+      const sessionTokenHash = hashToken(`synthetic-history-session-${owner.id}`);
+      const [session] = await database.db
+        .insert(sessions)
+        .values({
+          userId: owner.id,
+          tokenHash: sessionTokenHash,
+          expiresAt: new Date(now.getTime() + 60_000),
+        })
+        .returning();
+      if (!session) throw new Error("History composition session missing.");
+      const transport = vi.fn<typeof globalThis.fetch>(async () => {
+        throw new Error("No provider transport is authorized in this fixture.");
+      });
+      const plaid = createPlaidConnector({
+        clientId: "synthetic-client",
+        secret: "synthetic-secret",
+        environment: "sandbox",
+        fetch: transport,
+      });
+      const readHistory = vi
+        .fn<NonNullable<typeof plaid.readTransactionHistory>>()
+        .mockResolvedValue({
+          observedAt: now.toISOString(),
+          providerUpdatedAt: "2026-07-19T11:00:00.000Z",
+          snapshotConsistency: "not_atomic",
+          entries: [
+            {
+              accountId: "composition-private-account",
+              transactionId: "composition-private-transaction",
+              status: "found",
+              sourceAmount: -24.25,
+              normalizedAmount: 24.25,
+              economicDirection: "inflow",
+              currencyCode: "USD",
+              date: "2026-07-19",
+            },
+          ],
+          coverage: {
+            state: "partial",
+            scope: "provider_available_window",
+            reason: "page_limit",
+            pages: 5,
+            returnedTransactions: 500,
+          },
+        });
+      plaid.readTransactionHistory = readHistory;
+      const sync = vi.spyOn(plaid, "syncTransactions");
+      const getAccounts = vi.spyOn(plaid, "getAccounts");
+      const initialize = vi.spyOn(plaid, "createLinkToken");
+      const port = vi.spyOn(providerItems, "readTransactionHistory");
+      // Match real app composition: configured Item service has no connector; FinanceService must forward its exact Plaid instance.
+      const service = createFinanceService({
+        db: database.db,
+        encryptionKey: key,
+        now: () => now,
+        plaid,
+        providerItems,
+      });
+      const principal: Principal = {
+        ...financePrincipal(owner.id),
+        scopes: new Set(["finances:read"]),
+      };
+      async function ledgerSnapshot() {
+        return {
+          transactions: await database.db
+            .select()
+            .from(financeTransactions)
+            .where(eq(financeTransactions.userId, historyOwnerId)),
+          accounts: await database.db
+            .select()
+            .from(financeAccounts)
+            .where(eq(financeAccounts.userId, historyOwnerId)),
+          items: await database.db
+            .select()
+            .from(financeProviderItems)
+            .where(eq(financeProviderItems.userId, historyOwnerId)),
+          allocations: await database.db
+            .select()
+            .from(financeTransactionAllocations)
+            .where(eq(financeTransactionAllocations.userId, historyOwnerId)),
+          reviews: await database.db
+            .select()
+            .from(financeReviewCases)
+            .where(eq(financeReviewCases.userId, historyOwnerId)),
+          audits: await database.db
+            .select()
+            .from(auditEvents)
+            .where(eq(auditEvents.userId, historyOwnerId)),
+        };
+      }
+      return {
+        owner,
+        account,
+        item,
+        transaction,
+        session,
+        sessionTokenHash,
+        principal,
+        service,
+        plaid,
+        port,
+        readHistory,
+        sync,
+        getAccounts,
+        initialize,
+        transport,
+        ledgerSnapshot,
+      };
+    }
+
+    async function admissionFixture() {
+      const f = await historyCompositionFixture();
+      const [native] = await database.db
+        .update(financeTransactions)
+        .set({ amount: 2425, currencyCode: null, providerDirection: null })
+        .where(eq(financeTransactions.id, f.transaction.id))
+        .returning();
+      if (!native) throw new Error("Missing admission target.");
+      const principal: Principal = {
+        ...f.principal,
+        scopes: new Set(["finances:read", "finances:write"]),
+      };
+      const prior = f.readHistory.getMockImplementation();
+      if (!prior) throw new Error("Missing synthetic history response.");
+      const response = await prior({
+        accessToken: "synthetic-private",
+        itemId: "synthetic-private-item",
+        startDate: "2026-07-19",
+        endDate: "2026-07-19",
+        targets: [],
+      });
+      f.readHistory.mockResolvedValue({
+        ...response,
+        coverage: {
+          ...response.coverage,
+          state: "complete",
+          reason: "exhausted",
+          pages: 1,
+          returnedTransactions: 1,
+        },
+      });
+      const actions = createFinanceActionService({
+        db: database.db,
+        finances: f.service,
+        now: () => now,
+      });
+      const input = {
+        operation: "admit_source_facts",
+        idempotencyKey: `admission-${crypto.randomUUID()}`,
+        targets: [
+          {
+            transactionId: native.id,
+            expectedTransactionRevision: native.contextualRevision.toString(),
+            expectedAccountRevision: f.account.contextualRevision.toString(),
+          },
+        ],
+      };
+      const context = {
+        principal,
+        requestId: "source-admission",
+        sourceFactsSessionHash: f.sessionTokenHash,
+      };
+      const run = () => actions.performDirect("transaction", input, context);
+      const receipts = () =>
+        database.db
+          .select()
+          .from(financeMutationRecords)
+          .where(eq(financeMutationRecords.userId, f.owner.id));
+      const revisions = () =>
+        database.db
+          .select()
+          .from(financeTransactionRevisions)
+          .where(eq(financeTransactionRevisions.userId, f.owner.id));
+      return {
+        ...f,
+        principal,
+        context,
+        input,
+        actions,
+        run,
+        receipts,
+        revisions,
+        native,
+        response,
+      };
+    }
+
+    it("admits only missing source facts through the public action pipeline and replays its actor-bound receipt without provider access", async () => {
+      const f = await admissionFixture();
+      const before = await f.ledgerSnapshot();
+      const outcome = await f.run();
+      expect(outcome).toMatchObject({
+        status: "applied",
+        result: {
+          snapshotConsistency: "not_atomic",
+          entries: [
+            {
+              transactionId: f.native.id,
+              changed: true,
+              before: { currencyCode: null, providerDirection: null },
+              after: { currencyCode: "USD", providerDirection: "income" },
+            },
+          ],
+        },
+      });
+      const after = await f.ledgerSnapshot();
+      expect(after.transactions).toEqual([
+        expect.objectContaining({
+          ...f.native,
+          currencyCode: "USD",
+          providerDirection: "income",
+          contextualRevision: f.native.contextualRevision + 1n,
+          updatedAt: now,
+        }),
+      ]);
+      expect(after.accounts).toEqual(before.accounts);
+      expect(after.items).toEqual(before.items);
+      expect(after.allocations).toEqual(before.allocations);
+      expect(after.reviews).toEqual(before.reviews);
+      expect(after.audits).toHaveLength(before.audits.length + 1);
+      expect(await f.revisions()).toHaveLength(1);
+      expect(await f.receipts()).toMatchObject([
+        {
+          status: "completed",
+          actorId: f.principal.actorId,
+          operation: "finance.transaction.admit_source_facts",
+        },
+      ]);
+      expect(await f.run()).toEqual(outcome);
+      expect(await f.ledgerSnapshot()).toEqual(after);
+      expect(f.readHistory).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(outcome)).not.toMatch(/composition-private|composition-secret/);
+      expect(f.sync).not.toHaveBeenCalled();
+      expect(f.initialize).not.toHaveBeenCalled();
+      expect(f.transport).not.toHaveBeenCalled();
+    });
+
+    it("rejects missing, wrong and expired presenting sessions before acquisition and keeps every native row and receipt unchanged", async () => {
+      const f = await admissionFixture();
+      const before = await f.ledgerSnapshot();
+      for (const hash of [undefined, "wrong-presented-hash"])
+        await expect(
+          f.actions.performDirect("transaction", f.input, {
+            principal: f.principal,
+            requestId: "denied",
+            ...(hash ? { sourceFactsSessionHash: hash } : {}),
+          }),
+        ).rejects.toMatchObject({ code: "forbidden" });
+      await database.db
+        .update(sessions)
+        .set({ expiresAt: new Date(now.getTime() - 1) })
+        .where(eq(sessions.id, f.session.id));
+      await expect(f.run()).rejects.toMatchObject({ code: "forbidden" });
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(await f.receipts()).toEqual([]);
+      expect(f.readHistory).not.toHaveBeenCalled();
+    });
+
+    it("rejects changed replay payload, another actor and tampered receipt evidence before another provider acquisition", async () => {
+      const f = await admissionFixture();
+      await f.run();
+      const after = await f.ledgerSnapshot();
+      await expect(
+        f.actions.performDirect(
+          "transaction",
+          { ...f.input, targets: [{ ...f.input.targets[0], expectedTransactionRevision: "999" }] },
+          f.context,
+        ),
+      ).rejects.toMatchObject({ code: "invalid_request" });
+      await expect(
+        f.actions.performDirect("transaction", f.input, {
+          ...f.context,
+          principal: { ...f.principal, actorId: crypto.randomUUID() },
+        }),
+      ).rejects.toMatchObject({ code: "invalid_request" });
+      const [receipt] = await f.receipts();
+      if (!receipt) throw new Error("Receipt missing.");
+      await database.db
+        .update(financeMutationRecords)
+        .set({ response: { ...receipt.response, sourceHash: `sha256:${"b".repeat(64)}` } })
+        .where(eq(financeMutationRecords.id, receipt.id));
+      await expect(f.run()).rejects.toMatchObject({ code: "invalid_request" });
+      await database.db
+        .update(financeMutationRecords)
+        .set({ response: { ...receipt.response, observedAt: "2026-01-01T00:00:00.000Z" } })
+        .where(eq(financeMutationRecords.id, receipt.id));
+      await expect(f.run()).rejects.toMatchObject({ code: "conflict" });
+      expect(await f.ledgerSnapshot()).toEqual(after);
+      expect(f.readHistory).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      "source_changed",
+      "authority_expired",
+      "target_changed",
+    ])("rolls back all admission effects when %s occurs during the external read", async (change) => {
+      const f = await admissionFixture();
+      f.readHistory.mockImplementationOnce(async () => {
+        if (change === "authority_expired")
+          await database.db
+            .update(sessions)
+            .set({ expiresAt: new Date(now.getTime() - 1) })
+            .where(eq(sessions.id, f.session.id));
+        if (change === "target_changed")
+          await database.db
+            .update(financeTransactions)
+            .set({ notes: "Concurrent native edit" })
+            .where(eq(financeTransactions.id, f.native.id));
+        if (change === "source_changed")
+          await database.db
+            .update(financeAccounts)
+            .set({ providerAccountId: "different-private-account" })
+            .where(eq(financeAccounts.id, f.account.id));
+        return {
+          ...f.response,
+          coverage: { ...f.response.coverage, state: "complete", reason: "exhausted" },
+        };
+      });
+      await expect(f.run()).rejects.toMatchObject({
+        code: change === "authority_expired" ? "forbidden" : "conflict",
+      });
+      const after = await f.ledgerSnapshot();
+      expect(after.transactions[0]).toMatchObject({ currencyCode: null, providerDirection: null });
+      expect(await f.receipts()).toEqual([]);
+      expect(await f.revisions()).toEqual([]);
+      expect(after.audits.filter((a) => a.action === "finance.source_facts_admitted")).toEqual([]);
+    });
+
+    it("rolls back every native fill, revision and receipt after a later application failure, then atomically admits all targets", async () => {
+      const f = await admissionFixture();
+      const [second] = await database.db
+        .insert(financeTransactions)
+        .values({
+          userId: f.owner.id,
+          accountId: f.account.id,
+          amount: 2425,
+          direction: "income",
+          currencyCode: null,
+          providerDirection: null,
+          merchant: "Second missing source",
+          notes: "Preserve second notes",
+          transactionDate: "2026-07-19",
+          providerTransactionId: "second-private-transaction",
+        })
+        .returning();
+      if (!second) throw new Error("Second target missing.");
+      f.input.targets.push({
+        transactionId: second.id,
+        expectedTransactionRevision: second.contextualRevision.toString(),
+        expectedAccountRevision: f.account.contextualRevision.toString(),
+      });
+      const first = f.response.entries[0];
+      if (!first) throw new Error("Source fixture missing.");
+      f.readHistory.mockResolvedValue({
+        ...f.response,
+        entries: [first, { ...first, transactionId: "second-private-transaction" }],
+        coverage: { ...f.response.coverage, state: "complete", reason: "exhausted" },
+      });
+      const before = await f.ledgerSnapshot();
+      await expect(
+        f.service.runProviderSourceAdmission(
+          { ...f.input, operation: "admit_source_facts" },
+          f.context,
+          async (tx, acquisition, sourceHash) => {
+            const applied = await f.service.applyProviderSourceFacts(
+              acquisition,
+              sourceHash,
+              { ...f.input, operation: "admit_source_facts" },
+              f.context,
+              tx,
+            );
+            expect(applied).toHaveLength(2);
+            expect(applied.every((entry) => entry.changed)).toBe(true);
+            throw new Error("Synthetic failure after both native writes.");
+          },
+        ),
+      ).rejects.toThrow("Synthetic failure after both native writes.");
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(await f.receipts()).toEqual([]);
+      expect(await f.revisions()).toEqual([]);
+      const outcome = await f.run();
+      expect(outcome).toMatchObject({
+        status: "applied",
+        result: {
+          entries: expect.arrayContaining([
+            {
+              transactionId: f.native.id,
+              accountId: f.account.id,
+              changed: true,
+              before: expect.anything(),
+              after: expect.objectContaining({ currencyCode: "USD", providerDirection: "income" }),
+              source: expect.anything(),
+            },
+          ]),
+        },
+      });
+      const after = await f.ledgerSnapshot();
+      expect(after.transactions).toHaveLength(2);
+      expect(
+        after.transactions.every(
+          (row) => row.currencyCode === "USD" && row.providerDirection === "income",
+        ),
+      ).toBe(true);
+      expect(after.allocations).toEqual(before.allocations);
+      expect(after.accounts).toEqual(before.accounts);
+      expect(after.items).toEqual(before.items);
+      expect(await f.receipts()).toHaveLength(1);
+      expect(await f.revisions()).toHaveLength(2);
+    });
+
+    it("rejects an Item generation change within the same JavaScript millisecond before source admission", async () => {
+      const f = await admissionFixture();
+      await database.db
+        .update(financeProviderItems)
+        .set({
+          updatedAt: sql`date_trunc('milliseconds', ${financeProviderItems.updatedAt}) + interval '100 microseconds'`,
+        })
+        .where(eq(financeProviderItems.id, f.item.id));
+      const [before] = await database.db
+        .select({
+          at: financeProviderItems.updatedAt,
+          exact: sql<string>`${financeProviderItems.updatedAt}::text`,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, f.item.id));
+      if (!before) throw new Error("Missing native Item fence.");
+      f.readHistory.mockImplementationOnce(async () => {
+        await database.db
+          .update(financeProviderItems)
+          .set({ updatedAt: sql`${financeProviderItems.updatedAt} + interval '1 microsecond'` })
+          .where(eq(financeProviderItems.id, f.item.id));
+        return {
+          ...f.response,
+          coverage: { ...f.response.coverage, state: "complete", reason: "exhausted" },
+        };
+      });
+      await expect(f.run()).rejects.toMatchObject({ code: "conflict" });
+      const [after] = await database.db
+        .select({
+          at: financeProviderItems.updatedAt,
+          exact: sql<string>`${financeProviderItems.updatedAt}::text`,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, f.item.id));
+      if (!after) throw new Error("Missing native Item fence.");
+      expect(after.at).toEqual(before.at);
+      expect(after.exact).not.toBe(before.exact);
+      expect((await f.ledgerSnapshot()).transactions[0]).toMatchObject({
+        currencyCode: null,
+        providerDirection: null,
+      });
+      expect(await f.receipts()).toEqual([]);
+      expect(await f.revisions()).toEqual([]);
+      expect(f.readHistory).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects a foreign source admission target before provider acquisition and preserves both owners", async () => {
+      const f = await admissionFixture();
+      const foreign = await historyCompositionFixture();
+      f.input.targets.push({
+        transactionId: foreign.transaction.id,
+        expectedTransactionRevision: foreign.transaction.contextualRevision.toString(),
+        expectedAccountRevision: foreign.account.contextualRevision.toString(),
+      });
+      const before = await f.ledgerSnapshot();
+      const foreignBefore = await foreign.ledgerSnapshot();
+      await expect(f.run()).rejects.toMatchObject({ code: "not_found" });
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(await foreign.ledgerSnapshot()).toEqual(foreignBefore);
+      expect(await f.receipts()).toEqual([]);
+      expect(f.port).not.toHaveBeenCalled();
+      expect(f.readHistory).not.toHaveBeenCalled();
+      expect(foreign.port).not.toHaveBeenCalled();
+      expect(foreign.readHistory).not.toHaveBeenCalled();
+    });
+
+    it("admits and replays for a canonical admitted agent with all three current scopes and persisted owner bypass", async () => {
+      const f = await admissionFixture();
+      const [token] = await database.db
+        .insert(accessTokens)
+        .values({
+          userId: f.owner.id,
+          name: "Admitted source fixture",
+          tokenHash: crypto.randomUUID(),
+          scopes: ["finances:read", "finances:write", "finances:execute"],
+        })
+        .returning();
+      if (!token) throw new Error("Missing source grant.");
+      await database.db
+        .insert(executionPolicySettings)
+        .values({ userId: f.owner.id, reviewBypassEnabled: true });
+      const principal: Principal = {
+        actorId: token.id,
+        actorType: "agent",
+        userId: f.owner.id,
+        authorizationConnectionId: token.authorizationConnectionId,
+        scopes: new Set(token.scopes),
+      };
+      const context = { principal, requestId: "canonical-agent-source" };
+      const result = await f.actions.performDirect("transaction", f.input, context);
+      expect(result).toMatchObject({
+        status: "applied",
+        result: {
+          entries: [{ changed: true, after: { currencyCode: "USD", providerDirection: "income" } }],
+        },
+      });
+      expect(await f.actions.performDirect("transaction", f.input, context)).toEqual(result);
+      expect(f.readHistory).toHaveBeenCalledTimes(1);
+      if (result.status !== "applied") throw new Error("Source admission did not apply.");
+      const response = financeProviderSourceAdmissionResultSchema.parse(result.result);
+      // sourceKind is part of the canonical persisted hash, not an independent receipt column.
+      const requestHash = `sha256:${createHash("sha256")
+        .update(
+          stableFinanceActionInput({
+            actorId: token.id,
+            actorType: "agent",
+            operation: "finance.transaction.admit_source_facts",
+            payload: { actionKind: "transaction", input: f.input, sourceHash: response.sourceHash },
+            sourceKind: "agent",
+          }),
+        )
+        .digest("hex")}`;
+      expect(await f.receipts()).toMatchObject([
+        { actorId: token.id, actorType: "agent", requestHash, status: "completed" },
+      ]);
+    });
+
+    it("rejects a conflicting second source target without changing the first target, allocations, receipt or history", async () => {
+      const f = await admissionFixture();
+      const [second] = await database.db
+        .insert(financeTransactions)
+        .values({
+          userId: f.owner.id,
+          accountId: f.account.id,
+          amount: 2425,
+          direction: "income",
+          currencyCode: "EUR",
+          providerDirection: null,
+          merchant: "Second source target",
+          transactionDate: "2026-07-19",
+          providerTransactionId: "second-private-transaction",
+        })
+        .returning();
+      if (!second) throw new Error("Second target missing.");
+      f.input.targets.push({
+        transactionId: second.id,
+        expectedTransactionRevision: second.contextualRevision.toString(),
+        expectedAccountRevision: f.account.contextualRevision.toString(),
+      });
+      const first = f.response.entries[0];
+      if (!first) throw new Error("Source fixture missing.");
+      f.readHistory.mockResolvedValueOnce({
+        ...f.response,
+        entries: [first, { ...first, transactionId: "second-private-transaction" }],
+        coverage: { ...f.response.coverage, state: "complete", reason: "exhausted" },
+      });
+      const before = await f.ledgerSnapshot();
+      await expect(f.run()).rejects.toMatchObject({ code: "conflict" });
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(await f.receipts()).toEqual([]);
+      expect(await f.revisions()).toEqual([]);
+    });
+
+    it("checks persisted agent execution authority again after acquisition and denies a rotated/revoked actor without source writes", async () => {
+      const f = await admissionFixture();
+      const [token] = await database.db
+        .insert(accessTokens)
+        .values({
+          userId: f.owner.id,
+          name: "Source fixture",
+          tokenHash: crypto.randomUUID(),
+          scopes: ["finances:read", "finances:write", "finances:execute"],
+        })
+        .returning();
+      if (!token) throw new Error("Missing source grant.");
+      const principal: Principal = {
+        actorId: token.id,
+        actorType: "agent",
+        userId: f.owner.id,
+        authorizationConnectionId: token.authorizationConnectionId,
+        scopes: new Set(token.scopes),
+      };
+      const context = { principal, requestId: "agent-admission" };
+      await expect(f.actions.performDirect("transaction", f.input, context)).rejects.toMatchObject({
+        code: "forbidden",
+      });
+      expect(f.readHistory).not.toHaveBeenCalled();
+      await database.db
+        .insert(executionPolicySettings)
+        .values({ userId: f.owner.id, reviewBypassEnabled: true });
+      const before = await f.ledgerSnapshot();
+      f.readHistory.mockImplementationOnce(async () => {
+        await database.db
+          .update(accessTokens)
+          .set({ revokedAt: now })
+          .where(eq(accessTokens.id, token.id));
+        return {
+          ...f.response,
+          coverage: { ...f.response.coverage, state: "complete", reason: "exhausted" },
+        };
+      });
+      await expect(f.actions.performDirect("transaction", f.input, context)).rejects.toMatchObject({
+        code: "forbidden",
+      });
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(await f.receipts()).toEqual([]);
+      expect(await f.revisions()).toEqual([]);
+    });
+
+    it("does not retain a receipt or native write when acquisition fails, and does not overlap an in-flight same-key request", async () => {
+      const f = await admissionFixture();
+      const before = await f.ledgerSnapshot();
+      let release: (() => void) | undefined;
+      let entered: (() => void) | undefined;
+      const arrived = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      f.readHistory.mockImplementationOnce(async () => {
+        entered?.();
+        await gate;
+        throw new Error("Synthetic private provider failure.");
+      });
+      const running = f.run();
+      const failed = expect(running).rejects.toMatchObject({
+        code: "service_unavailable",
+        message: "Historical provider evidence is unavailable.",
+      });
+      await arrived;
+      try {
+        await expect(f.run()).rejects.toMatchObject({ code: "conflict" });
+      } finally {
+        release?.();
+      }
+      await failed;
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(await f.receipts()).toEqual([]);
+      expect(f.readHistory).toHaveBeenCalledTimes(1);
+    });
+
+    it("validates all targets before writes and preserves an already-identical source without revision churn", async () => {
+      const f = await admissionFixture();
+      await database.db
+        .update(financeTransactions)
+        .set({ currencyCode: "USD", providerDirection: "income" })
+        .where(eq(financeTransactions.id, f.native.id));
+      const [native] = await database.db
+        .select()
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, f.native.id));
+      if (!native) throw new Error("Target missing.");
+      const target = f.input.targets[0];
+      if (!target) throw new Error("Selection missing.");
+      target.expectedTransactionRevision = native.contextualRevision.toString();
+      const before = await f.ledgerSnapshot();
+      expect(await f.run()).toMatchObject({
+        status: "applied",
+        result: { entries: [{ changed: false }] },
+      });
+      expect((await f.ledgerSnapshot()).transactions).toEqual(before.transactions);
+      expect(await f.revisions()).toEqual([]);
+    });
+
+    it("delegates exact owned source through the public facade and preserves safe partial signed evidence without writes", async () => {
+      const f = await historyCompositionFixture();
+      const before = await f.ledgerSnapshot();
+      const result = await f.service.readFinanceProviderTransactionEvidence(
+        f.principal,
+        { transactionIds: [f.transaction.id] },
+        f.sessionTokenHash,
+      );
+      expect(f.port).toHaveBeenCalledExactlyOnceWith(
+        {
+          userId: f.owner.id,
+          itemRecordId: f.item.id,
+          expectedUpdatedAt: f.item.updatedAt.toISOString(),
+          targets: [
+            {
+              accountId: "composition-private-account",
+              transactionId: "composition-private-transaction",
+            },
+          ],
+          startDate: "2026-07-19",
+          endDate: "2026-07-19",
+        },
+        f.plaid,
+      );
+      expect(f.readHistory).toHaveBeenCalledExactlyOnceWith({
+        accessToken: "composition-secret-canary",
+        itemId: "composition-private-item",
+        targets: [
+          {
+            accountId: "composition-private-account",
+            transactionId: "composition-private-transaction",
+          },
+        ],
+        startDate: "2026-07-19",
+        endDate: "2026-07-19",
+      });
+      expect(result).toEqual({
+        observedAt: now.toISOString(),
+        providerUpdatedAt: "2026-07-19T11:00:00.000Z",
+        snapshotConsistency: "not_atomic",
+        coverage: "partial",
+        reason: "page_limit",
+        entries: [
+          {
+            transactionId: f.transaction.id,
+            accountId: f.account.id,
+            transactionRevision: f.transaction.contextualRevision.toString(),
+            accountRevision: f.account.contextualRevision.toString(),
+            status: "found",
+            sourceAmount: -24.25,
+            normalizedAmount: 24.25,
+            economicDirection: "inflow",
+            currencyCode: "USD",
+            date: "2026-07-19",
+          },
+        ],
+      });
+      expect(JSON.stringify(result)).not.toContain("composition-private");
+      expect(JSON.stringify(result)).not.toContain("composition-secret");
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(f.sync).not.toHaveBeenCalled();
+      expect(f.getAccounts).not.toHaveBeenCalled();
+      expect(f.initialize).not.toHaveBeenCalled();
+      expect(f.transport).not.toHaveBeenCalled();
+    });
+
+    it("rejects denied sessions and foreign native sources through the public facade before provider access or writes", async () => {
+      const f = await historyCompositionFixture();
+      const before = await f.ledgerSnapshot();
+      await expect(
+        f.service.readFinanceProviderTransactionEvidence(
+          { ...f.principal, scopes: new Set() },
+          { transactionIds: [f.transaction.id] },
+          f.sessionTokenHash,
+        ),
+      ).rejects.toMatchObject({ code: "forbidden" });
+      await expect(
+        f.service.readFinanceProviderTransactionEvidence(f.principal, {
+          transactionIds: [f.transaction.id],
+        }),
+      ).rejects.toMatchObject({
+        code: "forbidden",
+        message: "Present the authenticated session to read historical evidence.",
+      });
+      await expect(
+        f.service.readFinanceProviderTransactionEvidence(
+          f.principal,
+          { transactionIds: [f.transaction.id] },
+          hashToken("wrong-session"),
+        ),
+      ).rejects.toMatchObject({ code: "forbidden" });
+      const foreign = await historyCompositionFixture();
+      const foreignBefore = await foreign.ledgerSnapshot();
+      expect(foreign.account).toMatchObject({
+        provider: "plaid",
+        status: "connected",
+        providerItemRecordId: foreign.item.id,
+      });
+      await expect(
+        f.service.readFinanceProviderTransactionEvidence(
+          f.principal,
+          { transactionIds: [foreign.transaction.id] },
+          f.sessionTokenHash,
+        ),
+      ).rejects.toMatchObject({ code: "not_found" });
+      expect(await foreign.ledgerSnapshot()).toEqual(foreignBefore);
+      expect(foreign.port).not.toHaveBeenCalled();
+      expect(foreign.readHistory).not.toHaveBeenCalled();
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      await database.db
+        .update(sessions)
+        .set({ expiresAt: new Date(now.getTime() - 1) })
+        .where(eq(sessions.id, f.session.id));
+      await expect(
+        f.service.readFinanceProviderTransactionEvidence(
+          f.principal,
+          { transactionIds: [f.transaction.id] },
+          f.sessionTokenHash,
+        ),
+      ).rejects.toMatchObject({ code: "forbidden" });
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(f.port).not.toHaveBeenCalled();
+      expect(f.readHistory).not.toHaveBeenCalled();
+      expect(f.sync).not.toHaveBeenCalled();
+      expect(f.getAccounts).not.toHaveBeenCalled();
+      expect(f.initialize).not.toHaveBeenCalled();
+      expect(f.transport).not.toHaveBeenCalled();
     });
   });
 });

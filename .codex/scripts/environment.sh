@@ -19,6 +19,12 @@ log() { printf '[personal-os] %s\n' "$*"; }
 die() { printf '[personal-os] error: %s\n' "$*" >&2; exit 1; }
 require_command() { command -v "$1" >/dev/null 2>&1 || die "Required command '$1' is not installed."; }
 
+# App-launched shells may omit Docker Desktop's CLI directory and /usr/local/bin.
+# Keep an explicitly configured Docker CLI first when one is already available.
+if ! command -v docker >/dev/null 2>&1 && [[ -x /Applications/Docker.app/Contents/Resources/bin/docker ]]; then
+  export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
+fi
+
 check_toolchain() {
   require_command git; require_command node; require_command pnpm; require_command docker
   local node_major pnpm_major
@@ -137,7 +143,7 @@ case "${1:-}" in
   fixtures) command_fixtures ;;
   test) check_toolchain; require_docker; pnpm test:coverage ;;
   e2e) check_toolchain; require_docker; pnpm test:e2e ;;
-  verify) check_toolchain; require_docker; pnpm check; pnpm test:e2e ;;
+  verify) check_toolchain; require_docker; python3 "$ROOT/.codex/scripts/verification-runner.py" -- bash -c 'pnpm check && pnpm test:e2e' ;;
   build) check_toolchain; pnpm build ;;
   *) usage; exit 2 ;;
 esac

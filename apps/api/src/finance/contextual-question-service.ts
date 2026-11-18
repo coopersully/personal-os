@@ -8,6 +8,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
+import { requireWorkspaceExecution } from "../workspace-execution.js";
 import { answerContextualWork } from "./answer-service.js";
 import {
   executeFinanceAdmittedMutation,
@@ -28,6 +29,8 @@ import {
   lockContextualQuestion,
   lockContextualTransaction,
 } from "./contextual-question-store.js";
+import { mirrorCreatedFinanceQuestion } from "./conversation-question-mirror.js";
+import { guardFinanceExecutionTransaction } from "./execution-owner-guard.js";
 import { resolveContextualWork } from "./work-resolver.js";
 
 const unavailable = (): FinanceContextualQuestionResult => ({
@@ -48,14 +51,13 @@ export function createFinanceContextualQuestionService(options: ContextualOption
       executor?: FinanceTransaction,
     ): Promise<FinanceContextualQuestionResult> {
       authorizeContextual(context, "finances:write");
-      if (context.principal.actorType !== "user")
-        throw new AppError(
-          "forbidden",
-          "Creating contextual questions requires an interactive user session.",
-        );
       idSchema.parse(transactionId);
       const input = createFinanceContextualQuestionInputSchema.parse(raw);
       return contextualTransaction(options.db, executor, async (tx) => {
+        await guardFinanceExecutionTransaction(tx, context.principal.userId, {
+          actorIds: context.principal.actorType === "agent" ? [context.principal.actorId] : [],
+          hostSchedules: true,
+        });
         const authority = await loadFinanceAuthorization({ db: tx, ...context });
         return executeFinanceAdmittedMutation<Prepared, FinanceContextualQuestionResult>(
           tx,
@@ -64,7 +66,7 @@ export function createFinanceContextualQuestionService(options: ContextualOption
             idempotencyKey: input.operationId,
             operation: "create_contextual_question_v1",
             payload: { ...input, transactionId },
-            sourceKind: "app",
+            sourceKind: context.principal.actorType === "agent" ? "agent" : "app",
           },
           async (preparedTx) => {
             const parent = await lockContextualTransaction(
@@ -100,6 +102,12 @@ export function createFinanceContextualQuestionService(options: ContextualOption
             return { state: "admitted", prepared: { kind: "create", parent } };
           },
           async (writeTx, prepared) => {
+            await requireWorkspaceExecution(
+              writeTx,
+              context.principal,
+              "finances",
+              options.now?.() ?? new Date(),
+            );
             if (prepared.kind === "existing")
               return { state: "available", question: contextualValue(prepared.locked) };
             const { account, transaction } = prepared.parent;
@@ -112,7 +120,10 @@ export function createFinanceContextualQuestionService(options: ContextualOption
                 stableKey: `contextual-purpose:${transaction.id}`,
                 reason: "unknown_merchant",
                 reasonCode: "missing_provenance",
-                rationale: "Context requested by the person.",
+                rationale:
+                  context.principal.actorType === "agent"
+                    ? "Context requested by an authorized agent."
+                    : "Context requested by the person.",
                 createdAt: recordedAt,
                 updatedAt: recordedAt,
               })
@@ -141,6 +152,15 @@ export function createFinanceContextualQuestionService(options: ContextualOption
               .returning();
             if (!question)
               throw new AppError("internal_error", "The contextual question was not created.");
+            await mirrorCreatedFinanceQuestion(writeTx, context.principal, {
+              questionId: question.id,
+              caseId: review.id,
+              transactionId: transaction.id,
+              accountId: account.id,
+              operationId: input.operationId,
+              prompt: question.prompt,
+              createdAt: recordedAt,
+            });
             await writeTx.insert(auditEvents).values(
               auditValues({
                 ...context,
@@ -149,6 +169,8 @@ export function createFinanceContextualQuestionService(options: ContextualOption
                 entityId: question.id,
                 before: null,
                 after: {
+                  operationId: input.operationId,
+                  prompt: question.prompt,
                   reviewCaseId: review.id,
                   transactionId: transaction.id,
                   revision: "1",
@@ -172,6 +194,10 @@ export function createFinanceContextualQuestionService(options: ContextualOption
       authorizeContextual(context, "finances:read");
       idSchema.parse(id);
       return contextualTransaction(options.db, executor, async (tx) => {
+        await guardFinanceExecutionTransaction(tx, context.principal.userId, {
+          actorIds: context.principal.actorType === "agent" ? [context.principal.actorId] : [],
+          hostSchedules: true,
+        });
         await admitContextualOwner(tx, context.principal.userId);
         const locked = await lockContextualQuestion(tx, context.principal.userId, id, false);
         return locked ? { state: "available", question: contextualValue(locked) } : unavailable();

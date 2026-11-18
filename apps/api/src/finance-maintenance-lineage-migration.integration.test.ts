@@ -140,7 +140,18 @@ describe.sequential("Finance maintenance lineage migration", () => {
       const expected = structuredClone(before);
       for (const table of ["finance_accounts", "finance_transactions"]) {
         expected[table] = (before[table] ?? []).map(({ record }) => ({
-          record: { ...record, contextual_revision: 1 },
+          record: {
+            ...record,
+            contextual_revision: 1,
+            ...(table === "finance_transactions"
+              ? { reimbursement_relationship_revision: 1, reimbursement_relationship_state: [] }
+              : {
+                  provider_institution_id: null,
+                  provider_account_mask: null,
+                  provider_persistent_account_id: null,
+                  provider_account_name: null,
+                }),
+          },
         }));
       }
       expect(await historicalRows()).toEqual(expected);

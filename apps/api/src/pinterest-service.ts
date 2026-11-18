@@ -46,6 +46,19 @@ export function createPinterestService({
   }
 
   async function updateSettings(userId: string, input: UpdatePinterestWallpaperSettingsInput) {
+    // Resolve a submitted board before changing persisted preferences or scheduled work.
+    if (input.boardUrl) {
+      try {
+        await fetchPinterestBoardPins(input.boardUrl, requestFetch);
+      } catch (error) {
+        if (error instanceof PinterestBoardError)
+          throw new AppError(
+            error.code === "not_found" ? "invalid_request" : error.code,
+            error.message,
+          );
+        throw error;
+      }
+    }
     const [connection] = await db
       .select()
       .from(pinterestConnections)

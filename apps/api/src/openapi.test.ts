@@ -1,3 +1,4 @@
+import { taskWorkspaceQuerySchema } from "@personal-os/domain";
 import { createOpenApiDocument } from "./openapi.js";
 
 type OpenApiOperation = {
@@ -48,6 +49,17 @@ function taskOperation(path: string, method: string): OpenApiOperation {
 }
 
 describe("canonical Tasks OpenAPI surface", () => {
+  it("publishes every accepted Tasks lifecycle status for clients", () => {
+    const parameter = taskOperation("/v1/task-workspace", "get").parameters?.find(
+      ({ name }) => name === "status",
+    );
+    const published = parameter?.schema?.enum;
+    expect(published).toEqual(taskWorkspaceQuerySchema.shape.status.unwrap().options);
+    expect(taskWorkspaceQuerySchema.parse({ status: "open_and_completed" }).status).toBe(
+      "open_and_completed",
+    );
+  });
+
   it("describes the read-only shared projection with all query axes and scope variants", () => {
     const operation = taskOperation("/v1/task-workspace", "get");
     expect(operation["x-required-scopes"]).toEqual(["tasks:read", "reminders:read"]);
@@ -399,4 +411,23 @@ describe("Mail OpenAPI surface", () => {
       });
     }
   });
+});
+
+it("documents all workspace preference writes without supplying PATCH defaults", () => {
+  const operation = taskOperation("/v1/workspaces/{workspace}/settings", "patch");
+  const schema = operation.requestBody?.content?.["application/json"]?.schema as JsonSchema;
+  const variants = (schema as JsonSchema & { anyOf: JsonSchema[] }).anyOf;
+  expect(variants).toHaveLength(4);
+  for (const variant of variants) {
+    const preferences = variant.properties?.preferences;
+    expect(preferences?.required).toBeUndefined();
+    expect(preferences?.additionalProperties).toBe(false);
+    expect(
+      Object.values(preferences?.properties ?? {}).every((field) => field.default === undefined),
+    ).toBe(true);
+  }
+  expect(variants[0]?.properties?.preferences?.properties).toHaveProperty("weekStartsOn");
+  expect(variants[1]?.properties?.preferences?.properties).toHaveProperty("defaultCaptureListId");
+  expect(variants[2]?.properties?.preferences?.properties).not.toHaveProperty("calendarView");
+  expect(variants[3]?.properties?.preferences?.properties).toHaveProperty("spendAccountIds");
 });

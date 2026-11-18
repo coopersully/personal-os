@@ -1,5 +1,11 @@
 # Finance MVP specification
 
+> October 18 Finance experience revision: the consolidated [design](../superpowers/specs/2026-10-18-finance-experience-design.md)
+> and [implementation plan](../superpowers/plans/2026-10-18-finance-experience.md) define the target for setup,
+> Spending, Chat, Automations, Activity, and manual workflow coverage. They supersede conflicting
+> earlier targets below, including ungated setup and agent budget self-approval. This is not a
+> declaration that the redesigned experience has shipped.
+
 - Status: Approved by Cooper on 2026-09-14 ("It looks good, proceed."). Approval authorizes the planned rollout; it does not establish shipped capability.
 - Baseline inspected: `origin/main` at `3d3306608c4b6f729d0c93e4e887dae2ba930d2d`, 2026-09-13.
 - Planning owner: the Finance orchestration task; implementation belongs to separate workstream tasks.
@@ -25,12 +31,54 @@ This specification narrows the larger [master design](master-design.md#67-financ
 Those remain canonical target contracts. This document replaces the earlier branch-oriented lane
 proposal; the current review changes are one prerequisite, not the organizing center of the MVP.
 
+## Finance intelligence and visual exploration
+
+Accepted product direction, October 18: Finances is an automated financial assistant with a strong
+analytical foundation. It turns the financial records and relevant context the person has entrusted
+to nohmi into understanding, visual exploration, evidence-backed forecasts, and useful choices.
+Bookkeeping is the foundation, not the end product. Manual operation remains supported; authorized
+agent maintenance is the intended experience that keeps the financial picture current.
+
+Maximize the usefulness of available, authorized data rather than the volume of data collected.
+Combine transactions, account meaning, income timing, recurring commitments, reimbursement evidence,
+goals, priorities, and prior answers when they serve the person's purpose. Reuse known answers;
+request additional context only when its benefit is concrete, explain that benefit, and distinguish
+user-confirmed facts from inferred or uncertain information. Follow the User Knowledge contract for
+purpose, consent, retention, correction, and cross-workspace access. Context never grants authority.
+
+The user should be able to move through four levels of understanding:
+
+1. **Observe:** see where money went, what remains owed, and what is coming next through clear visuals
+   linked to exact records. Bubbles, lists, trends, rhythm, timelines, and journeys offer different
+   perspectives on the same financial evidence, not competing totals.
+2. **Understand:** identify changes, recurring commitments, and contributions to a result. Explanations
+   distinguish supported relationships from hypotheses; correlation is not a causal finding.
+3. **Explore:** change explicit hypothetical assumptions and compare options, timing, or goal progress
+   without changing the actual budget, account balances, or recorded contributions.
+4. **Decide and follow through:** an agent prepares useful proposals, asks only questions that need the
+   person, and carries authorized work through to a verified result. Budget activation and changes
+   always require exact human approval. Activity links important outcomes to their supporting records,
+   conversation excerpts, and approval evidence.
+
+Forecasts must expose their horizon, source freshness, coverage, assumptions, and limitations.
+Use intervals only when a defensible method supports them; do not invent statistical confidence,
+affordability guarantees, or precise dates from incomplete inputs. Favor understandable models whose
+outputs can be checked, corrected, and improved through observed outcomes. A schema field's presence
+is not evidence that the user's data is populated, current, or sufficient for prediction.
+
+Success is a person who can understand their situation, explore choices, and act with less repetitive
+work—not more charts, more questions, or lower spending for its own sake. Every new analytical view
+should name the decision or understanding it supports, its evidence requirements, its unavailable
+state, and how to inspect or correct the underlying records. The
+[Finance experience design](../superpowers/specs/2026-10-18-finance-experience-design.md) turns this
+motivation into the current planned views and workflows; it does not establish shipped capability.
+
 ## 2. Accepted constraints and approved release boundary
 
 ### Accepted
 
-- Automatic bookkeeping within granted authority and sufficient evidence; budget changes only
-  inside explicit user-defined boundaries. No production policy is activated by this specification.
+- Automatic bookkeeping within granted authority and sufficient evidence; budget changes and activation only
+  after exact human approval. No production policy is activated by this specification.
 - App and agent operate on the same records. Users can resolve items themselves and provide
   free-form context before or after an event. Corrections survive later maintenance.
 - Both Codex and Claude are required at launch. Each needs a separately evidenced unattended
@@ -56,9 +104,9 @@ full portfolio analytics, semantic memory infrastructure or a general multi-work
 as prerequisites. Account ownership that cannot be established must qualify or exclude affected
 aggregates. A joint account is not authority to disclose another person's records.
 
-MVP budget automation is bounded reallocation of existing planned resources. New borrowing, reserve
-withdrawals, increased assumed income, or reduced protected priorities require a new explicit
-proposal. Monthly rollovers and different budget modes remain later product work.
+Budget automation prepares proposals for human approval, including reallocations of existing
+resources. New borrowing, reserve withdrawals, increased assumed income, or reduced protected
+priorities must remain explicit in those proposals. Monthly rollovers and different budget modes remain later product work.
 
 ## 3. Current state and the completion gap
 
@@ -123,24 +171,41 @@ Maintenance reconciles sources, applies authorized bookkeeping, evaluates the pl
 questions, and verifies its result. It can cover outstanding work, a bounded period or an exact
 owned target. Repeated invocation resumes compatible work; it never duplicates economic effects.
 
-An automatic budget revision requires an active, explicitly approved policy: eligible categories,
-protected allocations, permitted direction, per-change and cumulative monthly limits. The baseline
-stays immutable; the active plan and forecast can differ. Validate current evidence and policy/plan
-revisions under lock. Concurrent small revisions cannot exceed an aggregate cap. Crossing a
-boundary creates a proposal without silently normalizing overspending by changing the baseline.
+Budget activation and changes to the active budget always require the person's explicit approval
+of the exact proposal. This October 18 decision supersedes the earlier optional automatic budget
+revision allowance. Agents may prepare proposals, but confidence, global bypass, or a previously
+approved adjustment policy cannot substitute for approval of this change. Preserve the baseline
+and do not silently normalize overspending by changing it. Existing policy records remain history;
+the runtime enforcement of this revised target must be verified before claiming it is shipped.
+
+A monthly comparison additionally needs an explicit currency, complete account universe, calendar
+month and timezone, and stable allocation identity and amounts. Present this review only when that
+baseline needs qualification; it is not a global setup requirement. The person confirms the exact
+persisted review. Agents may prepare it but cannot confirm it. The resulting snapshot is immutable,
+including account membership and category labels, so a later account addition, category rename or
+new active plan cannot silently change an earlier comparison. Selected chart accounts and dates do
+not narrow the whole-month budget numerator.
+
+Historical confirmation records its own human actor and timestamp alongside the original budget
+approval actor and timestamp. A later human confirmation may qualify an existing complete historical
+snapshot, including one originally approved by an agent, but must be labelled retrospective; it
+never rewrites the old actor or claims that the person approved it at the time. Missing account,
+currency, baseline or allocation evidence remains explicitly unavailable with a contextual review
+path. A user-confirmed budget currency is a declaration for that baseline, not evidence that unknown
+ledger transaction currencies are qualified. The Spending projection must still validate its
+numerator's accounting basis, pending/refund treatment, currency and coverage independently.
 
 The person explicitly designates one complete, human-approved baseline for each calendar month.
 Changing a policy, replacing a plan, or changing timezone cannot create a second baseline for that
 month. Policy terms and saved preview evidence remain immutable history; edits append versions,
 and disable/withdraw remain available even when evidence is missing or a preview has expired.
-Draft management and saving a hypothetical preview confer no execution authority. Until a reviewed
-authority path, cumulative usage producer, and commit-time position fence exist, execution stays
-unavailable; missing usage must never be treated as zero allowance consumed.
+Draft management and saving a hypothetical preview confer no execution authority. Historical
+policy limits and previews do not authorize automatic budget changes.
 
 A rule stays inactive until an exact preview exposes matches, non-matches, consequences, conflicts,
 authority and disable/recovery. A factual answer, setup completion or global bypass never activates
 it. Read-only agents may explain/propose; mutation execution follows the same domain authority
-through every channel. Default new users to no automatic budget revisions until they approve limits.
+through every channel. Budget changes require per-proposal human approval through every channel.
 
 ### F5 — Resolve outstanding work once
 

@@ -1,9 +1,9 @@
 fn main() {
-    println!("cargo:rerun-if-env-changed=NOHMI_UPDATER_PUBLIC_KEY");
+    println!("cargo:rerun-if-env-changed=PERSONAL_OS_UPDATER_PUBLIC_KEY");
     #[cfg(target_os = "macos")]
     {
         swift_rs::SwiftLinker::new("14.0")
-            .with_package("IloNative", "../macos")
+            .with_package("PersonalOsNative", "../macos")
             .link();
         println!("cargo:rerun-if-changed=../macos/Sources");
         // Swift 6.4 defaults to Swift Build, whose product path differs from
@@ -15,9 +15,9 @@ fn main() {
         };
         let products =
             std::path::PathBuf::from(std::env::var("OUT_DIR").expect("Cargo output directory"))
-                .join("swift-rs/IloNative/out/Products")
+                .join("swift-rs/PersonalOsNative/out/Products")
                 .join(profile);
-        if products.join("libIloNative.a").exists() {
+        if products.join("libPersonalOsNative.a").exists() {
             println!("cargo:rustc-link-search=native={}", products.display());
         }
         for framework in [

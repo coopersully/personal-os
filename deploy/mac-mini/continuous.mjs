@@ -5,6 +5,60 @@ import { privateFile, withLock, writePrivate } from "./safety.mjs";
 
 const commit = /^[a-f0-9]{40}$/;
 const pollInterval = 5 * 60_000;
+const GiB = 1024 ** 3;
+// The 2026-11-14 outage: PostgreSQL hit ENOSPC on a full 24 GiB VM disk while
+// a deploy was quiescing. Writers are never stopped below this free space.
+export const minimumDockerFree = 4 * GiB;
+// Building three images grows images and cache while live PostgreSQL writes
+// to the same disk; a build only starts with this additional allowance.
+export const buildAllowance = 2 * GiB;
+
+class InsufficientDockerDisk extends Error {}
+
+async function measureDockerFree(io, runtime) {
+  try {
+    return await io.dockerFree(runtime);
+  } catch {
+    return null; // A full disk can make the probe container itself fail.
+  }
+}
+
+// Reclaims unused release images outside `keep` whenever space is short or
+// unmeasurable, then lets a fresh measurement decide. The live release is
+// never stopped for space; a shortfall defers the release instead.
+async function ensureDockerHeadroom(io, runtime, state, keep, minimum, now) {
+  let free = await measureDockerFree(io, runtime);
+  if (free === null || free < minimum) {
+    try {
+      await io.reclaim(runtime, keep);
+      delete state.retentionError;
+    } catch {
+      state.retentionError = "image-retention-failed";
+    }
+    free = await measureDockerFree(io, runtime);
+  }
+  if (free === null) throw new Error("Docker disk headroom could not be measured.");
+  state.dockerFree = { bytes: free, at: new Date(now).toISOString() };
+  if (free < minimum)
+    throw new InsufficientDockerDisk("Docker disk headroom is below the release minimum.");
+}
+
+// The last successfully replaced release, retained for attended rollback. It is
+// set only at completion, so a resumed or failed attempt never overwrites it.
+// State written before this record existed falls back to its completed
+// transaction's previous configuration, which then names a different release.
+function rollbackKeep(state, ...revisions) {
+  const rollback =
+    state.rollback ??
+    (state.completedAt && state.previousConfig?.revision !== state.deployed
+      ? state.previousConfig
+      : undefined);
+  const images = rollback?.images ?? {};
+  return {
+    revisions: [...revisions, rollback?.revision].filter(Boolean),
+    images: ["api", "mcp", "web"].map((name) => images[name]).filter(Boolean),
+  };
+}
 
 export function eligibleRelease({ candidate, deployed, descendant, runs }) {
   if (!commit.test(candidate) || !commit.test(deployed) || candidate === deployed || !descendant)
@@ -120,6 +174,84 @@ export async function authorizeAdoption(configPath, io, expectedDeployed, target
   });
 }
 
+// This attended exception is pinned to the one release Cooper authorized. It
+// changes eligibility only, never the build/switch/recovery transaction below.
+const attendedCiTarget = "76de239aa764cc0642c4b0a15375766353213c16";
+
+export async function authorizeCiOverride(
+  configPath,
+  io,
+  expectedDeployed,
+  target,
+  acknowledgement,
+  reason,
+) {
+  if (
+    acknowledgement !== "--attended-ci-override" ||
+    !commit.test(expectedDeployed) ||
+    target !== attendedCiTarget ||
+    target === expectedDeployed ||
+    typeof reason !== "string" ||
+    !reason.trim() ||
+    reason.length > 240 ||
+    /[\r\n]/.test(reason)
+  )
+    throw new Error("Exact one-release revisions, reason and acknowledgement required.");
+  const initial = io.load(configPath);
+  return withLock(initial.root, async () => {
+    const runtime = io.load(configPath);
+    const state = readState(runtime.root, runtime.config.revision);
+    const activation = JSON.parse(privateFile(join(runtime.root, "activation.json")));
+    if (
+      existsSync(join(runtime.root, "maintenance.json")) ||
+      state.phase !== "idle" ||
+      state.ciOverride ||
+      state.deployed !== expectedDeployed ||
+      runtime.config.revision !== expectedDeployed ||
+      activation.revision !== expectedDeployed ||
+      (await io.main()) !== target ||
+      !(await io.history(expectedDeployed, target))
+    )
+      throw new Error(
+        "Override requires the exact idle serving release and descendant current main.",
+      );
+    let runs = [];
+    let ciObservation = "unavailable";
+    try {
+      runs = await io.ci(target);
+      ciObservation = "not-successful";
+    } catch {
+      /* Availability is the explicitly attended eligibility exception. */
+    }
+    if (eligibleRelease({ candidate: target, deployed: expectedDeployed, descendant: true, runs }))
+      throw new Error("Exact main CI already succeeded; use the normal controller path.");
+    await io.check(runtime);
+    state.ciOverride = {
+      expectedDeployed,
+      target,
+      reason: reason.trim(),
+      authorizedAt: new Date().toISOString(),
+      ciObservation,
+    };
+    state.nextPollAt = 0;
+    state.updatedAt = new Date().toISOString();
+    writePrivate(join(runtime.root, "continuous-state.json"), JSON.stringify(state, null, 2));
+  });
+}
+
+function unusedCiOverride(state, candidate) {
+  const receipt = state.ciOverride;
+  return (
+    candidate === attendedCiTarget &&
+    receipt?.target === candidate &&
+    receipt.expectedDeployed === state.deployed &&
+    !receipt.consumedAt &&
+    typeof receipt.reason === "string" &&
+    Boolean(receipt.reason.trim()) &&
+    typeof receipt.authorizedAt === "string"
+  );
+}
+
 // io owns only external process/network boundaries. Receipts, eligibility,
 // locking and the release switch are exercised against real files in tests.
 export async function tick(configPath, io, now = Date.now()) {
@@ -181,13 +313,45 @@ export async function tick(configPath, io, now = Date.now()) {
         save();
         return;
       }
-      const runs = await io.ci(candidate);
-      if (!eligibleRelease({ candidate, deployed: state.deployed, descendant, runs })) {
+      const override = unusedCiOverride(state, candidate);
+      let runs;
+      try {
+        runs = await io.ci(candidate);
+      } catch (error) {
+        if (!override) throw error;
+        runs = [];
+      }
+      const normalEligibility = eligibleRelease({
+        candidate,
+        deployed: state.deployed,
+        descendant,
+        runs,
+      });
+      if (!normalEligibility && !override) {
         state.error = "awaiting-successful-main-ci";
         save();
         return;
       }
+      // Consume before external work: a crash, failed check/build or lost
+      // response cannot silently turn an attended attempt into a retry loop.
+      if (override) {
+        state.ciOverride.consumedAt = new Date(now).toISOString();
+        state.ciOverride.disposition = normalEligibility ? "normal-ci-won" : "attempt-authorized";
+        save();
+      }
+      state.releaseEligibility = normalEligibility ? "successful-main-ci" : "attended-ci-override";
       await io.check(runtime);
+      // Keeping the candidate stops a tight disk from deleting and rebuilding
+      // the same release every backoff interval.
+      const retained = rollbackKeep(state, state.deployed, candidate);
+      await ensureDockerHeadroom(
+        io,
+        runtime,
+        state,
+        retained,
+        minimumDockerFree + buildAllowance,
+        now,
+      );
       state.phase = "building";
       state.candidate = candidate;
       save();
@@ -195,15 +359,18 @@ export async function tick(configPath, io, now = Date.now()) {
       // Validate the new image provenance before stopping anything. Keep all
       // existing runtime files; this check does not use a prepared next config.
       if (io.checkImages) await io.checkImages(next);
+      // The build consumed space; measure again before stopping any writer.
+      await ensureDockerHeadroom(io, runtime, state, retained, minimumDockerFree, now);
       if (maintenance() || (await io.main()) !== candidate) {
         state.phase = "idle";
         state.error = "candidate-superseded-or-maintenance";
         save();
         return;
       }
-    } catch {
+    } catch (error) {
       state.phase = "idle";
-      state.error = "prepare-failed";
+      state.error =
+        error instanceof InsufficientDockerDisk ? "insufficient-docker-disk" : "prepare-failed";
       state.nextPollAt = now + 15 * 60_000;
       save();
       return;
@@ -265,6 +432,12 @@ export async function tick(configPath, io, now = Date.now()) {
       // recorded, but its writers and ingress are intentionally stopped.
       if (maintenance()) await io.stop(runtime);
       state.deployed = candidate;
+      state.rollback = {
+        revision: state.previousConfig.revision,
+        images: Object.fromEntries(
+          ["api", "mcp", "web"].map((name) => [name, state.previousConfig.images[name]]),
+        ),
+      };
       if (state.adoption) {
         state.bootstrapConsumed = true;
         delete state.adoption;
@@ -286,6 +459,18 @@ export async function tick(configPath, io, now = Date.now()) {
         state.cleanupError = "writers-stop-failed";
         save();
       }
+      return;
     }
+    // The release is complete. Retention failure is recorded, never a reason
+    // to block or roll back: the next reclaim retries it. Attended maintenance
+    // keeps the lock free of Docker cleanup work.
+    if (maintenance()) return;
+    try {
+      await io.reclaim(runtime, rollbackKeep(state, candidate));
+      delete state.retentionError;
+    } catch {
+      state.retentionError = "image-retention-failed";
+    }
+    save();
   });
 }

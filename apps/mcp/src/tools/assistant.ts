@@ -38,7 +38,7 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
       }),
       title: "Start or continue nohmi setup",
     },
-    async (input) => apiResult(() => api.getIloSetup(input)),
+    async (input) => apiResult(() => api.getPersonalOsSetup(input)),
   );
 
   server.registerTool(
@@ -85,7 +85,7 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
         readOnlyHint: false,
       },
       description:
-        "Create or revise one domain preference profile after a short user interview. Save a draft first, preserve user wording, and use expectedVersion when updating. A saved draft is not approval; domain-specific API validation of source ownership, connectivity, activation authority, and preferences is authoritative.",
+        "Create or revise one domain preference profile after a short user interview. Save a draft first, preserve user wording, and use expectedVersion when updating. A saved draft is not approval. Activating Finance guidance requires finances:write, finances:execute and enabled review bypass; domain-specific API validation of source ownership, connectivity, activation authority, and preferences is authoritative.",
       inputSchema: z.object({
         categories: z
           .array(

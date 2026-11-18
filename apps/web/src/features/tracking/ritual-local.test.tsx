@@ -1,15 +1,20 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { toast } from "sonner";
+import { SettingsFeedbackContext } from "../../lib/settings-feedback";
 import { RitualLocal } from "./ritual-local.js";
 
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), dismiss: vi.fn() } }));
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 function mount() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <RitualLocal />
+      <SettingsFeedbackContext.Provider value={true}>
+        <RitualLocal />
+      </SettingsFeedbackContext.Provider>
     </QueryClientProvider>,
   );
   return client;
@@ -21,10 +26,19 @@ it("shows unavailable instead of a false disabled status and retries a failed re
     .mockRejectedValueOnce(new Error("Private diagnostic detail"))
     .mockResolvedValue({ enabled: true, queue: [], localHistory: [], deliveryHealth: null });
   mount();
-  expect(await screen.findByRole("alert")).toHaveTextContent("Ritual status unavailable");
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Couldn’t load local routine status.",
+      expect.objectContaining({ action: expect.objectContaining({ label: "Try again" }) }),
+    ),
+  );
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(screen.getByText("Automatic rituals on this Mac: unavailable")).toBeInTheDocument();
   expect(screen.queryByText(/Private diagnostic detail/)).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  const retry = vi.mocked(toast.error).mock.calls.at(-1)?.[1]?.action;
+  if (!retry || typeof retry !== "object" || !("onClick" in retry))
+    throw new Error("Missing read retry");
+  retry.onClick({} as never);
   expect(await screen.findByText("Automatic rituals on this Mac: on")).toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
@@ -122,4 +136,23 @@ it("shows quarantined-storage recovery while signed out even with an empty queue
     expect(screen.queryByText("Saved ritual data needs recovery")).not.toBeInTheDocument(),
   );
   expect(invoke).toHaveBeenCalledWith("ritual_local", { discard: true });
+});
+
+it("reports a discard failure only through Sonner and retains the recovery controls", async () => {
+  invoke.mockImplementation(async (_command, args) => {
+    if (args.discard) throw new Error("private failure");
+    return { enabled: true, queue: [{}], localHistory: [] };
+  });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Discard pending changes" }));
+  fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("automatic rituals"),
+      expect.anything(),
+    ),
+  );
+  expect(screen.queryByText(/Couldn’t update automatic rituals/)).not.toBeInTheDocument();
+  expect(screen.queryByText("private failure")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Keep changes" })).toBeEnabled();
 });

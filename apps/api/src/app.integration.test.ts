@@ -15,6 +15,8 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   domainProfiles,
+  financeAccounts,
+  financeProviderItems,
   financeTransactions,
   mailReviews,
   mailRuleWorkItems,
@@ -41,7 +43,7 @@ import type { EmailMessage } from "./email-delivery.js";
 import { GooglePubSubAuthError } from "./google-pubsub-auth.js";
 import { DEMO_QA_PASSWORD, loadQaFixtures, qaFixtureAccounts } from "./qa-fixtures.js";
 import { createRuntimeLifecycle, type RuntimeLifecycle } from "./runtime-lifecycle.js";
-import { verifyPassword } from "./security.js";
+import { encryptJson, hashToken, verifyPassword } from "./security.js";
 
 const invalidLowercasePassword = ["alllowercase", "123", "!"].join("");
 
@@ -217,6 +219,86 @@ describe.sequential("ilo API", () => {
     return response.status === 204 ? null : response.json();
   }
 
+  it("composes shared agent identity routes with authentication and owner-only linking", async () => {
+    expect((await app.request("/v1/agent-accounts")).status).toBe(401);
+    expect((await app.request("/v1/agent-accounts/current")).status).toBe(401);
+    const registration = await request("/v1/auth/register", {
+      auth: "none",
+      body: {
+        displayName: "Agent identity owner",
+        email: "agent-identity-owner@example.test",
+        password: "LocalTestOnly123!",
+        planningTimezone: "UTC",
+      },
+    });
+    const owner = await payload(registration);
+    const headers = {
+      authorization: `Session ${owner.sessionToken}`,
+      "content-type": "application/json",
+    };
+    const created = await payload(
+      await app.request("/v1/access-tokens", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ name: "Claude Code", scopes: ["finances:read"] }),
+      }),
+    );
+    const agentHeaders = {
+      authorization: `Bearer ${created.token.token}`,
+      "content-type": "application/json",
+    };
+    const currentResponse = await app.request("/v1/agent-accounts/current", {
+      headers: agentHeaders,
+    });
+    expect(currentResponse.status).toBe(200);
+    const current = await payload(currentResponse);
+    expect(current).toMatchObject({ platform: "unknown", identitySource: "connection" });
+    const declared = await payload(
+      await app.request("/v1/agent-accounts/current", {
+        method: "POST",
+        headers: agentHeaders,
+        body: JSON.stringify({ platform: "claude" }),
+      }),
+    );
+    expect(declared).toMatchObject({ id: current.id, platform: "claude" });
+    const directoryResponse = await app.request("/v1/agent-accounts", { headers });
+    expect(directoryResponse.status).toBe(200);
+    const directory = await payload(directoryResponse);
+    expect(directory.accounts).toHaveLength(1);
+    expect(directory.connections[0].agentAccountId).toBe(current.id);
+    expect((await app.request("/v1/agent-accounts", { headers: agentHeaders })).status).toBe(403);
+    expect(
+      (
+        await app.request(`/v1/agent-accounts/${current.id}`, {
+          method: "PATCH",
+          headers: agentHeaders,
+          body: JSON.stringify({ displayName: "Impersonation" }),
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await app.request(`/v1/agent-accounts/connections/${directory.connections[0].id}`, {
+          method: "PUT",
+          headers: agentHeaders,
+          body: JSON.stringify({ agentAccountId: current.id }),
+        })
+      ).status,
+    ).toBe(403);
+    const renamed = await payload(
+      await app.request(`/v1/agent-accounts/${current.id}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ displayName: "Amber Finch", accountLabel: "Personal" }),
+      }),
+    );
+    expect(renamed).toMatchObject({
+      id: current.id,
+      displayName: "Amber Finch",
+      avatarSeed: current.avatarSeed,
+    });
+  });
+
   it("composes authenticated notification status and human preferences without publication authority", async () => {
     const registration = await request("/v1/auth/register", {
       auth: "none",
@@ -318,7 +400,7 @@ describe.sequential("ilo API", () => {
       capability: "unavailable",
       intents: [],
       preferences: [],
-      reason: "producer_not_registered",
+      reason: "delivery_not_enabled",
     });
     const unregisteredPublication = await agentRequest(
       fullAgent,
@@ -4917,7 +4999,7 @@ describe.sequential("ilo API", () => {
     });
   });
 
-  it("composes human-only budget policy management", async () => {
+  it("composes read-scoped budget policy management", async () => {
     const registration = await request("/v1/auth/register", {
       auth: "none",
       body: {
@@ -4951,13 +5033,8 @@ describe.sequential("ilo API", () => {
       headers: { authorization: `Bearer ${token}` },
     });
 
-    expect(rejected.status).toBe(403);
-    await expect(payload(rejected)).resolves.toMatchObject({
-      error: {
-        code: "forbidden",
-        message: "This operation requires an interactive user session.",
-      },
-    });
+    expect(rejected.status).toBe(200);
+    await expect(payload(rejected)).resolves.toEqual({ policies: [] });
   });
 
   it("enforces owner-issued, one-time invitations for private beta sign-up", async () => {
@@ -5184,9 +5261,39 @@ describe.sequential("ilo API", () => {
         .from(reminders)
         .where(and(eq(reminders.userId, demo?.id ?? ""), eq(reminders.kind, "task"))),
     ]);
-    expect(events).toHaveLength(12);
+    // Twelve baseline events plus four stable demo evening/next-week agenda records.
+    expect(events).toHaveLength(16);
+    const agendaIds = [2100, 2102, 2103, 2105].map(
+      (record) => `f1000000-0000-4000-8000-${record.toString(16).padStart(12, "0")}`,
+    );
+    expect(events.filter((event) => agendaIds.includes(event.id))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: agendaIds[0],
+          title: "Read and plan tomorrow",
+          startsAt: new Date("2026-07-29T01:00:00.000Z"),
+          endsAt: new Date("2026-07-29T01:30:00.000Z"),
+        }),
+        expect.objectContaining({
+          id: agendaIds[1],
+          title: "Autumn workshop volunteer briefing",
+          startsAt: new Date("2026-07-30T21:00:00.000Z"),
+        }),
+        expect.objectContaining({
+          id: agendaIds[2],
+          title: "River loop with Priya",
+          startsAt: new Date("2026-07-31T21:00:00.000Z"),
+        }),
+        expect.objectContaining({
+          id: agendaIds[3],
+          title: "Friday money check-in",
+          startsAt: new Date("2026-08-02T21:00:00.000Z"),
+        }),
+      ]),
+    );
     expect(messages).toHaveLength(5);
-    expect(transactions).toHaveLength(9);
+    // Eleven current records plus 159 transactions across the four completed history months.
+    expect(transactions).toHaveLength(170);
     expect(profiles).toContainEqual(expect.objectContaining({ domain: "mail", status: "active" }));
     expect(emptyTasks).toEqual([]);
     expect(degradedAccounts).toContainEqual(
@@ -5272,6 +5379,18 @@ describe.sequential("ilo API", () => {
     expect(sameListProjects).toHaveLength(2);
 
     await loadQaFixtures(database.db, { now: new Date("2026-07-29T14:00:00.000Z") });
+    const reloadedEvents = await database.db
+      .select()
+      .from(calendarEvents)
+      .where(eq(calendarEvents.userId, demo?.id ?? ""));
+    expect(reloadedEvents).toHaveLength(16);
+    expect(reloadedEvents.map((event) => event.id).sort()).toEqual(
+      events.map((event) => event.id).sort(),
+    );
+    expect(reloadedEvents.find((event) => event.id === agendaIds[0])).toMatchObject({
+      startsAt: new Date("2026-07-30T01:00:00.000Z"),
+      endsAt: new Date("2026-07-30T01:30:00.000Z"),
+    });
     expect(
       await database.db.select().from(users).where(inArray(users.email, fixtureEmails)),
     ).toHaveLength(qaFixtureAccounts.length);
@@ -5797,13 +5916,30 @@ describe.sequential("ilo API", () => {
         })
       ).status,
     ).toBe(200);
-    expect(
-      (
-        await request("/v1/finances/budgets", {
-          body: { category: "Groceries", limit: 400, month: "2026-07" },
-        })
-      ).status,
-    ).toBe(201);
+    const budgetProposalResponse = await request("/v1/finances/budgets", {
+      body: { category: "Groceries", limit: 400, month: "2026-07" },
+    });
+    expect(budgetProposalResponse.status).toBe(202);
+    const budgetProposal = await payload(budgetProposalResponse);
+    expect(budgetProposal).toMatchObject({
+      status: "pending_review",
+      review: { id: expect.any(String) },
+    });
+    expect((await payload(await request("/v1/finances/budgets/status"))).budgets).toEqual([]);
+    const budgetApprovalResponse = await request(
+      `/v1/finances/action-reviews/${budgetProposal.review.id}/approve`,
+      {
+        auth: "session",
+        method: "POST",
+      },
+    );
+    expect(budgetApprovalResponse.status).toBe(200);
+    expect(await payload(budgetApprovalResponse)).toMatchObject({
+      outcome: {
+        status: "applied",
+        result: { category: "Groceries", limit: 400, month: "2026-07" },
+      },
+    });
     expect((await payload(await request("/v1/finances/budgets/status"))).budgets).toEqual([
       expect.objectContaining({ remaining: 381.5, spent: 18.5 }),
     ]);
@@ -5875,7 +6011,10 @@ describe.sequential("ilo API", () => {
         })
       ).status,
     ).toBe(404);
-    expect(await payload(await request("/v1/finances/plaid/status"))).toEqual({ available: false });
+    expect(await payload(await request("/v1/finances/plaid/status"))).toEqual({
+      available: false,
+      environment: "sandbox",
+    });
     expect((await request("/v1/finances/plaid/link-token", { method: "POST" })).status).toBe(400);
     expect(
       (
@@ -5935,7 +6074,7 @@ describe.sequential("ilo API", () => {
           body: { idempotencyKey: "route-connect", provider: "plaid" },
         })
       ).status,
-    ).toBe(400);
+    ).toBe(503);
     expect(
       (
         await request("/v1/finances/transactions/classify", {
@@ -6188,38 +6327,39 @@ describe.sequential("ilo API", () => {
       return Response.json({ error_message: "Unexpected Plaid call" }, { status: 400 });
     });
     vi.stubGlobal("fetch", plaidFetch);
-    const plaidApp = createApp({
-      config: {
-        allowedOrigins: ["https://app.example.com"],
-        apiBaseUrl: "https://api.example.com",
-        apiShutdownTimeoutMs: 105_000,
-        appBaseUrl: "https://app.example.com",
-        databaseUrl: container.getConnectionUri(),
-        emailFrom: "",
-        encryptionKey: Buffer.alloc(32, 1).toString("base64"),
-        googleClientId: "",
-        googleClientSecret: "",
-        googleRedirectUri: "https://api.example.com/v1/connectors/google/callback",
-        logLevel: "info",
-        plaidClientId: "client",
-        plaidEnvironment: "sandbox",
-        plaidSecret: "secret",
-        port: 8787,
-        production: false,
-        resendApiKey: "",
-        sessionCookieName: "personal_os_session",
-        sessionTtlDays: 30,
-        xClientId: "",
-        xClientSecret: "",
-        xRedirectUri: "https://api.example.com/v1/x-bookmarks/callback",
-      },
+    const plaidConfig = {
+      allowedOrigins: ["https://app.example.com"],
+      apiBaseUrl: "https://api.example.com",
+      apiShutdownTimeoutMs: 105_000,
+      appBaseUrl: "https://app.example.com",
+      databaseUrl: container.getConnectionUri(),
+      emailFrom: "",
+      encryptionKey: Buffer.alloc(32, 1).toString("base64"),
+      googleClientId: "",
+      googleClientSecret: "",
+      googleRedirectUri: "https://api.example.com/v1/connectors/google/callback",
+      logLevel: "info",
+      plaidClientId: "client",
+      plaidEnvironment: "sandbox",
+      plaidSecret: "secret",
+      port: 8787,
+      production: false,
+      resendApiKey: "",
+      sessionCookieName: "personal_os_session",
+      sessionTtlDays: 30,
+      xClientId: "",
+      xClientSecret: "",
+      xRedirectUri: "https://api.example.com/v1/x-bookmarks/callback",
+    } satisfies Parameters<typeof createApp>[0]["config"];
+    const plaidDependencies = {
       db: database.db,
       icloud: icloudConnector,
       log: logs,
       now: () => new Date("2026-07-13T12:00:00.000Z"),
-    });
-    const plaidRequest = (path: string, body?: unknown) =>
-      plaidApp.request(path, {
+    };
+    const plaidApp = createApp({ config: plaidConfig, ...plaidDependencies });
+    const plaidRequest = (path: string, body?: unknown, app = plaidApp) =>
+      app.request(path, {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         headers: {
           authorization: `Session ${sessionToken}`,
@@ -6228,6 +6368,36 @@ describe.sequential("ilo API", () => {
         method: "POST",
       });
     expect((await plaidRequest("/v1/finances/plaid/link-token")).status).toBe(200);
+    const linkTokenBody = () => {
+      const call = plaidFetch.mock.calls.at(-1) as unknown as [RequestInfo | URL, RequestInit];
+      expect(String(call[0])).toContain("/link/token/create");
+      return JSON.parse(String(call[1].body)) as Record<string, unknown>;
+    };
+    const webLinkBody = linkTokenBody();
+    expect(webLinkBody).not.toHaveProperty("redirect_uri");
+    // With no redirect configured, the iPhone app's request to Plaid is exactly the web one.
+    expect((await plaidRequest("/v1/finances/plaid/link-token", { client: "ios" })).status).toBe(
+      200,
+    );
+    expect(linkTokenBody()).toEqual(webLinkBody);
+    expect(
+      (await plaidRequest("/v1/finances/plaid/link-token", { client: "android" })).status,
+    ).toBe(400);
+    const redirectApp = createApp({
+      config: { ...plaidConfig, plaidIosRedirectUri: "https://app.example.com/plaid/return" },
+      ...plaidDependencies,
+    });
+    expect(
+      (await plaidRequest("/v1/finances/plaid/link-token", undefined, redirectApp)).status,
+    ).toBe(200);
+    expect(linkTokenBody()).toEqual(webLinkBody);
+    expect(
+      (await plaidRequest("/v1/finances/plaid/link-token", { client: "ios" }, redirectApp)).status,
+    ).toBe(200);
+    expect(linkTokenBody()).toEqual({
+      ...webLinkBody,
+      redirect_uri: "https://app.example.com/plaid/return",
+    });
     const plaidExchange = await plaidRequest("/v1/finances/plaid/exchange", {
       institution: "Integration Bank",
       publicToken: "public-token",
@@ -6370,6 +6540,71 @@ describe.sequential("ilo API", () => {
     ).toBe("updated@example.com");
     const sessions = (await payload(await request("/v1/sessions"))).sessions;
     expect(sessions).toHaveLength(2);
+    const currentSession = sessions.find((session: { isCurrent: boolean }) => session.isCurrent);
+    expect(currentSession).toMatchObject({ isCurrent: true, userAgent: "Integration Browser" });
+    expect(sessions.filter((session: { isCurrent: boolean }) => !session.isCurrent)).toHaveLength(
+      1,
+    );
+    const originalSession = sessions.find((session: { isCurrent: boolean }) => !session.isCurrent);
+    const cookieSessions = (
+      await payload(
+        await request("/v1/sessions", {
+          auth: "none",
+          headers: { cookie: String(sessionCookie) },
+        }),
+      )
+    ).sessions;
+    expect(cookieSessions.filter((session: { isCurrent: boolean }) => session.isCurrent)).toEqual([
+      currentSession,
+    ]);
+    const originalCookie = `${appConfig.sessionCookieName}=${registrationBody.sessionToken}`;
+    const originalCookieSessions = (
+      await payload(
+        await request("/v1/sessions", {
+          auth: "none",
+          headers: { cookie: originalCookie },
+        }),
+      )
+    ).sessions;
+    expect(
+      originalCookieSessions.find((session: { id: string }) => session.id === originalSession.id),
+    ).toMatchObject({ isCurrent: true });
+    expect(
+      originalCookieSessions.find((session: { id: string }) => session.id === currentSession.id),
+    ).toMatchObject({ isCurrent: false });
+    const headerWithOtherCookie = (
+      await payload(
+        await request("/v1/sessions", {
+          headers: { cookie: originalCookie },
+        }),
+      )
+    ).sessions;
+    expect(
+      headerWithOtherCookie.find((session: { id: string }) => session.id === currentSession.id),
+    ).toMatchObject({ isCurrent: true });
+    for (const listed of [
+      sessions,
+      cookieSessions,
+      originalCookieSessions,
+      headerWithOtherCookie,
+    ]) {
+      for (const summary of listed)
+        expect(Object.keys(summary).sort()).toEqual([
+          "createdAt",
+          "expiresAt",
+          "id",
+          "ipAddress",
+          "isCurrent",
+          "lastSeenAt",
+          "userAgent",
+        ]);
+      const serialized = JSON.stringify(listed);
+      for (const token of [sessionToken, registrationBody.sessionToken]) {
+        expect(serialized).not.toContain(token);
+        expect(serialized).not.toContain(hashToken(token));
+      }
+    }
+    expect((await request("/v1/sessions", { auth: "none" })).status).toBe(401);
     expect(
       sessions.some(
         (session: { ipAddress: string | null }) => session.ipAddress === "203.0.113.10",
@@ -6407,6 +6642,7 @@ describe.sequential("ilo API", () => {
     );
     agentToken = createdToken.token.token;
     expect(agentToken).toMatch(/^pos_/);
+    expect((await request("/v1/sessions", { auth: "agent" })).status).toBe(403);
     expect(
       (
         await request(`/v1/finances/accounts/${paypalAccount.id}/disconnect`, {
@@ -6423,7 +6659,7 @@ describe.sequential("ilo API", () => {
       ).status,
     ).toBe(400);
     expect((await payload(await request("/v1/access-tokens"))).tokens).toHaveLength(1);
-    expect((await request("/v1/connectors", { auth: "agent" })).status).toBe(403);
+    expect((await request("/v1/connectors", { auth: "agent" })).status).toBe(200);
     const financeGuidanceDraft = {
       categories: [],
       domain: "finances",
@@ -6694,6 +6930,10 @@ describe.sequential("ilo API", () => {
     const invalid = await request("/v1/desktop/activity?cursor=invalid");
     expect(invalid.status).toBe(400);
 
+    const privateCategory = await request("/v1/finances/categories", {
+      body: { name: "Private medical category" },
+    });
+    expect(privateCategory.status).toBe(200);
     const fullAgentToken = agentToken;
     const auditOnlyToken = await payload(
       await request("/v1/access-tokens", {
@@ -6708,6 +6948,13 @@ describe.sequential("ilo API", () => {
       await payload(await request("/v1/audit", { auth: "agent" }))
     ).events.filter((event: { action: string }) => event.action.startsWith("finance."));
     expect(auditOnlyFinanceEvents.length).toBeGreaterThan(0);
+    expect(auditOnlyFinanceEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "finance.category_saved", after: { saved: true } }),
+      ]),
+    );
+    expect(JSON.stringify(auditOnlyFinanceEvents)).not.toContain("Private medical category");
+
     expect(
       JSON.stringify(
         auditOnlyFinanceEvents.map((event: { after: unknown; before: unknown }) => ({
@@ -8447,5 +8694,124 @@ describe.sequential("ilo API", () => {
         })
       ).status,
     ).toBe(401);
+  });
+
+  it("routes duplicate previews and explicit resolution through owner and execution boundaries", async () => {
+    const registration = await app.request("/v1/auth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        displayName: "Duplicate fixture",
+        email: `duplicate-${crypto.randomUUID()}@example.test`,
+        password: "LocalTestOnly123!",
+        planningTimezone: "UTC",
+      }),
+    });
+    const owner = await payload(registration);
+    const headers = {
+      authorization: `Session ${owner.sessionToken}`,
+      "content-type": "application/json",
+    };
+    const [item] = await database.db
+      .insert(financeProviderItems)
+      .values({
+        userId: owner.user.id,
+        provider: "plaid",
+        providerItemId: crypto.randomUUID(),
+        encryptedCredentials: encryptJson(
+          { accessToken: "synthetic-only" },
+          appConfig.encryptionKey ?? Buffer.alloc(32, 1).toString("base64"),
+        ),
+        syncState: "current",
+        lastSyncedAt: new Date(),
+      })
+      .returning();
+    if (!item) throw new Error("Missing fixture");
+    const accounts = await database.db
+      .insert(financeAccounts)
+      .values(
+        [0, 1].map((index) => ({
+          userId: owner.user.id,
+          provider: "plaid" as const,
+          providerAccountId: `fixture-${index}-${crypto.randomUUID()}`,
+          providerItemRecordId: item.id,
+          name: "Fixture card",
+          institution: "Fixture bank",
+          status: "connected" as const,
+          syncState: "current" as const,
+          balance: 100,
+          currencyCode: "USD",
+          lastSyncedAt: new Date(),
+        })),
+      )
+      .returning();
+    const redundant = accounts[0],
+      keep = accounts[1];
+    if (!redundant || !keep) throw new Error("Missing fixture");
+    const path = `/v1/finances/accounts/${redundant.id}`;
+    expect((await app.request(`${path}/duplicate-preview?keepAccountId=${keep.id}`)).status).toBe(
+      401,
+    );
+    expect(
+      (await app.request(`${path}/duplicate-preview?keepAccountId=invalid`, { headers })).status,
+    ).toBe(400);
+    const previewResponse = await app.request(
+      `${path}/duplicate-preview?keepAccountId=${keep.id}`,
+      { headers },
+    );
+    expect(previewResponse.status).toBe(200);
+    const preview = await payload(previewResponse);
+    expect(preview.data).toMatchObject({
+      keptAccount: { id: keep.id },
+      redundantAccount: { id: redundant.id },
+      match: "possible",
+    });
+    const createdToken = await payload(
+      await app.request("/v1/access-tokens", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ name: "Read-only fixture", scopes: ["finances:read"] }),
+      }),
+    );
+    const readHeaders = {
+      authorization: `Bearer ${createdToken.token.token}`,
+      "content-type": "application/json",
+    };
+    expect(
+      (
+        await app.request(`${path}/duplicate-preview?keepAccountId=${keep.id}`, {
+          headers: readHeaders,
+        })
+      ).status,
+    ).toBe(200);
+    const body = JSON.stringify({
+      keepAccountId: keep.id,
+      revision: preview.data.revision,
+      idempotencyKey: "explicit-resolution",
+    });
+    expect(
+      (
+        await app.request(`${path}/resolve-duplicate`, {
+          method: "POST",
+          headers: readHeaders,
+          body,
+        })
+      ).status,
+    ).toBe(403);
+    const resolved = await app.request(`${path}/resolve-duplicate`, {
+      method: "POST",
+      headers,
+      body,
+    });
+    expect(resolved.status).toBe(200);
+    expect((await payload(resolved)).data).toMatchObject({
+      id: redundant.id,
+      includeInPlanning: false,
+      synchronization: { failureCode: "finance_account_disconnected" },
+    });
+    expect(
+      (await database.db.select().from(financeAccounts).where(eq(financeAccounts.id, keep.id)))[0]
+        ?.status,
+    ).toBe("connected");
   });
 });

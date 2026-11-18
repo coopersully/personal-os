@@ -1,12 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   composeNotification,
   defaultNotificationPreferences,
+  notificationAttemptDetailSchema,
   notificationEligibility,
   notificationPreferencesSchema,
   notificationWorkSchema,
+  type PublishNotificationResult,
   validateNotificationResolution,
 } from "./notification-policy.js";
+
+it("includes disabled delivery in the public notification result contract", () => {
+  expectTypeOf<{
+    state: "unavailable";
+    reason: "delivery_not_enabled";
+  }>().toExtend<PublishNotificationResult>();
+});
 
 const work = {
   work: {
@@ -21,7 +30,7 @@ const work = {
   disclosure: "context" as const,
   context: "Dinner",
   occurredAt: "2026-03-07T23:00:00.000Z",
-  destination: "/settings?section=reviews" as const,
+  destination: "/finances?review=open" as const,
 };
 const now = new Date("2026-03-08T12:00:00.000Z");
 const preferences = defaultNotificationPreferences;
@@ -141,7 +150,7 @@ describe("notification policy", () => {
         works: Array.from({ length: 4 }, (_, i) => ({ ...work, context: `Item ${i}` })),
       }),
     ).not.toContain("Item 3");
-    expect(composeNotification(input)).toContain("https://nohmi.test/settings?section=reviews");
+    expect(composeNotification(input)).toContain("https://nohmi.test/finances?review=open");
     expect(composeNotification(input)).not.toContain("Reply");
   });
 });
@@ -275,4 +284,302 @@ it("supports daytime quiet windows, any-time mode, elapsed reminders, and local 
       ],
     }),
   ).toBe("eligible");
+});
+
+describe("run attention delivery policy", () => {
+  const repair = { ...work, work: { ...work.work, kind: "repair" as const } };
+  const evaluate = (
+    attempts: Parameters<typeof notificationEligibility>[0]["attempts"],
+    at = now,
+  ) => notificationEligibility({ work: repair, preferences, timeZone: "UTC", now: at, attempts });
+  it("honors repair reminder intervals and never while preserving uncertainty", () => {
+    expect(
+      evaluate(
+        [{ actionRevision: "action-1", state: "accepted", submittedAt: now }],
+        new Date(now.getTime() + 30 * 86400000),
+      ),
+    ).toBe("eligible");
+    const accepted = [{ actionRevision: "action-1", state: "accepted" as const, submittedAt: now }];
+    expect(evaluate(accepted)).toBe("reminder_wait");
+    expect(
+      notificationEligibility({
+        work: repair,
+        preferences: { ...preferences, reminderDays: null },
+        timeZone: "UTC",
+        now: new Date(now.getTime() + 365 * 86400000),
+        attempts: accepted,
+      }),
+    ).toBe("reminder_never");
+    expect(evaluate([{ actionRevision: "older", state: "uncertain", submittedAt: now }])).toBe(
+      "delivery_uncertain",
+    );
+  });
+  it("bounds known failed sends to three attempts with one and five minute delays", () => {
+    const failure = { actionRevision: "action-1", state: "failed" as const, submittedAt: now };
+    expect(evaluate([failure])).toBe("retry_wait");
+    expect(evaluate([failure], new Date(now.getTime() + 60_000))).toBe("eligible");
+    expect(evaluate([failure, failure], new Date(now.getTime() + 60_000))).toBe("retry_wait");
+    expect(evaluate([failure, failure], new Date(now.getTime() + 300_000))).toBe("eligible");
+    expect(evaluate([failure, failure, failure], new Date(now.getTime() + 86400000))).toBe(
+      "retry_exhausted",
+    );
+  });
+  it("bounds failed reminder retries after the prior accepted handoff", () => {
+    const accepted = {
+      actionRevision: "action-1",
+      state: "accepted" as const,
+      submittedAt: new Date(now.getTime() - 8 * 86400000),
+    };
+    const failed = { actionRevision: "action-1", state: "failed" as const, submittedAt: now };
+    expect(evaluate([accepted, failed])).toBe("retry_wait");
+    expect(evaluate([accepted, failed], new Date(now.getTime() + 60_000))).toBe("eligible");
+    expect(evaluate([accepted, failed, failed, failed], new Date(now.getTime() + 300_000))).toBe(
+      "retry_exhausted",
+    );
+  });
+  it("retains quiet hours, opt-out and resolved fences during retry", () => {
+    const failure = {
+      actionRevision: "action-1",
+      state: "failed" as const,
+      submittedAt: new Date(now.getTime() - 300_000),
+    };
+    expect(evaluate([failure], new Date("2026-03-09T02:00:00Z"))).toBe("quiet_hours");
+    expect(
+      notificationEligibility({
+        work: repair,
+        preferences: { ...preferences, enabled: false },
+        timeZone: "UTC",
+        now,
+        attempts: [failure],
+      }),
+    ).toBe("disabled");
+    expect(
+      notificationEligibility({
+        work: { ...repair, active: false },
+        preferences,
+        timeZone: "UTC",
+        now,
+        attempts: [failure],
+      }),
+    ).toBe("resolved");
+  });
+});
+
+describe("strict notification attempt detail", () => {
+  const detail = () => ({
+    id: "11111111-1111-4111-8111-111111111111",
+    state: "uncertain",
+    reason: "delivery_uncertain",
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    dispatchRecordedAt: now.toISOString(),
+    initiatingActor: { basis: "unavailable" },
+    membership: [
+      { intentId: "22222222-2222-4222-8222-222222222222", work: work.work, currentIntent: null },
+    ],
+    policy: {
+      historicalPreferences: { basis: "unavailable", reason: "not_persisted" },
+      recordedAttempt: {
+        basis: "attempt_record",
+        connectionId: "33333333-3333-4333-8333-333333333333",
+        consentEpoch: 1,
+        timeZone: "UTC",
+        timezoneRevision: now.toISOString(),
+      },
+      current: {
+        basis: "current",
+        timeZone: "UTC",
+        timezoneRevision: now.toISOString(),
+        preferences: [],
+        effective: preferences,
+        connection: null,
+      },
+    },
+    transport: {
+      message: null,
+      callbackProvenance: { basis: "unavailable", reason: "not_persisted" },
+    },
+    coverage: {
+      state: "partial",
+      membership: "complete",
+      limit: 100,
+      returnedItems: 1,
+      hasMore: false,
+      reasons: [
+        "historical_policy_unavailable",
+        "callback_provenance_unavailable",
+        "message_unavailable",
+        "intent_unavailable",
+      ],
+    },
+    recovery: "inspect_delivery_do_not_resend",
+  });
+  it("keeps actual frozen work and current/historical basis distinct without granting retry", () => {
+    const parsed = notificationAttemptDetailSchema.parse(detail());
+    expect(parsed.membership[0]?.work).toEqual(work.work);
+    expect(parsed.policy.historicalPreferences.basis).toBe("unavailable");
+    expect(parsed.policy.current.basis).toBe("current");
+    expect(parsed.recovery).toBe("inspect_delivery_do_not_resend");
+  });
+  it.each([
+    "ownerId",
+    "phone",
+    "body",
+    "providerSid",
+    "token",
+    "authority",
+  ])("rejects extra private %s fields", (field) => {
+    const value = detail();
+    expect(
+      notificationAttemptDetailSchema.safeParse({ ...value, [field]: "private" }).success,
+    ).toBe(false);
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        policy: { ...value.policy, [field]: "private" },
+      }).success,
+    ).toBe(false);
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        transport: { ...value.transport, [field]: "private" },
+      }).success,
+    ).toBe(false);
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        membership: [{ ...value.membership[0], [field]: "private" }],
+      }).success,
+    ).toBe(false);
+  });
+  it("rejects overflow presented as complete or inconsistent returned counts", () => {
+    const value = detail();
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        coverage: { ...value.coverage, hasMore: true },
+      }).success,
+    ).toBe(false);
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        coverage: { ...value.coverage, returnedItems: 0 },
+      }).success,
+    ).toBe(false);
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        membership: Array.from({ length: 101 }, () => value.membership[0]),
+      }).success,
+    ).toBe(false);
+  });
+  it("does not accept current preference data disguised as historical submission evidence", () => {
+    const value = detail();
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        policy: { ...value.policy, historicalPreferences: { basis: "historical", preferences } },
+      }).success,
+    ).toBe(false);
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        reason: "raw provider or message contents",
+      }).success,
+    ).toBe(false);
+  });
+  it("accepts only finite unknown detail labels and rejects raw values or nested private fields", () => {
+    const value = detail();
+    const connection = {
+      id: value.policy.recordedAttempt.connectionId,
+      state: "unknown",
+      consentEpoch: 1,
+      updatedAt: now.toISOString(),
+      matchesRecordedEpoch: true,
+    };
+    const message = {
+      id: value.id,
+      status: "unknown",
+      providerSubmittedAt: null,
+      sentAt: null,
+      deliveredAt: null,
+      updatedAt: now.toISOString(),
+    };
+    const diagnostic = {
+      ...value,
+      policy: { ...value.policy, current: { ...value.policy.current, connection } },
+      transport: { ...value.transport, message },
+      coverage: {
+        ...value.coverage,
+        reasons: [
+          ...value.coverage.reasons,
+          "connection_state_unrecognized",
+          "message_status_unrecognized",
+        ],
+      },
+    };
+    expect(notificationAttemptDetailSchema.safeParse(diagnostic).success).toBe(true);
+    for (const extra of [
+      { state: "reader-state-canary" },
+      { rawState: "private" },
+      { token: "private" },
+    ]) {
+      expect(
+        notificationAttemptDetailSchema.safeParse({
+          ...diagnostic,
+          policy: {
+            ...diagnostic.policy,
+            current: { ...diagnostic.policy.current, connection: { ...connection, ...extra } },
+          },
+        }).success,
+      ).toBe(false);
+    }
+    for (const extra of [
+      { status: "reader-status-canary" },
+      { rawStatus: "private" },
+      { body: "private" },
+    ]) {
+      expect(
+        notificationAttemptDetailSchema.safeParse({
+          ...diagnostic,
+          transport: { ...diagnostic.transport, message: { ...message, ...extra } },
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...diagnostic,
+        coverage: {
+          ...diagnostic.coverage,
+          reasons: [...diagnostic.coverage.reasons, "reader-state-canary"],
+        },
+      }).success,
+    ).toBe(false);
+  });
+  it("bounds all nine allowlisted partial-coverage reasons without widening arbitrary evidence", () => {
+    const value = detail();
+    const reasons = [
+      "historical_policy_unavailable",
+      "callback_provenance_unavailable",
+      "membership_unavailable",
+      "membership_inconsistent",
+      "membership_limit",
+      "message_unavailable",
+      "intent_unavailable",
+      "connection_state_unrecognized",
+      "message_status_unrecognized",
+    ];
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        coverage: { ...value.coverage, reasons },
+      }).success,
+    ).toBe(true);
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        coverage: { ...value.coverage, reasons: [...reasons, reasons[0]] },
+      }).success,
+    ).toBe(false);
+  });
 });

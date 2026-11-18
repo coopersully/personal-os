@@ -14,6 +14,11 @@ required_files=(
   ".agents/skills/ship-it/scripts/evaluate_readiness_test.py"
   ".github/pull_request_template.md"
   "docs/engineering/pr-rubric.md"
+  "docs/engineering/acceptance-contract.md"
+  "docs/engineering/acceptance-policy.json"
+  "docs/engineering/code-standards.md"
+  ".agents/skills/deep-review/SKILL.md"
+  ".agents/skills/handoff/SKILL.md"
   "docs/engineering/work-context.md"
   ".codex/runtime/Dockerfile.dev"
   ".codex/runtime/compose.yaml"
@@ -44,7 +49,12 @@ node --test \
   ./.codex/scripts/worktree-runtime.test.mjs \
   ./.codex/scripts/compose-runtime-manager.test.mjs
 bash ./.codex/scripts/environment.test.sh
-PYTHONDONTWRITEBYTECODE=1 python3 ./.agents/skills/ship-it/scripts/evaluate_readiness_test.py
+PYTHONDONTWRITEBYTECODE=1 python3 .codex/scripts/verification-runner.test.py
+PYTHONDONTWRITEBYTECODE=1 python3 .codex/scripts/verification-admission.test.py
+PYTHONDONTWRITEBYTECODE=1 python3 .codex/scripts/check-skills.py
+for scripts in ship-it personal-os-deploy-status pr-shepherd resolve-pr-comments; do
+  PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s "./.agents/skills/$scripts/scripts" -p '*_test.py'
+done
 
 grep -Eq '^## Work map$' .github/pull_request_template.md &&
   grep -Eq '^- Project: \[Nohmi\]\(https://linear\.app/coopersully/project/nohmi-6799e74a853f\)' .github/pull_request_template.md &&
@@ -53,9 +63,13 @@ grep -Eq '^## Work map$' .github/pull_request_template.md &&
   exit 1
 }
 
-grep -Fq 'types: [edited, opened, ready_for_review, reopened, synchronize]' .github/workflows/ci.yml || {
-  echo "CI must revalidate the PR Work map whenever pull request metadata changes" >&2
+grep -Fq 'types: [edited, ready_for_review]' .github/workflows/pr-metadata.yml &&
+  grep -Fq 'run: node .github/scripts/wait-source-ci.mjs --gate' .github/workflows/ci.yml || {
+  echo "Metadata CI must revalidate the PR Work map when source CI completes and whenever pull request metadata changes" >&2
   exit 1
 }
 
+node --test .github/scripts/collect-node-coverage.test.mjs
+node --test .github/scripts/collect-browser-diagnostics.test.mjs
+node --test .github/scripts/source-observation.test.mjs .github/scripts/wait-source-ci.test.mjs scripts/coverage-shards.test.mjs scripts/verification-plan.test.mjs scripts/development-plan.test.mjs
 echo "Codex repository check passed."

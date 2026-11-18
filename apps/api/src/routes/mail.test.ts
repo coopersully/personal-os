@@ -152,6 +152,14 @@ describe("Mail routes", () => {
       listRules: vi.fn(async () => []),
       listSetupContext: vi.fn(async () => ({ accounts: [], safety: {} })),
       listThreads: vi.fn(async () => [thread]),
+      navigationCounts: vi.fn(async () => ({
+        all: 250,
+        unread: 2,
+        starred: 1,
+        snoozed: 0,
+        sent: 3,
+        drafts: 0,
+      })),
       previewRule: vi.fn(async () => ({ candidates: [], matchedCount: 0, scannedCount: 1 })),
       previewSavedRule: vi.fn(async () => ({ candidates: [], matchedCount: 0, scannedCount: 1 })),
       snoozeThread: vi.fn(async () => undefined),
@@ -186,6 +194,11 @@ describe("Mail routes", () => {
     expect((await request("/v1/mail/drafts")).status).toBe(200);
     expect((await request("/v1/mail/rules")).status).toBe(200);
     expect((await request("/v1/mail/threads?limit=10")).status).toBe(200);
+    const counts = await request(`/v1/mail/counts?accountIds=${accountId}`);
+    expect(counts.status).toBe(200);
+    expect(await counts.json()).toMatchObject({ counts: { all: 250 } });
+    expect(mail.navigationCounts).toHaveBeenCalledWith(id, [accountId]);
+
     expect((await request(`/v1/mail/threads/${id}`)).status).toBe(200);
     expect((await request(`/v1/mail/threads/${id}/messages`)).status).toBe(200);
     expect(
@@ -327,5 +340,8 @@ describe("Mail routes", () => {
       ).status,
     ).toBe(403);
     expect((await request("/v1/mail/drafts", { body: "{}", method: "POST" })).status).toBe(403);
+    scopes = new Set<AccessScope>(["mail:write"]);
+    expect((await request("/v1/mail/counts")).status).toBe(403);
+    expect(mail.navigationCounts).toHaveBeenCalledTimes(1);
   });
 });

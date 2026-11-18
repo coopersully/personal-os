@@ -10,20 +10,32 @@ export const taskWorkspaceQuerySchema = paginationSchema
     view: z.enum(["all", "today", "upcoming", "history", "trash"]).default("all"),
     kind: z.enum(["all", "task", "reminder"]).default("all"),
     // Omission means open in active views, all in History/Trash.
-    status: z.enum(["all", "open", "completed", "cancelled", "archived"]).optional(),
+    status: z
+      .enum(["all", "open", "open_and_completed", "completed", "cancelled", "archived"])
+      .optional(),
     listId: idSchema.optional(),
     projectId: idSchema.optional(),
     query: z.string().trim().min(1).max(200).optional(),
     priority: reminderPrioritySchema.optional(),
     tag: z.string().trim().min(1).max(60).optional(),
-    due: z.enum(["any", "overdue", "none", "dated"]).default("any"),
+    due: z.enum(["any", "today", "overdue", "none", "dated"]).default("any"),
     reserved: z.enum(["any", "none", "scheduled"]).default("any"),
     dueAfter: isoDateTimeSchema.optional(),
     dueBefore: isoDateTimeSchema.optional(),
     scheduledAfter: isoDateTimeSchema.optional(),
     scheduledBefore: isoDateTimeSchema.optional(),
     sort: z
-      .enum(["default", "date", "reserved", "priority", "newest", "oldest", "title", "estimate"])
+      .enum([
+        "auto",
+        "default",
+        "date",
+        "reserved",
+        "priority",
+        "newest",
+        "oldest",
+        "title",
+        "estimate",
+      ])
       .default("default"),
     group: z.enum(["none", "date", "list", "project"]).default("none"),
   })

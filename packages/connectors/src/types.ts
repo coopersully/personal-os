@@ -174,6 +174,8 @@ export type SyncResult = CredentialResult<{
 }>;
 
 export type MailSyncResult = CredentialResult<{
+  /** More work, or a quota cooldown, remains; this pass does not establish freshness. */
+  continuation?: { notBefore: string; deferred?: boolean };
   deletedThreadIds: string[];
   mailboxes: RemoteMailbox[];
   nextSyncToken: string | null;
@@ -221,6 +223,7 @@ export type SendRemoteMailInput = {
 };
 
 export type ProviderOperationOptions = {
+  persistGoogleCredentials?: (credentials: GoogleCredentials) => Promise<GoogleCredentials>;
   deadlineMs?: number;
   signal?: AbortSignal;
 };
@@ -235,6 +238,12 @@ export function throwIfProviderOperationCancelled(operation?: ProviderOperationO
 export type GoogleAuthorizationService = "calendar" | "mail";
 
 export type GoogleConnector = {
+  downloadMailAttachment?: (
+    credentials: GoogleCredentials,
+    messageId: string,
+    attachment: MailAttachment,
+    operation?: ProviderOperationOptions,
+  ) => Promise<CredentialResult<Uint8Array>>;
   authorizationUrl: (
     state: string,
     codeChallenge: string,
@@ -322,6 +331,12 @@ export type GoogleConnector = {
 };
 
 export type ICloudConnector = {
+  downloadMailAttachment?: (
+    credentials: ICloudCredentials,
+    messageId: string,
+    attachment: MailAttachment,
+    operation?: ProviderOperationOptions,
+  ) => Promise<Uint8Array>;
   createEvent: (
     credentials: ICloudCredentials,
     remoteCalendarId: string,

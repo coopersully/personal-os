@@ -6,8 +6,10 @@ import {
   financeReimbursementMatches,
   financeReimbursements,
   financeTransactionAllocations,
+  financeTransactionCoverage,
   financeTransactionRelationships,
   financeTransactions,
+  users,
 } from "@personal-os/database";
 import {
   type FinancePositionEvidence,
@@ -15,14 +17,23 @@ import {
   financePositionEvidenceSchema,
   financeProvenanceSchema,
 } from "@personal-os/domain";
-import { eq } from "drizzle-orm";
+import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import { AppError } from "../errors.js";
+import { budgetPlanningDate } from "./budget-plan-projection.js";
+import type { FinanceTransaction } from "./context.js";
 import { buildFinancePosition, type PositionAccount, positionRevision } from "./position.js";
 import type { RecognitionInput } from "./recognition.js";
+import { requireScopedLedgerScope, type ScopedFinanceLedger } from "./scoped-ledger-reader.js";
+import { spendingDateCoverage } from "./spending-coverage.js";
 
 /** Read-only producer. Authenticated composition supplies userId, never a request payload. */
 export function createFinancePositionService(input: { db: Database; now: () => Date }) {
-  async function readSnapshot(userId: string, requestedScope: FinancePositionReadScope) {
+  async function readSnapshot(
+    userId: string,
+    requestedScope: FinancePositionReadScope,
+    executor?: FinanceTransaction,
+    ledger?: ScopedFinanceLedger,
+  ) {
     const asOf = input.now().toISOString();
     const scopeResult = financePositionEvidenceSchema.shape.scope.safeParse({
       ...requestedScope,
@@ -37,7 +48,16 @@ export function createFinancePositionService(input: { db: Database; now: () => D
     if (validatedScope.from > validatedScope.through) {
       throw new AppError("invalid_request", "Position scope dates are reversed.");
     }
-    return input.db.transaction(
+    if (ledger) {
+      if (!executor)
+        throw new AppError("conflict", "A scoped ledger requires its caller transaction.");
+      requireScopedLedgerScope(ledger, userId, validatedScope);
+    }
+    const read = <T>(
+      fn: (tx: FinanceTransaction) => Promise<T>,
+      options: Parameters<Database["transaction"]>[1],
+    ) => (executor ? fn(executor) : input.db.transaction(fn, options));
+    return read(
       async (tx) => {
         const accountRows = await tx
           .select()
@@ -47,30 +67,42 @@ export function createFinancePositionService(input: { db: Database; now: () => D
           .select()
           .from(financeProviderItems)
           .where(eq(financeProviderItems.userId, userId));
-        const transactions = await tx
-          .select()
-          .from(financeTransactions)
-          .where(eq(financeTransactions.userId, userId));
-        const allocations = await tx
-          .select()
-          .from(financeTransactionAllocations)
-          .where(eq(financeTransactionAllocations.userId, userId));
-        const reimbursements = await tx
-          .select()
-          .from(financeReimbursements)
-          .where(eq(financeReimbursements.userId, userId));
-        const matches = await tx
-          .select()
-          .from(financeReimbursementMatches)
-          .where(eq(financeReimbursementMatches.userId, userId));
-        const rows = await tx
-          .select()
-          .from(financeTransactionRelationships)
-          .where(eq(financeTransactionRelationships.userId, userId));
-        const events = await tx
-          .select()
-          .from(financeEconomicEvents)
-          .where(eq(financeEconomicEvents.userId, userId));
+        const transactions =
+          ledger?.transactions ??
+          (await tx
+            .select()
+            .from(financeTransactions)
+            .where(eq(financeTransactions.userId, userId)));
+        const allocations =
+          ledger?.allocations ??
+          (await tx
+            .select()
+            .from(financeTransactionAllocations)
+            .where(eq(financeTransactionAllocations.userId, userId)));
+        const reimbursements =
+          ledger?.reimbursements ??
+          (await tx
+            .select()
+            .from(financeReimbursements)
+            .where(eq(financeReimbursements.userId, userId)));
+        const matches =
+          ledger?.matches ??
+          (await tx
+            .select()
+            .from(financeReimbursementMatches)
+            .where(eq(financeReimbursementMatches.userId, userId)));
+        const rows =
+          ledger?.relationships ??
+          (await tx
+            .select()
+            .from(financeTransactionRelationships)
+            .where(eq(financeTransactionRelationships.userId, userId)));
+        const events =
+          ledger?.events ??
+          (await tx
+            .select()
+            .from(financeEconomicEvents)
+            .where(eq(financeEconomicEvents.userId, userId)));
         const ownedIds = new Set(accountRows.map((account) => account.id));
         if (validatedScope.accountIds.some((id) => !ownedIds.has(id))) {
           throw new AppError("not_found", "The position account was not found.");
@@ -88,6 +120,24 @@ export function createFinancePositionService(input: { db: Database; now: () => D
               ? [...ownedIds].toSorted()
               : [...new Set(validatedScope.accountIds)].toSorted(),
         };
+        const [owner] = await tx
+          .select({ timezone: users.planningTimezone })
+          .from(users)
+          .where(eq(users.id, userId));
+        if (!owner) throw new AppError("not_found", "The position owner was not found.");
+        const today = budgetPlanningDate(new Date(asOf), owner.timezone);
+        const observedThrough = scope.through < today ? scope.through : today;
+        const coverageRows = await tx
+          .select()
+          .from(financeTransactionCoverage)
+          .where(
+            and(
+              eq(financeTransactionCoverage.userId, userId),
+              inArray(financeTransactionCoverage.accountId, scope.accountIds),
+              lte(financeTransactionCoverage.fromDate, observedThrough),
+              gte(financeTransactionCoverage.throughDate, scope.from),
+            ),
+          );
         const itemById = new Map(items.map((item) => [item.id, item]));
         const accounts: PositionAccount[] = accountRows.map((row) => {
           const item = row.providerItemRecordId
@@ -135,6 +185,53 @@ export function createFinancePositionService(input: { db: Database; now: () => D
             },
           };
         });
+        const planningAccounts = accounts.filter(
+          (account) => account.includeInPlanning && scope.accountIds.includes(account.id),
+        );
+        const planningIds = new Set(planningAccounts.map((account) => account.id));
+        const coverage = coverageRows.filter(
+          (row) =>
+            planningIds.has(row.accountId) &&
+            row.fromDate <= observedThrough &&
+            row.throughDate >= scope.from,
+        );
+        const coverageByAccount = new Map<string, typeof coverage>();
+        for (const row of coverage) {
+          const group = coverageByAccount.get(row.accountId) ?? [];
+          group.push(row);
+          coverageByAccount.set(row.accountId, group);
+        }
+        // Merge explicit intervals, without scanning every requested calendar day
+        // or repeatedly comparing every account against every coverage row.
+        const from = Date.parse(`${scope.from}T00:00:00Z`);
+        const through = Date.parse(`${observedThrough}T00:00:00Z`);
+        const completeCoverage =
+          scope.from <= observedThrough &&
+          planningAccounts.length > 0 &&
+          planningAccounts.every((account) => {
+            let coveredThrough = from - 86_400_000;
+            const intervals = (coverageByAccount.get(account.id) ?? []).toSorted((a, b) =>
+              a.fromDate.localeCompare(b.fromDate),
+            );
+            for (const row of intervals) {
+              if (
+                spendingDateCoverage({
+                  userId,
+                  accounts: [account],
+                  date: row.fromDate,
+                  timezone: owner.timezone,
+                  asOf,
+                  intervals: [row],
+                }) !== "complete"
+              )
+                continue;
+              const start = Date.parse(`${row.fromDate}T00:00:00Z`);
+              if (start > coveredThrough + 86_400_000) return false;
+              coveredThrough = Math.max(coveredThrough, Date.parse(`${row.throughDate}T00:00:00Z`));
+              if (coveredThrough >= through) return true;
+            }
+            return false;
+          });
         const eventById = new Map(events.map((event) => [event.id, event]));
         const relationships: RecognitionInput["relationships"] = rows.flatMap((row) => {
           const event = eventById.get(row.economicEventId);
@@ -219,7 +316,11 @@ export function createFinancePositionService(input: { db: Database; now: () => D
         };
         // Sort all row sets before hashing so database ordering cannot create a new revision.
         const activityRevision = positionRevision({
+          ...(ledger ? { scopedLedgerRevision: ledger.revision } : {}),
           scope,
+          timezone: owner.timezone,
+          observedThrough,
+          coverage: coverage.toSorted((a, b) => a.id.localeCompare(b.id)),
           transactions: activityInput.transactions.toSorted((a, b) => a.id.localeCompare(b.id)),
           allocations: activityInput.allocations.toSorted((a, b) => a.id.localeCompare(b.id)),
           relationships: relationships.toSorted((a, b) => a.id.localeCompare(b.id)),
@@ -235,7 +336,9 @@ export function createFinancePositionService(input: { db: Database; now: () => D
           accounts,
           asOf,
           scope,
+          period: { from: scope.from, through: observedThrough },
           activitySource: { id: userId, revision: activityRevision },
+          activityCoverageReasons: completeCoverage ? [] : ["incomplete_evidence"],
         });
       },
       { isolationLevel: "repeatable read", accessMode: "read only" },
@@ -244,8 +347,10 @@ export function createFinancePositionService(input: { db: Database; now: () => D
   async function readPosition(
     userId: string,
     scope: FinancePositionReadScope,
+    executor?: FinanceTransaction,
+    ledger?: ScopedFinanceLedger,
   ): Promise<FinancePositionEvidence> {
-    return (await readSnapshot(userId, scope)).position;
+    return (await readSnapshot(userId, scope, executor, ledger)).position;
   }
   return { readPosition, readSnapshot };
 }

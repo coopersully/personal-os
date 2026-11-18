@@ -1,3 +1,4 @@
+import { useModalRecoveryPriority } from "../modal-recovery-priority";
 import * as React from "react";
 import { Drawer as DrawerPrimitive } from "vaul";
 
@@ -6,7 +7,8 @@ import { cn } from "@/lib/utils";
 function Drawer({
   ...props
 }: React.ComponentProps<typeof DrawerPrimitive.Root>) {
-  return <DrawerPrimitive.Root data-slot="drawer" {...props} />;
+  const recovery = useModalRecoveryPriority(props);
+  return <DrawerPrimitive.Root data-slot="drawer" {...props} {...recovery} />;
 }
 
 function DrawerTrigger({
@@ -59,7 +61,7 @@ function DrawerContent({
         )}
         {...props}
       >
-        <div className="mx-auto mt-4 hidden h-1 w-[100px] shrink-0 rounded-full bg-muted group-data-[vaul-drawer-direction=bottom]/drawer-content:block" />
+        <div data-slot="drawer-handle" className="mx-auto mt-4 hidden h-1 w-[100px] shrink-0 rounded-full bg-muted group-data-[vaul-drawer-direction=bottom]/drawer-content:block" />
         {children}
       </DrawerPrimitive.Content>
     </DrawerPortal>

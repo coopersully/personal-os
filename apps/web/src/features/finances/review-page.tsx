@@ -6,19 +6,36 @@ import {
   financeReviewResolutionSchema,
   idSchema,
 } from "@personal-os/domain";
-import { EmptyState, Spinner } from "@personal-os/ui";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { EmptyState } from "@personal-os/ui";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { CircleCheckIcon } from "@/components/icons";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
 import { SearchableSelect } from "@/components/searchable-select";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { api, errorMessage } from "../../api.js";
@@ -28,6 +45,7 @@ import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { FinanceContextualQuestionPage } from "./contextual-question.js";
 import { formatMoney } from "./format.js";
 import { requireFinanceResult } from "./position-material.js";
+import { FinanceReviewBacklog } from "./review-backlog.js";
 import { savedClarification } from "./review-note.js";
 import { FinanceAgentReviewQueue } from "./review-queue.js";
 import { TransactionSummary } from "./transaction-summary.js";
@@ -88,7 +106,9 @@ function TransactionEvidence({ id }: { id: string }) {
             {record?.merchant ?? "Open transaction"}
           </Link>
         </ItemTitle>
-        {transaction.isPending ? <Spinner label="Loading transaction evidence" /> : null}
+        {transaction.isPending ? (
+          <ContentSkeleton label="Loading transaction evidence" rows={3} />
+        ) : null}
         {transaction.error ? (
           <InlineError
             error={transaction.error}
@@ -132,7 +152,7 @@ function FinanceInboxReviewPage() {
   const result = inbox.data;
   const question = result?.communication.nextQuestion;
   const [searchParams, setSearchParams] = useSearchParams();
-  const requestedItem = searchParams.get("item");
+  const requestedItem = searchParams.get("item") ?? searchParams.get("case");
   const requestedQuestion = searchParams.get("question") ?? undefined;
   const requestedApproval = searchParams.get("approval") ?? undefined;
   const review =
@@ -162,6 +182,7 @@ function FinanceInboxReviewPage() {
   }
   return (
     <section aria-label="Finance review" className="grid gap-4">
+      <FinanceReviewBacklog />
       {inbox.error ? (
         <>
           <InlineError
@@ -174,7 +195,7 @@ function FinanceInboxReviewPage() {
           </Button>
         </>
       ) : null}
-      {inbox.isPending ? <Spinner label="Loading Finance Inbox" /> : null}
+      {inbox.isPending ? <ContentSkeleton label="Loading Finance Inbox" rows={3} /> : null}
       {result?.communication.requiredDisclosures.map((disclosure) => (
         <Alert key={disclosure.message}>
           <AlertDescription>{disclosure.message}</AlertDescription>
@@ -245,13 +266,222 @@ function FinanceInboxReviewPage() {
             <Link to="/finances/review/legacy">Earlier transaction reviews</Link>
           </Button>
           {olderOpen || targetedAgentWork ? (
-            <FinanceAgentReviewQueue
-              questionId={requestedQuestion}
-              approvalId={requestedApproval}
-            />
+            <>
+              <FinanceReviewHistory />
+              <FinanceAgentReviewQueue
+                questionId={requestedQuestion}
+                approvalId={requestedApproval}
+              />
+            </>
           ) : null}
         </CollapsibleContent>
       </Collapsible>
+    </section>
+  );
+}
+
+export function FinanceReviewHistory() {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const history = useInfiniteQuery({
+    queryKey: ["finance-review-history"],
+    initialPageParam: "",
+    queryFn: ({ pageParam }) =>
+      api.listFinanceReviewHistory({ limit: 20, ...(pageParam ? { cursor: pageParam } : {}) }),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+  });
+  const detail = useQuery({
+    queryKey: ["finance-review-history-item", selectedId],
+    queryFn: () => api.getFinanceReviewHistoryItem(selectedId ?? ""),
+    enabled: selectedId !== null,
+  });
+  const items = history.data?.pages.flatMap((page) => page.items) ?? [];
+  return (
+    <section aria-label="Finance review history" className="grid gap-3">
+      <h2 className="text-base font-medium">Review history</h2>
+      {history.isPending ? (
+        <ContentSkeleton label="Loading Finance review history" rows={3} />
+      ) : null}
+      {history.error ? (
+        <InlineError
+          error={history.error}
+          retry={() => history.refetch()}
+          stale={history.data !== undefined}
+        />
+      ) : null}
+      {!history.isPending && !history.error && items.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No review history yet.</p>
+      ) : null}
+      <ItemGroup>
+        {items.map((item) => (
+          <Item key={item.id}>
+            <ItemContent>
+              <ItemTitle>{item.context?.merchant ?? item.reason.replaceAll("_", " ")}</ItemTitle>
+              <ItemDescription>
+                {item.reason.replaceAll("_", " ")} ·{" "}
+                {new Date(item.firstSeenAt).toLocaleDateString()}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Badge variant="outline">{item.status}</Badge>
+              <Button size="sm" variant="outline" onClick={() => setSelectedId(item.id)}>
+                View evidence
+                <span className="sr-only"> for {item.context?.merchant ?? item.reason}</span>
+              </Button>
+            </ItemActions>
+          </Item>
+        ))}
+      </ItemGroup>
+      {history.hasNextPage ? (
+        <Button
+          className="justify-self-start"
+          disabled={history.isFetchingNextPage}
+          onClick={() => void history.fetchNextPage()}
+          variant="outline"
+        >
+          {history.isFetchingNextPage ? "Loading more…" : "Load more history"}
+        </Button>
+      ) : null}
+      <Dialog open={selectedId !== null} onOpenChange={(open) => !open && setSelectedId(null)}>
+        <DialogContent data-finance-dialog data-finance-size="wide">
+          <DialogHeader>
+            <DialogTitle>Finance review evidence</DialogTitle>
+            <DialogDescription>
+              Recorded context and the outcome for this exact review.
+            </DialogDescription>
+          </DialogHeader>
+          <ResponsiveDialogBody>
+            {detail.isPending ? <ContentSkeleton label="Loading review evidence" rows={3} /> : null}
+            {detail.error ? (
+              <InlineError
+                error={detail.error}
+                retry={() => detail.refetch()}
+                stale={detail.data !== undefined}
+              />
+            ) : null}
+            {detail.data ? (
+              <div className="grid gap-3 text-sm">
+                <p>{detail.data.prompt ?? detail.data.reason.replaceAll("_", " ")}</p>
+                <p>Status: {detail.data.status}</p>
+                {detail.data.archived ? (
+                  <p className="text-sm text-muted-foreground">
+                    Source removed. This review is retained as read-only history.
+                  </p>
+                ) : null}
+                {detail.data.transactionId && !detail.data.archived ? (
+                  <Link
+                    className="underline underline-offset-4"
+                    to={`/finances/transactions?transactionId=${encodeURIComponent(detail.data.transactionId)}`}
+                  >
+                    Open transaction
+                  </Link>
+                ) : null}
+                {detail.data.resolution ? (
+                  <FinanceReviewHistoryResolution
+                    resolution={detail.data.resolution}
+                    relatedAvailable={detail.data.relatedTransactionAvailable === true}
+                  />
+                ) : null}
+                {detail.data.resolutionProvenance?.actorType === "user" ? (
+                  <p>Recorded by you</p>
+                ) : detail.data.resolutionProvenance?.actorType === "agent" ? (
+                  <p>Recorded by an agent</p>
+                ) : null}
+                {detail.data.resolvedAt ? (
+                  <p>Resolved {new Date(detail.data.resolvedAt).toLocaleString()}</p>
+                ) : null}
+                {detail.data.context ? (
+                  <section aria-label="Source transaction context">
+                    <h3 className="font-medium">
+                      {detail.data.archived
+                        ? "Context when source was removed"
+                        : "Current source context"}
+                    </h3>
+                    <p>
+                      {detail.data.context.merchant} · {detail.data.context.date}
+                    </p>
+                    <p>
+                      {detail.data.context.accountName}
+                      {detail.data.context.institution
+                        ? ` · ${detail.data.context.institution}`
+                        : ""}
+                    </p>
+                    <p>
+                      {detail.data.context.amount}{" "}
+                      {detail.data.context.currencyCode ?? "Currency unavailable"} ·{" "}
+                      {detail.data.context.direction}
+                      {detail.data.context.pending ? " · Pending" : ""}
+                    </p>
+                  </section>
+                ) : null}
+                {detail.data.retainedQuestions?.map((question) => (
+                  <p key={question.id}>Question: {question.prompt}</p>
+                ))}
+                {detail.data.retainedAnswers?.map((answer) => (
+                  <p key={answer.id}>Recorded answer: {answer.text}</p>
+                ))}
+                <details>
+                  <summary>Source evidence</summary>
+                  <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs">
+                    {JSON.stringify(detail.data.evidence, null, 2)}
+                  </pre>
+                </details>
+              </div>
+            ) : null}
+          </ResponsiveDialogBody>
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
+}
+
+function FinanceReviewHistoryResolution({
+  resolution,
+  relatedAvailable,
+}: {
+  resolution: Record<string, unknown>;
+  relatedAvailable: boolean;
+}) {
+  const relatedTransactionId =
+    typeof resolution.relatedTransactionId === "string" &&
+    idSchema.safeParse(resolution.relatedTransactionId).success
+      ? resolution.relatedTransactionId
+      : null;
+  return (
+    <section className="grid gap-1" aria-label="Recorded outcome">
+      <h3 className="font-medium">Recorded outcome</h3>
+      {typeof resolution.type === "string" ? (
+        <p>Action: {resolution.type.replaceAll("_", " ")}</p>
+      ) : null}
+      {typeof resolution.answer === "string" ? <p>Recorded answer: {resolution.answer}</p> : null}
+      {typeof resolution.rationale === "string" ? <p>Reason: {resolution.rationale}</p> : null}
+      {typeof resolution.clarification === "string" ? (
+        <p>Clarification: {resolution.clarification}</p>
+      ) : null}
+      {typeof resolution.meaning === "string" ? <p>Meaning: {resolution.meaning}</p> : null}
+      {typeof resolution.relationship === "string" ? (
+        <p>Relationship: {resolution.relationship.replaceAll("_", " ")}</p>
+      ) : null}
+      {typeof resolution.categoryId === "string" ? (
+        <p>Category reference: {resolution.categoryId}</p>
+      ) : null}
+      {relatedTransactionId && relatedAvailable ? (
+        <Link
+          className="underline underline-offset-4"
+          to={`/finances/transactions?transactionId=${encodeURIComponent(relatedTransactionId)}`}
+        >
+          Open related transaction
+        </Link>
+      ) : relatedTransactionId ? (
+        <p>Related transaction reference: {relatedTransactionId} (source unavailable)</p>
+      ) : null}
+      {resolution.changes && typeof resolution.changes === "object" ? (
+        <details>
+          <summary>Profile changes</summary>
+          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs">
+            {JSON.stringify(resolution.changes, null, 2)}
+          </pre>
+        </details>
+      ) : null}
     </section>
   );
 }
@@ -301,6 +531,7 @@ export function ReviewQuestion({
     },
     onSuccess: (response) => {
       if (response.outcome === "failed") {
+        toast.error(response.communication.headline, { duration: Number.POSITIVE_INFINITY });
         requestKey.current = { signature: "", key: "" };
         return;
       }
@@ -373,7 +604,7 @@ export function ReviewQuestion({
         ) : null}
         {clarification ? (
           <Alert>
-            <AlertTitle>Note saved · awaiting maintenance</AlertTitle>
+            <AlertTitle>Note awaiting maintenance</AlertTitle>
             <AlertDescription>{clarification}</AlertDescription>
           </Alert>
         ) : null}
@@ -558,12 +789,6 @@ export function ReviewQuestion({
             </Field>
           </FieldGroup>
 
-          {mutation.data?.outcome === "failed" ? (
-            <Alert variant="destructive">
-              <AlertTitle>Answer not saved</AlertTitle>
-              <AlertDescription>{mutation.data.communication.headline}</AlertDescription>
-            </Alert>
-          ) : null}
           <Button
             className="justify-self-start"
             disabled={mutation.isPending || invalidAnswer || missingSelection}
@@ -610,7 +835,7 @@ function NearbyActivity({
         <p className="text-sm text-muted-foreground">
           Same account · {from} through {to}. Nearby activity does not establish a relationship.
         </p>
-        {nearby.isPending ? <Spinner label="Loading nearby activity" /> : null}
+        {nearby.isPending ? <ContentSkeleton label="Loading nearby activity" rows={3} /> : null}
         {nearby.error ? (
           <InlineError
             error={nearby.error}

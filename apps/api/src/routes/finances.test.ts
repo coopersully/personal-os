@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { errorResponse } from "../errors.js";
 import type { createFinanceBudgetPolicyService } from "../finance/budget-policy-service.js";
 import type { createFinancePositionService } from "../finance/position-service.js";
+import type { createFinanceActionService } from "../finance-action-service.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import type { FinancePeriodReviewService } from "../finance-period-review-service.js";
 import type { createFinanceService } from "../finance-service.js";
@@ -14,6 +15,148 @@ import { registerFinanceRoutes } from "./finances.js";
 const id = "11111111-1111-4111-8111-111111111111";
 
 describe("finance routes", () => {
+  it("admits source facts only through the action pipeline with read/write authority and the private presenting session", async () => {
+    const app = new Hono<AppEnv>();
+    let scopes = new Set<AccessScope>(["finances:read", "finances:write"]);
+    let actorType: "user" | "agent" = "user";
+    const performDirect = vi.fn(async () => ({ status: "applied", result: { entries: [] } }));
+    app.use("*", async (c, next) => {
+      c.set("principal", { actorId: id, actorType, scopes, userId: id });
+      await next();
+    });
+    app.onError(errorResponse);
+    registerFinanceRoutes({
+      app,
+      actions: { performDirect } as unknown as ReturnType<typeof createFinanceActionService>,
+      finances: {} as ReturnType<typeof createFinanceService>,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: {} as FinanceStatusService,
+      mutationContext: (c) => ({ principal: c.get("principal"), requestId: "admit-source" }),
+    });
+    const body = {
+      idempotencyKey: "source-admission",
+      targets: [
+        { transactionId: id, expectedTransactionRevision: "1", expectedAccountRevision: "2" },
+      ],
+    };
+    const send = (session = true, input: unknown = body) =>
+      app.request("/v1/finances/provider-transaction-evidence/admit", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(session ? { authorization: "Session synthetic-session" } : {}),
+        },
+        body: JSON.stringify(input),
+      });
+    const response = await send();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(performDirect).toHaveBeenLastCalledWith(
+      "transaction",
+      { ...body, operation: "admit_source_facts" },
+      expect.objectContaining({ sourceFactsSessionHash: expect.stringMatching(/^[a-f0-9]{64}$/) }),
+    );
+    expect((await send(false)).status).toBe(403);
+    expect((await send(true, { ...body, currencyCode: "USD" })).status).toBe(400);
+    scopes = new Set(["finances:read"]);
+    expect((await send()).status).toBe(403);
+    scopes = new Set(["finances:write"]);
+    expect((await send()).status).toBe(403);
+    scopes = new Set(["finances:read", "finances:write", "finances:execute"]);
+    actorType = "agent";
+    expect((await send(false)).status).toBe(200);
+    expect(performDirect).toHaveBeenCalledTimes(2);
+    expect(performDirect).toHaveBeenLastCalledWith(
+      "transaction",
+      { ...body, operation: "admit_source_facts" },
+      expect.not.objectContaining({ sourceFactsSessionHash: expect.anything() }),
+    );
+  });
+
+  it("reads historical evidence with read-only scope, exact presenting session and no-store", async () => {
+    const app = new Hono<AppEnv>();
+    let scopes = new Set<AccessScope>(["finances:read"]);
+    let actorType: "user" | "agent" = "user";
+    const readFinanceProviderTransactionEvidence = vi.fn(async () => ({
+      coverage: "unavailable",
+      reason: "not_initialized",
+    }));
+    app.use("*", async (c, next) => {
+      c.set("principal", { actorId: id, actorType, scopes, userId: id });
+      await next();
+    });
+    app.onError(errorResponse);
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: {} as FinanceStatusService,
+      finances: { readFinanceProviderTransactionEvidence } as unknown as ReturnType<
+        typeof createFinanceService
+      >,
+      mutationContext: (c) => ({ principal: c.get("principal"), requestId: "history-read" }),
+    });
+    const request = (body: unknown, session = true) =>
+      app.request("/v1/finances/provider-transaction-evidence", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(session ? { authorization: "Session synthetic-history-session" } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+    const response = await request({ transactionIds: [id] });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(readFinanceProviderTransactionEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: id }),
+      { transactionIds: [id] },
+      expect.stringMatching(/^[0-9a-f]{64}$/),
+    );
+    expect((await request({ transactionIds: [id], userId: id })).status).toBe(400);
+    expect((await request({ transactionIds: [id] }, false)).status).toBe(403);
+    actorType = "agent";
+    expect((await request({ transactionIds: [id] }, false)).status).toBe(200);
+    expect(readFinanceProviderTransactionEvidence).toHaveBeenLastCalledWith(
+      expect.objectContaining({ actorType: "agent" }),
+      { transactionIds: [id] },
+      undefined,
+    );
+    scopes = new Set();
+    expect((await request({ transactionIds: [id] })).status).toBe(403);
+    expect(readFinanceProviderTransactionEvidence).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads configuration only for the authenticated owner without write scope", async () => {
+    const app = new Hono<AppEnv>();
+    let scopes = new Set<AccessScope>(["finances:read"]);
+    const getFinanceConfiguration = vi
+      .fn()
+      .mockResolvedValue({ profile: { state: "loaded", value: null } });
+    app.use("*", async (context, next) => {
+      context.set("principal", { actorId: id, actorType: "user", scopes, userId: id });
+      context.set("requestId", "configuration-read");
+      await next();
+    });
+    app.onError(errorResponse);
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: {} as FinanceStatusService,
+      finances: { getFinanceConfiguration } as unknown as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+    const response = await app.request("/v1/finances/configuration?userId=foreign");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(getFinanceConfiguration).toHaveBeenCalledWith(id, "configuration-read");
+    scopes = new Set();
+    expect((await app.request("/v1/finances/configuration")).status).toBe(403);
+    expect(getFinanceConfiguration).toHaveBeenCalledTimes(1);
+  });
+
   it("reads canonical position evidence for the authenticated tenant and validates scope", async () => {
     const app = new Hono<AppEnv>();
     let scopes = new Set<AccessScope>(["finances:read"]);
@@ -73,7 +216,7 @@ describe("finance routes", () => {
     expect(readPosition).toHaveBeenCalledTimes(1);
   });
 
-  it("registers human-only budget policy reads and normalizes list pagination", async () => {
+  it("registers scoped budget policy reads and normalizes list pagination", async () => {
     const app = new Hono<AppEnv>();
     let actorType: "agent" | "user" = "user";
     const policy = {
@@ -118,17 +261,10 @@ describe("finance routes", () => {
     expect(getPolicy).toHaveBeenCalledWith(id, id);
 
     actorType = "agent";
-    const rejected = await app.request("/v1/finances/budget-policies?limit=25");
-
-    expect(rejected.status).toBe(403);
-    await expect(rejected.json()).resolves.toEqual({
-      error: {
-        code: "forbidden",
-        message: "This operation requires an interactive user session.",
-        requestId: "budget-policy-route",
-      },
-    });
-    expect(listPolicies).toHaveBeenCalledTimes(1);
+    const agentRead = await app.request("/v1/finances/budget-policies?limit=25");
+    expect(agentRead.status).toBe(200);
+    await expect(agentRead.json()).resolves.toEqual({ policies: [policy] });
+    expect(listPolicies).toHaveBeenCalledTimes(2);
   });
 
   it("forwards human budget policy lifecycle mutations with execution unavailable", async () => {
@@ -250,7 +386,10 @@ describe("finance routes", () => {
     expect(get).toHaveBeenCalledWith(id);
   });
 
-  it("parses account discovery filters and returns the structured account list", async () => {
+  it.each([
+    "user",
+    "agent",
+  ] as const)("parses account discovery and selects artwork for %s", async (actorType) => {
     const app = new Hono<AppEnv>();
     const listFinanceAccounts = vi.fn(async () => ({
       accounts: [],
@@ -265,7 +404,7 @@ describe("finance routes", () => {
     app.use("*", async (context, next) => {
       context.set("principal", {
         actorId: id,
-        actorType: "agent",
+        actorType,
         scopes: new Set(["finances:read"]),
         userId: id,
       });
@@ -288,20 +427,27 @@ describe("finance routes", () => {
     );
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ totals: { netWorth: 0 } });
-    expect(listFinanceAccounts).toHaveBeenCalledWith(id, {
-      includeExcluded: false,
-      kind: "investment",
-      query: "IRA",
-    });
+    expect(listFinanceAccounts).toHaveBeenCalledWith(
+      id,
+      {
+        includeExcluded: false,
+        kind: "investment",
+        query: "IRA",
+      },
+      actorType === "user",
+    );
   });
 
-  it("returns read-only Finance status for a parsed maintenance scope", async () => {
+  it.each([
+    "user",
+    "agent",
+  ] as const)("returns Finance status with appropriate artwork for %s", async (actorType) => {
     const app = new Hono<AppEnv>();
     const getFinanceStatus = vi.fn(async () => ({ domain: "finances" }));
     app.use("*", async (context, next) => {
       context.set("principal", {
         actorId: id,
-        actorType: "agent",
+        actorType,
         scopes: new Set(["finances:read"]),
         userId: id,
       });
@@ -326,16 +472,22 @@ describe("finance routes", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ status: { domain: "finances" } });
-    expect(getFinanceStatus).toHaveBeenCalledWith(id, {
-      type: "window",
-      start: "2026-08-01",
-      end: "2026-08-15",
-    });
+    expect(getFinanceStatus).toHaveBeenCalledWith(
+      id,
+      {
+        type: "window",
+        start: "2026-08-01",
+        end: "2026-08-15",
+      },
+      undefined,
+      actorType === "user",
+    );
   });
 
   it("compares scenarios on the read scope and forwards a complete budget plan", async () => {
     const app = new Hono<AppEnv>();
     const setBudgetPlan = vi.fn(async (input) => input);
+    const performDirect = vi.fn(async () => ({ status: "pending_review", review: { id } }));
     app.use("*", async (context, next) => {
       context.set("principal", {
         actorId: id,
@@ -351,6 +503,7 @@ describe("finance routes", () => {
       financeMaintenance: {} as FinanceMaintenanceService,
       financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
       finances: { setBudgetPlan } as unknown as ReturnType<typeof createFinanceService>,
+      actions: { performDirect } as unknown as ReturnType<typeof createFinanceActionService>,
       mutationContext: (context) => ({
         principal: context.get("principal"),
         requestId: context.get("requestId"),
@@ -380,15 +533,30 @@ describe("finance routes", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),
     });
-    expect(plan.status).toBe(200);
-    await expect(plan.json()).resolves.toMatchObject({ plan: input });
-    expect(setBudgetPlan).toHaveBeenCalledWith(
+    expect(plan.status).toBe(202);
+    await expect(plan.json()).resolves.toMatchObject({ status: "pending_review", review: { id } });
+    expect(setBudgetPlan).not.toHaveBeenCalled();
+    const categoryInput = { category: "Food", limit: 100, month: "2026-08" };
+    const category = await app.request("/v1/finances/budgets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(categoryInput),
+    });
+    expect(category.status).toBe(202);
+    await expect(category.json()).resolves.toMatchObject({ status: "pending_review" });
+    expect(performDirect).toHaveBeenCalledWith(
+      "budget_plan",
+      expect.objectContaining(categoryInput),
+      expect.objectContaining({ requestId: "finance-plan" }),
+    );
+    expect(performDirect).toHaveBeenCalledWith(
+      "budget_plan",
       expect.objectContaining(input),
       expect.objectContaining({ requestId: "finance-plan" }),
     );
   });
 
-  it("keeps setup and owned attention agent-accessible while provider, account, and approval actions stay human-only", async () => {
+  it("keeps setup and owned attention agent-accessible while sensitive actions without execution authority stay denied", async () => {
     const app = new Hono<AppEnv>();
     const finances = {
       createAccount: vi.fn(),
@@ -476,7 +644,9 @@ describe("finance routes", () => {
     for (const response of humanOnlyResponses) {
       expect(response.status).toBe(403);
       await expect(response.json()).resolves.toMatchObject({
-        error: expect.stringMatching(/interactive user session|waiting for review/),
+        error: expect.stringMatching(
+          /interactive user session|waiting for review|execution authority/,
+        ),
       });
     }
     const queued = await app.request("/v1/finances/budgets", {
@@ -491,7 +661,7 @@ describe("finance routes", () => {
       expect.objectContaining({ category: "Housing" }),
       expect.objectContaining({ requestId: "request-1" }),
     );
-    expect(finances.getGuidedSetupContext).toHaveBeenCalledWith(id);
+    expect(finances.getGuidedSetupContext).toHaveBeenCalledWith(id, false);
     expect(finances.proposeCategorizations).toHaveBeenCalledWith(
       id,
       expect.objectContaining({ limit: 50, review: "all" }),
@@ -837,6 +1007,13 @@ describe("finance routes", () => {
       expect((await app.request(`/v1/finances/${path}?id=`)).status).toBe(400);
       expect(read.mock.calls).toHaveLength(calls);
     }
+    const oversizedAnswer = await app.request(`/v1/finances/questions/${id}/answer`, {
+      body: JSON.stringify({ answer: "😀".repeat(2001) }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(oversizedAnswer.status).toBe(400);
+    expect(answerQuestion).not.toHaveBeenCalled();
     const answered = await app.request(`/v1/finances/questions/${id}/answer`, {
       body: JSON.stringify({ answer: JSON.stringify({ answer: { kind: "not_reimbursement" } }) }),
       headers: { "content-type": "application/json" },
@@ -1037,4 +1214,46 @@ describe("finance routes", () => {
     await expect(raw.json()).resolves.toEqual({ review });
     expect(getOwned).toHaveBeenCalledTimes(2);
   });
+});
+
+it("creates categories only for the authenticated human with write access", async () => {
+  const app = new Hono<AppEnv>();
+  let actorType: "user" | "agent" = "user";
+  let scopes = new Set<AccessScope>(["finances:write"]);
+  const createCategory = vi.fn().mockResolvedValue({ id, name: "Hobbies" });
+  app.use("*", async (context, next) => {
+    context.set("principal", { actorId: id, actorType, scopes, userId: id });
+    context.set("requestId", "category-create");
+    await next();
+  });
+  app.onError(errorResponse);
+  registerFinanceRoutes({
+    app,
+    finances: { createCategory } as unknown as ReturnType<typeof createFinanceService>,
+    financeMaintenance: {} as FinanceMaintenanceService,
+    financeStatus: {} as FinanceStatusService,
+    mutationContext: (context) => ({
+      principal: context.get("principal"),
+      requestId: context.get("requestId"),
+    }),
+  });
+  const send = (body: unknown) =>
+    app.request("/v1/finances/categories", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  expect((await send({ name: "  Hobbies  " })).status).toBe(200);
+  expect(createCategory).toHaveBeenCalledWith(
+    { name: "Hobbies" },
+    expect.objectContaining({ principal: expect.objectContaining({ userId: id }) }),
+  );
+  expect((await send({ name: " " })).status).toBe(400);
+  expect((await send({ name: "Hobbies", userId: "foreign" })).status).toBe(400);
+  actorType = "agent";
+  expect((await send({ name: "Hobbies" })).status).toBe(403);
+  actorType = "user";
+  scopes = new Set(["finances:read"]);
+  expect((await send({ name: "Hobbies" })).status).toBe(403);
+  expect(createCategory).toHaveBeenCalledTimes(1);
 });

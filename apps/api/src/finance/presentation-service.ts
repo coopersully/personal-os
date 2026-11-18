@@ -208,7 +208,7 @@ export function withFinanceInboxPresentation(
     kind: "finance_review",
     prompt: question.prompt,
     reason: reviewReasonLabels[review.reason],
-    summary: "Ilo needs one answer before it can resolve this item safely.",
+    summary: "nohmi needs one answer before it can resolve this item safely.",
     title: "A transaction needs your input",
   });
 }

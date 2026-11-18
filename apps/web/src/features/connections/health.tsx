@@ -1,8 +1,52 @@
-import type { ConnectedAccountHealth } from "@personal-os/domain";
+import type { ConnectedAccountHealth, ConnectorCapabilities } from "@personal-os/domain";
 import { AlertTriangleIcon, LinkOffIcon, RefreshIcon } from "@/components/icons";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Badge } from "../../components/ui/badge.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
+
+export function ConnectionCapabilityHealth({
+  capabilities,
+  enabled,
+  fallback,
+}: {
+  capabilities: ConnectorCapabilities;
+  enabled: { calendar: boolean; mail: boolean };
+  fallback: { health: ConnectedAccountHealth; lastSyncedAt: string | null };
+}) {
+  return (
+    <dl className="flex flex-col gap-2">
+      {(["calendar", "mail"] as const).map((capability) => {
+        if (!enabled[capability]) return null;
+        const value = capabilities[capability] ?? fallback;
+        return (
+          <div key={capability}>
+            <dt className="flex items-center gap-2">
+              <strong>{capability === "calendar" ? "Calendar" : "Mail"}</strong>
+              <ConnectionHealthBadge health={value.health} />
+            </dt>
+            <dd>
+              <ConnectionHealthDescription
+                health={value.health}
+                lastSyncedAt={value.lastSyncedAt}
+              />
+            </dd>
+            <dd className="text-xs">
+              {value.lastSyncedAt ? (
+                <>
+                  Last successful sync:{" "}
+                  <time dateTime={value.lastSyncedAt}>
+                    {new Date(value.lastSyncedAt).toLocaleString()}
+                  </time>
+                </>
+              ) : (
+                "No successful sync recorded yet."
+              )}
+            </dd>
+          </div>
+        );
+      })}
+    </dl>
+  );
+}
 
 export function ConnectionHealthBadge({ health }: { health: ConnectedAccountHealth }) {
   if (health.state === "syncing") {
@@ -61,35 +105,6 @@ export function ConnectionHealthDescription({
     return <>{health.message ?? "nohmi is resolving a connection issue."}</>;
   }
   return <>{lastSyncedAt ? `Synced ${formatRelativeTime(lastSyncedAt, now)}` : "Ready to sync"}</>;
-}
-
-export function ConnectionRecoveryAlert({
-  accounts,
-}: {
-  accounts: Array<{
-    health?: ConnectedAccountHealth;
-    id: string;
-    label: string;
-    syncStatus?: string;
-  }>;
-}) {
-  const reconnecting = accounts.filter(
-    (account) => connectionHealth(account).state === "reconnect",
-  );
-  if (reconnecting.length === 0) return null;
-  return (
-    <Alert variant="warning">
-      <AlertTriangleIcon aria-hidden="true" />
-      <AlertTitle>Reconnect {reconnecting.length === 1 ? "an account" : "accounts"}</AlertTitle>
-      <AlertDescription>
-        {reconnecting.map((account) => account.label).join(", ")} needs authorization before new
-        information can sync.
-      </AlertDescription>
-      <AlertAction>
-        <a href="/settings?section=connections">Review connections</a>
-      </AlertAction>
-    </Alert>
-  );
 }
 
 export function connectionHealth(account: {

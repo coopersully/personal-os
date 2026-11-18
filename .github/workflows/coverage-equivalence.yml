@@ -1,0 +1,123 @@
+name: Coverage equivalence
+
+# CI splits the Node tests across machines and merges raw V8 coverage before
+# conversion (scripts/coverage-shard-provider.mjs). This workflow keeps that honest:
+# it runs the suite once on one machine, runs the same shards CI runs, and fails if
+# the two reports disagree. It runs whenever the coverage machinery or its
+# dependencies change, weekly, and on request. It is evidence, not a merge gate.
+on:
+  pull_request:
+    paths:
+      - vitest.config.ts
+      - vitest.setup.ts
+      - scripts/coverage-shard-provider.mjs
+      - scripts/merge-coverage-shards.mjs
+      - scripts/compare-coverage.mjs
+      - package.json
+      - pnpm-lock.yaml
+      - .github/workflows/ci.yml
+      - .github/workflows/coverage-equivalence.yml
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coverage-equivalence-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  single:
+    name: Single-run coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v7
+        with:
+          cache: pnpm
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:coverage
+        timeout-minutes: 30
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-single-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            coverage/coverage-final.json
+            coverage/coverage-summary.json
+          if-no-files-found: error
+          retention-days: 7
+
+  shards:
+    name: Shard coverage (${{ matrix.shard }}/6)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v7
+        with:
+          cache: pnpm
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - env:
+          NOHMI_COVERAGE_SHARD_DIR: ${{ runner.temp }}/coverage-shards/${{ matrix.shard }}
+        run: pnpm test:coverage:shard --shard=${{ matrix.shard }}/6
+        timeout-minutes: 15
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-shard-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/coverage-shards/${{ matrix.shard }}/
+          if-no-files-found: error
+          retention-days: 1
+
+  compare:
+    name: Compare merged and single-run coverage
+    needs: [single, shards]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v7
+        with:
+          cache: pnpm
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-shard-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: ${{ runner.temp }}/coverage-shards
+      - uses: actions/download-artifact@v8
+        with:
+          name: coverage-single-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/coverage-single
+      - id: merge
+        env:
+          NOHMI_COVERAGE_SHARD_DIR: ${{ runner.temp }}/coverage-shards
+        run: pnpm test:coverage:merge
+      - name: Require the merged report the comparison reads
+        if: ${{ steps.merge.outcome == 'success' && hashFiles('coverage/coverage-final.json') == '' }}
+        run: |
+          echo "::error::The merge succeeded without writing coverage/coverage-final.json; nothing was compared."
+          exit 1
+      # A merge that misses the floors where the single run met them is the case
+      # this comparison exists for: still print it. The failed merge fails the job.
+      - if: ${{ always() && steps.merge.outcome != 'skipped' && hashFiles('coverage/coverage-final.json') != '' }}
+        # The explicit shell enables pipefail, so a failed comparison fails the step.
+        shell: bash
+        run: node scripts/compare-coverage.mjs "$RUNNER_TEMP/coverage-single/coverage-final.json" coverage/coverage-final.json | tee -a "$GITHUB_STEP_SUMMARY"

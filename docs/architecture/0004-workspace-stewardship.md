@@ -54,8 +54,10 @@ A rule preview records each proposal's immutable version or fingerprint, conditi
 selection, representative matches and non-matches, action, consequences, conflicts/precedence,
 authority requirement, and disable/rollback behavior. Large proposal sets may be grouped and
 paginated, but every rule remains individually inspectable and deselectable. Any proposal or sample
-drift invalidates the preview; setup completion and global review bypass cannot activate an action
-rule.
+drift invalidates the preview; setup completion cannot activate an action rule. The later
+[explicit execution contract](../engineering/workspace-agent-capabilities.md) permits registered
+agent rule activation with opt-in execution grants and owner-enabled review bypass. Bypass alone
+cannot activate a rule or replace its exact version and current preview evidence.
 
 ## Package responsibilities
 
@@ -77,6 +79,13 @@ Centralized Settings owns global policy, channels, connected-agent credentials/s
 Knowledge controls, and unified Reviews, plus a read-only cross-workspace overview that deep-links
 to exact domain controls. It must not persist or render a second editable copy of workspace-owned
 configuration.
+
+**Reviews placement supersession:** the paragraph above records the original ownership decision.
+The accepted October 1 [Settings architecture](../design/pages/settings-architecture.md) supersedes
+its Settings-owned Reviews placement; the current [workspace Reviews flow](../design/pages/reviews.md)
+retains domain-owned actions. Texting’s accepted cross-workspace destination is still unimplemented,
+and legacy central links fall back to Account. Preserve that target/implementation distinction;
+this historical ADR does not establish a working central Reviews route.
 
 Shared User Knowledge, context assembly, and promotion policy follow
 [`ADR 0005`](0005-user-knowledge.md). Workspaces declare the context they need but do not duplicate

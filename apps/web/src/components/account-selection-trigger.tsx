@@ -1,7 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { LinkOffIcon } from "@/components/icons";
-import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
+import { ActionButton as Button } from "@/components/action-button";
 import {
   PopoverContent,
   PopoverDescription,
@@ -9,20 +7,16 @@ import {
   PopoverTitle,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-
-export interface AccountSelectionIdentity {
-  avatarUrl?: string | null | undefined;
-  fallback: string;
-  id: string;
-}
+import { LayersIcon, UsersIcon } from "./icons";
+import { Badge } from "./ui/badge";
 
 type AccountSelectionTriggerProps = Omit<
   ComponentProps<typeof Button>,
   "aria-label" | "children"
 > & {
   ariaLabel: string;
-  identities: AccountSelectionIdentity[];
   needsAttention?: boolean;
+  allSynced?: boolean;
   selectedCount: number;
   totalCount: number;
 };
@@ -31,39 +25,38 @@ export function AccountSelectionTrigger({
   ariaLabel,
   className,
   disabled,
-  identities,
   needsAttention = false,
+  allSynced = false,
   selectedCount,
   totalCount,
+  variant: _variant,
+  tooltip,
   ...buttonProps
 }: AccountSelectionTriggerProps) {
   return (
     <Button
       {...buttonProps}
       aria-label={ariaLabel}
-      className={cn("account-selection-trigger", className)}
+      tooltip={
+        tooltip ??
+        `${ariaLabel}${allSynced && !needsAttention ? ", all accounts connected and syncing" : ""}`
+      }
+      className={cn("account-selection-trigger relative", className)}
       disabled={disabled}
-      size="sm"
+      size="icon"
       variant="ghost"
+      badgeCount={selectedCount === totalCount ? 0 : selectedCount}
     >
-      {needsAttention ? (
-        <LinkOffIcon
-          aria-hidden="true"
-          className="account-selection-trigger__warning"
-          weight="Filled"
-        />
+      {selectedCount === totalCount ? (
+        <LayersIcon aria-hidden="true" />
+      ) : (
+        <UsersIcon aria-hidden="true" />
+      )}
+      {selectedCount === 0 && totalCount > 0 ? (
+        <Badge className="action-count-badge" aria-hidden="true">
+          0
+        </Badge>
       ) : null}
-      <AvatarGroup className="account-selection-trigger__avatars">
-        {identities.map((identity) => (
-          <Avatar key={identity.id} size="sm">
-            {identity.avatarUrl ? <AvatarImage alt="" src={identity.avatarUrl} /> : null}
-            <AvatarFallback>{identity.fallback}</AvatarFallback>
-          </Avatar>
-        ))}
-      </AvatarGroup>
-      <span aria-hidden="true" className="account-selection-trigger__count">
-        {selectedCount}/{totalCount} accounts
-      </span>
     </Button>
   );
 }

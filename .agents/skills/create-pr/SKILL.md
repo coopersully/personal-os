@@ -21,8 +21,9 @@ auto-merge, or mutate another Linear Project.
   existing PR unless the readiness gate supports changing it.
 - Detect an open PR for the current branch before creating one. Refine it instead of opening a
   duplicate.
-- Treat `pnpm verify` as the required pre-review verifier. A maintainer may explicitly authorize a
-  narrower check, but the gap remains visible.
+- Follow `docs/engineering/development-handbook.md` and `delivery-verification.md`: focused
+  checks support draft publication and review convergence; complete frozen-candidate verification
+  is required before merge. Publishing never supplies missing acceptance evidence.
 - Keep title/body-only drafting requests read-only: report proposed relationships, but do not create
   or update Linear issues, branches, commits, or PRs.
 - Prefer connected GitHub and Linear tools for their records. Use local `git` and `gh` for branch,
@@ -92,8 +93,19 @@ GitHub issue as a substitute for required Nohmi Linear coverage.
 ### 4. Verify
 
 - Run focused checks while implementing.
-- Run `pnpm lint` before pushing.
-- Run `pnpm verify` before requesting review or publishing as ready.
+- Run changed-file formatting/lint and affected contract checks before pushing; retain full lint
+  in final verification. See `docs/engineering/verification-efficiency.md`.
+- **Before hosted publication:** retain completed applicable native formatting/import checks for
+  the final file bytes, using the existing pinned tool and own configuration. A planned or late
+  check is not proof. Validate the exact body with `.codex/scripts/check-pr-body.sh` and reconcile
+  its live Nohmi Project/direct issues before PR creation. Bundle fixture invariant review with
+  this pass where applicable; do not add a review panel. If formatting writes, check the final file.
+- Reuse authoring evidence only while command/file/tool/config/dependency identity is unchanged and
+  no newer relevant failure exists. Do not demand fresh lint solely for a new commit or base.
+  Refresh changed or comparison-sensitive inputs and preserve newer failures.
+  This does not narrow full frozen-candidate acceptance or grant publication outside assigned scope.
+- Early review and draft publication need focused evidence with gaps recorded. After convergence,
+  freeze/commit and obtain complete local or equivalent hosted verification before merge.
 - Fix failures and rerun the relevant stage, then the required verifier.
 - Record every exact command, outcome, what it proves, and any explicitly authorized gap.
 - Re-inspect the final diff for unrelated changes, secrets, generated output, and accidental churn.
@@ -143,7 +155,8 @@ Re-read the published PR, head SHA, checks, and every direct Linear issue. Confi
 - only intended files were committed and current docs match the change;
 - the Work map links the live Nohmi Project, milestone when present, and every direct issue;
 - every direct issue has the structured PR backlink and least advanced supported status;
-- `pnpm verify` passed or the explicitly authorized gap is documented;
+- focused publication evidence is current and pending final verification is explicit; complete
+  frozen-candidate verification is required before merge, not each draft update;
 - title, body, diff, verification, docs, and Linear comments make no unsupported claim; and
 - every reported artifact has a real URL.
 
@@ -161,3 +174,11 @@ commit SHA, PR state/URL, Nohmi Project and milestone, every direct Linear issue
 structured backlink result, duplicate-search result, checks, docs, risks, audit path, and blockers.
 
 Do not claim a PR, Linear write, link, comment, or check succeeded without verifying it.
+
+## Shipping verification policy
+
+For an authorized ship-it run, follow `docs/engineering/delivery-verification.md`: converge review
+with focused checks, freeze/commit the candidate, then obtain complete local or equivalent hosted
+verification. This replaces duplicate full-suite invocations in the steps above; it does not waive
+any required check, unexplained failure, or issue-specific acceptance. Local `pnpm verify` uses the
+shared host runner. Metadata-only changes refresh metadata gates, not unchanged source verification.

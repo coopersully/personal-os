@@ -29,6 +29,11 @@ Product context
 
 ## Field contracts
 
+- When login has a validated local `next` destination, show a quiet dismissible
+  “After login” tag below the heading with the destination’s readable page name.
+  Clearing it removes only `next` from the URL and restores the normal Today
+  landing page; retain other query parameters and reject external/auth-loop targets.
+
 - A small static logo and wordmark sit above the form column: top-left on
   desktop, centered on mobile, sharing the desktop card's 1.5rem outer inset.
   The lockup is 0.875rem tall, with the logo matching the wordmark's line height.
@@ -89,3 +94,16 @@ Product context
    and 390 × 844 layouts without horizontal overflow.
 8. Confirm the brand card appears only on desktop and the form stays centered
    on smaller screens, without horizontal overflow.
+
+Authentication utility navigation stays on one row. Keep About, Guide, and Support
+visible with a shared shadcn Legal menu containing Privacy Policy, Terms of Use,
+Data Use, and SMS Policy. Below 22rem of available footer width, group the first
+three links into a Help menu beside Legal. Adapt to the pane’s width, preserve
+readable text and keyboard navigation, and never truncate or horizontally scroll
+these links to force them into place.
+
+Footer navigation uses tertiary semantic text with normal contrast on hover/focus,
+and standard Button padding for both direct links and menu triggers. Signed-in
+visitors to the homepage or authentication routes go to Today; document links remain
+public. Authentication links with a validated local return target continue to that requested
+page, including after sign-in; ordinary account-entry links go to Today.

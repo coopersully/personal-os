@@ -15,19 +15,18 @@ import { ReviewQuestion } from "../finances/review-page.js";
 import { FinanceAgentReviewQueue } from "../finances/review-queue.js";
 import { TransactionSummary } from "../finances/transaction-summary.js";
 
+import { MailStewardshipPage } from "../mail/stewardship-page.js";
+
 type ActionsProps = { item: AgentAccessWorkItem; onChanged: () => Promise<void> };
 export function ReviewActions({ item, onChanged }: ActionsProps) {
   const id = item.id.split(":")[1] as string;
   if (item.id.startsWith("attention:"))
     return <AttentionActions item={item} onChanged={onChanged} />;
   if (item.id.startsWith("mail-rule:")) return <MailRuleActions id={id} onChanged={onChanged} />;
-  if (item.id.startsWith("mail-question:") || item.id.startsWith("mail-run:"))
-    return (
-      <MailQuestionActions
-        id={item.id.startsWith("mail-question:") ? id : undefined}
-        onChanged={onChanged}
-      />
-    );
+  if (item.id.startsWith("mail-run:"))
+    return <MailStewardshipPage embedded onChanged={onChanged} />;
+  if (item.id.startsWith("mail-question:"))
+    return <MailQuestionActions id={id} onChanged={onChanged} />;
   if (item.id.startsWith("finance-contextual:"))
     return <FinanceContextualQuestionPage id={id} onChanged={onChanged} />;
   if (item.id.startsWith("finance-action:"))
@@ -223,13 +222,12 @@ function MailQuestionActions({
   id,
   onChanged,
 }: {
-  id: string | undefined;
+  id: string;
   onChanged: ActionsProps["onChanged"];
 }) {
   const query = useQuery({
     queryKey: ["review-mail-question", id],
-    queryFn: async () =>
-      id ? api.getMailQuestion(id) : ((await api.getMailStatus()).details.openQuestions[0] ?? null),
+    queryFn: () => api.getMailQuestion(id),
   });
   const question = query.data?.status === "open" ? query.data : undefined;
   const [answer, setAnswer] = useState("");

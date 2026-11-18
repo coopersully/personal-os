@@ -7,16 +7,9 @@ import type {
 import { useQuery } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import {
-  AlertTriangleIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  CircleCheckIcon,
-  RefreshIcon,
-} from "@/components/icons";
-import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
+import { DataChoice, FilterBar } from "@/components/data-view-controls";
+import { ChevronLeftIcon, ChevronRightIcon, CircleCheckIcon } from "@/components/icons";
 import { SettingsRecordAction, SettingsRecordContent } from "@/components/settings-record";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,13 +20,13 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Item, ItemGroup } from "@/components/ui/item";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Pagination, PaginationContent, PaginationItem } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkspaceIcon, workspaceIdentities } from "@/components/workspace-identity";
 import { WorkspaceSearch } from "@/components/workspace-search";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
+import { useErrorToast } from "../../lib/settings-feedback.js";
 
 const pageSize = 10;
 const skeletonRows = ["first", "second", "third"] as const;
@@ -202,6 +195,12 @@ export function ReviewsPage({ workspace }: { workspace?: AgentAccessDomain }) {
     setCursor(null);
     setPreviousCursors([]);
   }, [deferredSearch, kind, domain, sort]);
+  const unavailable = query.data?.unavailableDomains ?? [];
+  useErrorToast(
+    unavailable.length ? unavailable : null,
+    `Some workspaces are unavailable. ${joinLabels(unavailable)} could not be checked. Counts may be incomplete.`,
+    () => void query.refetch(),
+  );
   const pageNumber = previousCursors.length + 1;
   const start = (pageNumber - 1) * pageSize + 1;
   const visibleItems = transform
@@ -243,70 +242,69 @@ export function ReviewsPage({ workspace }: { workspace?: AgentAccessDomain }) {
 
       <section aria-label="Review filters" className="reviews-page__filters">
         <WorkspaceSearch label="Search reviews" />
-        <label htmlFor="review-sort" className="reviews-page__workspace-filter">
-          Sort
-          <NativeSelect
-            id="review-sort"
-            value={sort}
-            onChange={(event) => selectFilter("sort", event.target.value)}
-          >
-            <NativeSelectOption value="priority">Priority</NativeSelectOption>
-            <NativeSelectOption value="oldest">Oldest updated</NativeSelectOption>
-            <NativeSelectOption value="newest">Recently updated</NativeSelectOption>
-          </NativeSelect>
-        </label>
-        <SegmentedControl
-          aria-label="Filter by work type"
-          onValueChange={(value) => selectFilter("kind", value)}
-          value={kind}
+        <FilterBar
+          filters={[
+            {
+              id: "kind",
+              label: "Work Type",
+              active: kind !== "all",
+              control: (
+                <DataChoice
+                  label="Filter by work type"
+                  ariaLabel="Filter by work type"
+                  value={kind}
+                  active={kind !== "all"}
+                  choices={[
+                    ["all", "All work"],
+                    ...kinds.map((value) => [value, kindLabels[value]] as const),
+                  ]}
+                  onChange={(value) => selectFilter("kind", value)}
+                />
+              ),
+            },
+            ...(!workspace
+              ? [
+                  {
+                    id: "workspace",
+                    label: "Workspace",
+                    active: domain !== "all",
+                    control: (
+                      <DataChoice
+                        label="Filter by workspace"
+                        ariaLabel="Filter by workspace"
+                        value={domain}
+                        active={domain !== "all"}
+                        choices={[
+                          ["all", "All workspaces"],
+                          ...domains.map(
+                            (value) => [value, workspaceIdentities[value].label] as const,
+                          ),
+                        ]}
+                        onChange={(value) => selectFilter("workspace", value)}
+                      />
+                    ),
+                  },
+                ]
+              : []),
+          ]}
         >
-          <SegmentedControlItem value="all">All work</SegmentedControlItem>
-          {kinds.map((value) => (
-            <SegmentedControlItem key={value} value={value}>
-              {kindLabels[value]}
-            </SegmentedControlItem>
-          ))}
-        </SegmentedControl>
-        {!workspace ? (
-          <label className="reviews-page__workspace-filter" htmlFor="review-workspace">
-            <span>Workspace</span>
-            <NativeSelect
-              id="review-workspace"
-              aria-label="Filter by workspace"
-              autoComplete="off"
-              name="review-workspace"
-              onChange={(event) => selectFilter("workspace", event.target.value)}
-              value={domain}
-            >
-              <NativeSelectOption value="all">All workspaces</NativeSelectOption>
-              {domains.map((value) => (
-                <NativeSelectOption key={value} value={value}>
-                  {workspaceIdentities[value].label}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </label>
-        ) : null}
+          <DataChoice
+            label="Sort"
+            ariaLabel="Sort reviews"
+            sorting
+            value={sort}
+            choices={[
+              ["priority", "Priority"],
+              ["oldest", "Oldest updated"],
+              ["newest", "Recently updated"],
+            ]}
+            onChange={(value) => selectFilter("sort", value)}
+          />
+        </FilterBar>
       </section>
       <div className="flex min-w-0 flex-col gap-4">
         {query.isPending ? <QueueSkeleton /> : null}
         <QueryFeedback query={{ ...query, refetch: retry }} title="Couldn’t load your reviews." />
-        {query.data && query.data.unavailableDomains.length > 0 ? (
-          <Alert variant="warning">
-            <AlertTriangleIcon />
-            <AlertTitle>Some workspaces are unavailable</AlertTitle>
-            <AlertDescription>
-              {joinLabels(query.data.unavailableDomains)} could not be checked. Counts may be
-              incomplete.
-            </AlertDescription>
-            <AlertAction>
-              <Button onClick={() => query.refetch()} size="sm" variant="outline">
-                <RefreshIcon data-icon="inline-start" />
-                Check again
-              </Button>
-            </AlertAction>
-          </Alert>
-        ) : null}
         {query.data && query.data.items.length === 0 ? (
           <Empty className="reviews-page__empty">
             <EmptyHeader>

@@ -1,7 +1,7 @@
 import type { FinanceCategory } from "@personal-os/domain";
-import { Spinner } from "@personal-os/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { Button as ShadcnButton } from "@/components/ui/button";
 import {
   Card as ShadcnCard,
@@ -64,7 +64,7 @@ export function FinanceBudgetBucketManager({
     onSuccess: refresh,
   });
   if (typeof api.listFinanceBudgetBuckets !== "function") return null;
-  if (buckets.isPending) return <Spinner />;
+  if (buckets.isPending) return <ContentSkeleton label="Loading buckets" />;
   if (buckets.isError && !buckets.data)
     return (
       <InlineError

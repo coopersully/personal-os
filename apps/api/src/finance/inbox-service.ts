@@ -3,7 +3,12 @@ import {
   financeAccounts,
   financeCategories,
   financeClassificationDecisions,
+  financeContextualAnswers,
+  financeContextualQuestions,
   financeEventTransactions,
+  financeReviewActionRequests,
+  financeReviewAnswers,
+  financeReviewArchives,
   financeReviewCases,
   financeTransactionRelationships,
   financeTransactionRevisions,
@@ -13,11 +18,14 @@ import {
   type AnswerFinanceReviewInput,
   type FinanceChange,
   type FinanceInboxCase,
+  type FinanceReviewHistoryItem,
+  type FinanceReviewHistorySummary,
   type FinanceReviewReason,
   type FinanceToolResult,
+  financeReviewHistoryQuerySchema,
   financialProfileChangesSchema,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
 import {
@@ -25,6 +33,14 @@ import {
   lockFinanceMaintenanceLineage,
   supersedeFinanceMaintenanceLineage,
 } from "./maintenance-rebuild.js";
+import {
+  finishMaintenanceReviewFromApp,
+  recordMaintenanceReviewAppAnswer,
+} from "./review-action-service.js";
+import { financeReviewPrompt } from "./review-prompt.js";
+
+export { financeReviewPrompt } from "./review-prompt.js";
+
 import { withFinanceInboxPresentation } from "./presentation-service.js";
 import { appendFinanceProfile } from "./profile-writer.js";
 import { nextFinanceTransactionRevision } from "./transaction-revision-lock.js";
@@ -71,29 +87,80 @@ function caseValue(row: typeof financeReviewCases.$inferSelect): FinanceInboxCas
   };
 }
 
-export function financeReviewPrompt(
-  reason: FinanceReviewReason,
-  evidence: Record<string, unknown>,
-): string {
-  if (typeof evidence.prompt === "string" && evidence.prompt.trim()) {
-    return evidence.prompt.trim().slice(0, 1_000);
-  }
-  const merchant = typeof evidence.merchant === "string" ? ` at ${evidence.merchant}` : "";
-  const prompts: Record<FinanceReviewReason, string> = {
-    budget_variance: "Was this budget variance expected, and should the budget change?",
-    category_ambiguity: `What did this transaction${merchant} represent?`,
-    merchant_identity: `What was this transaction${merchant} for?`,
-    missing_provenance: "What is the source and purpose of this transaction?",
-    possible_duplicate: "Are these charges duplicates, or are both legitimate?",
-    possible_transfer: "Was this movement a transfer between your own accounts?",
-    profile_fact: "What should this financial profile fact be?",
-    recurring_status: "Is this still a recurring obligation?",
-    refund_or_reversal: "Was this transaction a refund or reversal of another charge?",
-    reimbursement: "Which expense did this reimbursement offset?",
-    source_freshness: "Does this account need to be reconnected or updated manually?",
-    unusual_amount: `Was this unusually large transaction${merchant} expected and legitimate?`,
+function archivedReviewRow(
+  snapshot: Record<string, unknown>,
+): typeof financeReviewCases.$inferSelect {
+  const row = Object.fromEntries(
+    Object.entries(snapshot).map(([key, value]) => [
+      key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()),
+      value,
+    ]),
+  );
+  row.impactAmount = snapshot.impact_amount_cents;
+  for (const key of ["firstSeenAt", "lastSeenAt", "resolvedAt", "createdAt", "updatedAt"])
+    if (typeof row[key] === "string") row[key] = new Date(row[key] as string);
+  row.contextualRevision = BigInt(String(snapshot.contextual_revision));
+  return row as typeof financeReviewCases.$inferSelect;
+}
+
+function archivedReviewContext(
+  context: Record<string, unknown>,
+): NonNullable<FinanceInboxCase["context"]> {
+  // The first published 0105 archive recorded transactionDate but did not
+  // record institution. Keep that immutable evidence readable after 0109.
+  const date = context.date ?? context.transactionDate;
+  if (typeof date !== "string")
+    throw new AppError("internal_error", "A retained Finance review lost its date.");
+  const current = { ...context };
+  delete current.transactionDate;
+  return {
+    ...current,
+    date,
+    institution: typeof context.institution === "string" ? context.institution : "",
+  } as NonNullable<FinanceInboxCase["context"]>;
+}
+
+function historyValue(
+  row: typeof financeReviewCases.$inferSelect,
+  context?: NonNullable<FinanceInboxCase["context"]>,
+): FinanceReviewHistoryItem {
+  return {
+    ...(context ? { context } : {}),
+    economicEventId: row.economicEventId,
+    evidence: row.evidence,
+    firstSeenAt: row.firstSeenAt.toISOString(),
+    id: row.id,
+    impactAmount: fromCents(row.impactAmount),
+    lastSeenAt: row.lastSeenAt.toISOString(),
+    prompt: prompt(row),
+    proposedResolution: row.proposedResolution,
+    reason: row.reasonCode,
+    reopenedFromId: row.reopenedFromId,
+    resolution: row.resolution,
+    resolutionProvenance: row.resolutionProvenance,
+    resolvedAt: row.resolvedAt?.toISOString() ?? null,
+    stableKey: row.stableKey,
+    status: row.status,
+    transactionId: row.transactionId,
   };
-  return prompts[reason];
+}
+
+function historySummary(
+  row: Pick<
+    typeof financeReviewCases.$inferSelect,
+    "firstSeenAt" | "id" | "reasonCode" | "resolvedAt" | "status" | "transactionId"
+  >,
+  context?: NonNullable<FinanceInboxCase["context"]>,
+): FinanceReviewHistorySummary {
+  return {
+    ...(context ? { context } : {}),
+    firstSeenAt: row.firstSeenAt.toISOString(),
+    id: row.id,
+    reason: row.reasonCode,
+    resolvedAt: row.resolvedAt?.toISOString() ?? null,
+    status: row.status,
+    transactionId: row.transactionId,
+  };
 }
 
 function prompt(row: typeof financeReviewCases.$inferSelect): string {
@@ -143,7 +210,7 @@ export function createInboxService({ db, now }: Options) {
 
   async function transactionContexts(
     userId: string,
-    rows: Array<typeof financeReviewCases.$inferSelect>,
+    rows: Array<{ transactionId: string }>,
     executor: FinanceExecutor,
   ) {
     if (!rows.length) return new Map<string, NonNullable<FinanceInboxCase["context"]>>();
@@ -267,6 +334,213 @@ export function createInboxService({ db, now }: Options) {
       );
     },
 
+    async listFinanceReviewHistory(userId: string, rawQuery: unknown) {
+      const query = financeReviewHistoryQuerySchema.parse(rawQuery);
+      return db.transaction(
+        async (tx) => {
+          // Resolve the owned anchor before scanning either history source. Text preserves
+          // PostgreSQL microseconds that a JavaScript Date would truncate.
+          const anchor = query.cursor
+            ? await tx.execute<{ first_seen_at: string }>(sql`
+            SELECT first_seen_at::text FROM finance_review_cases
+            WHERE user_id=${userId}::uuid AND id=${query.cursor}::uuid
+            UNION ALL
+            SELECT first_seen_at::text FROM finance_review_archives
+            WHERE user_id=${userId}::uuid AND id=${query.cursor}::uuid
+            LIMIT 1
+          `)
+            : null;
+          const anchorTimestamp = anchor?.rows[0]?.first_seen_at;
+          if (query.cursor && !anchorTimestamp)
+            throw new AppError("invalid_request", "Review history cursor is unavailable.");
+          const cursorBound = query.cursor
+            ? sql`(first_seen_at,id) < (${anchorTimestamp}::timestamptz,${query.cursor}::uuid)`
+            : sql`true`;
+          // Bound each indexed source before merging; neither branch needs to read
+          // the owner's entire history to fill a page.
+          const rows = await tx.execute<{
+            id: string;
+            snapshot: Record<string, unknown>;
+            context: FinanceInboxCase["context"] | null;
+            archived: boolean;
+          }>(sql`
+        SELECT id,snapshot,context,archived FROM (
+          (SELECT id,first_seen_at,to_jsonb(r) AS snapshot,NULL::jsonb AS context,false AS archived
+           FROM finance_review_cases r
+           WHERE user_id=${userId}::uuid AND ${cursorBound}
+           ORDER BY first_seen_at DESC,id DESC LIMIT ${query.limit + 1})
+          UNION ALL
+          (SELECT id,first_seen_at,snapshot,context,true AS archived
+           FROM finance_review_archives
+           WHERE user_id=${userId}::uuid AND ${cursorBound}
+           ORDER BY first_seen_at DESC,id DESC LIMIT ${query.limit + 1})
+        ) history
+        ORDER BY first_seen_at DESC,id DESC LIMIT ${query.limit + 1}
+      `);
+          const page = rows.rows.slice(0, query.limit);
+          const hydrated = page.map((entry) => ({
+            ...entry,
+            row: archivedReviewRow(entry.snapshot),
+          }));
+          const contexts = await transactionContexts(
+            userId,
+            hydrated.filter((e) => !e.archived).map((e) => e.row),
+            tx,
+          );
+          return {
+            items: hydrated.map((entry) => ({
+              ...historySummary(
+                entry.row,
+                entry.archived && entry.context
+                  ? archivedReviewContext(entry.context)
+                  : (contexts.get(entry.row.transactionId) ?? undefined),
+              ),
+              archived: entry.archived,
+            })),
+            nextCursor: rows.rows.length > query.limit ? (page.at(-1)?.id ?? null) : null,
+          };
+        },
+        { accessMode: "read only", isolationLevel: "repeatable read" },
+      );
+    },
+
+    async getFinanceReviewHistoryItem(userId: string, id: string) {
+      return db.transaction(
+        async (tx) => {
+          const [row] = await tx
+            .select()
+            .from(financeReviewCases)
+            .where(and(eq(financeReviewCases.userId, userId), eq(financeReviewCases.id, id)))
+            .limit(1);
+          const relatedAvailable = async (resolution: Record<string, unknown> | null) => {
+            if (typeof resolution?.relatedTransactionId !== "string") return false;
+            const [related] = await tx
+              .select({ id: financeTransactions.id })
+              .from(financeTransactions)
+              .where(
+                and(
+                  eq(financeTransactions.userId, userId),
+                  eq(financeTransactions.id, resolution.relatedTransactionId),
+                ),
+              )
+              .limit(1);
+            return Boolean(related);
+          };
+          if (row) {
+            const contexts = await transactionContexts(userId, [row], tx);
+            const questions = await tx
+              .select({
+                id: financeContextualQuestions.id,
+                prompt: financeContextualQuestions.prompt,
+                state: financeContextualQuestions.state,
+              })
+              .from(financeContextualQuestions)
+              .where(
+                and(
+                  eq(financeContextualQuestions.userId, userId),
+                  eq(financeContextualQuestions.reviewCaseId, id),
+                ),
+              )
+              .orderBy(asc(financeContextualQuestions.id));
+            const answers = questions.length
+              ? await tx
+                  .select({
+                    id: financeContextualAnswers.id,
+                    text: financeContextualAnswers.text,
+                    sourceKind: financeContextualAnswers.sourceKind,
+                    recordedAt: financeContextualAnswers.recordedAt,
+                  })
+                  .from(financeContextualAnswers)
+                  .where(
+                    and(
+                      eq(financeContextualAnswers.userId, userId),
+                      inArray(
+                        financeContextualAnswers.questionId,
+                        questions.map((question) => question.id),
+                      ),
+                    ),
+                  )
+                  .orderBy(
+                    asc(financeContextualAnswers.recordedAt),
+                    asc(financeContextualAnswers.id),
+                  )
+              : [];
+            const requests = await tx
+              .select()
+              .from(financeReviewActionRequests)
+              .where(
+                and(
+                  eq(financeReviewActionRequests.userId, userId),
+                  eq(financeReviewActionRequests.reviewCaseId, id),
+                ),
+              )
+              .orderBy(asc(financeReviewActionRequests.actionRevision));
+            const canonicalAnswers = await tx
+              .select({
+                id: financeReviewAnswers.id,
+                text: financeReviewAnswers.text,
+                sourceKind: financeReviewAnswers.sourceKind,
+                recordedAt: financeReviewAnswers.recordedAt,
+              })
+              .from(financeReviewAnswers)
+              .where(
+                and(
+                  eq(financeReviewAnswers.userId, userId),
+                  eq(financeReviewAnswers.reviewCaseId, id),
+                ),
+              )
+              .orderBy(asc(financeReviewAnswers.recordedAt), asc(financeReviewAnswers.id));
+            return {
+              ...historyValue(row, contexts.get(row.transactionId)),
+              archived: false,
+              relatedTransactionAvailable: await relatedAvailable(row.resolution),
+              retainedQuestions: [
+                ...questions,
+                ...requests.map((request) => ({
+                  id: request.id,
+                  prompt: request.prompt,
+                  state: request.state,
+                })),
+              ],
+              retainedAnswers: [...answers, ...canonicalAnswers]
+                .sort(
+                  (a, b) =>
+                    a.recordedAt.getTime() - b.recordedAt.getTime() || a.id.localeCompare(b.id),
+                )
+                .map((answer) => ({
+                  ...answer,
+                  recordedAt: answer.recordedAt.toISOString(),
+                })),
+            };
+          }
+          const [archive] = await tx
+            .select()
+            .from(financeReviewArchives)
+            .where(and(eq(financeReviewArchives.userId, userId), eq(financeReviewArchives.id, id)))
+            .limit(1);
+          if (!archive) throw new AppError("not_found", "Finance review not found.");
+          const retained = archivedReviewRow(archive.snapshot);
+          return {
+            ...historyValue(retained, archivedReviewContext(archive.context)),
+            archived: true,
+            relatedTransactionAvailable: await relatedAvailable(retained.resolution),
+            retainedQuestions: archive.questions.map((question) => ({
+              id: String(question.id),
+              prompt: String(question.prompt),
+              state: String(question.state),
+            })),
+            retainedAnswers: archive.answers.map((answer) => ({
+              id: String(answer.id),
+              text: String(answer.text),
+              sourceKind: String(answer.source_kind),
+              recordedAt: new Date(String(answer.recorded_at)).toISOString(),
+            })),
+          };
+        },
+        { isolationLevel: "repeatable read" },
+      );
+    },
+
     async answerFinanceReview(
       caseId: string,
       input: AnswerFinanceReviewInput,
@@ -278,6 +552,10 @@ export function createInboxService({ db, now }: Options) {
         {
           idempotencyKey: input.idempotencyKey,
           operation: "answer_finance_review",
+          executionOwnerPlan: {
+            hostSchedules: true,
+            actorIds: context.actorType === "agent" ? [context.actorId] : [],
+          },
           lockIdentities:
             input.resolution?.type === "update_profile"
               ? [`finance-profile:${context.userId}`]
@@ -320,9 +598,11 @@ export function createInboxService({ db, now }: Options) {
                 : eq(financeReviewCases.resolutionProvenance, review.resolutionProvenance),
             );
             if (input.resolution.type === "clarify") {
+              const terminal = await finishMaintenanceReviewFromApp(tx, review, "consume");
               const [saved] = await tx
                 .update(financeReviewCases)
                 .set({
+                  ...(terminal ? { humanAction: terminal } : {}),
                   resolution: { answer: input.answer, ...input.resolution },
                   resolutionProvenance: {
                     actorId: context.actorId,
@@ -339,9 +619,22 @@ export function createInboxService({ db, now }: Options) {
                     unchangedResolution,
                   ),
                 )
-                .returning({ id: financeReviewCases.id });
+                .returning({
+                  id: financeReviewCases.id,
+                  revision: financeReviewCases.contextualRevision,
+                });
               if (!saved)
                 throw new AppError("conflict", "That Finance Inbox case is already resolved.");
+              if (terminal)
+                await recordMaintenanceReviewAppAnswer(
+                  tx,
+                  review,
+                  saved.revision,
+                  terminal,
+                  input.resolution.clarification,
+                  context,
+                  now(),
+                );
               return null;
             }
             if (
@@ -456,6 +749,7 @@ export function createInboxService({ db, now }: Options) {
                 },
               );
             }
+            const terminal = await finishMaintenanceReviewFromApp(tx, review, "withdraw");
             const [resolved] = await tx
               .update(financeReviewCases)
               .set({
@@ -465,6 +759,7 @@ export function createInboxService({ db, now }: Options) {
                   actorType: context.actorType,
                   requestId: context.requestId,
                 },
+                ...(terminal ? { humanAction: terminal } : {}),
                 resolvedAt: now(),
                 resolvedByActorId: context.actorId,
                 resolvedByActorType: context.actorType,

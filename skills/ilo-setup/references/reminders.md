@@ -1,7 +1,7 @@
 # Reminders setup
 
 Reminders are simple attention commitments. They are not scheduled Tasks, Calendar events, or a
-notification-delivery system. `dueAt` is the instant Ilo uses for due and overdue views; it does not
+notification-delivery system. `dueAt` is the instant nohmi uses for due and overdue views; it does not
 prove that a platform notification will be delivered.
 
 ## Run the short interview
@@ -13,7 +13,7 @@ Group the interview into at most five initial questions:
 2. What do low, medium, and high mean in the user's own words?
 3. Does `dueAt` mean a deadline, a desired notification time, or something to clarify? Which
    notification lead time and time-zone behavior does the user expect?
-4. When is an item overdue enough to review, which priorities enter review, and should Ilo keep the
+4. When is an item overdue enough to review, which priorities enter review, and should nohmi keep the
    original time, review it, or propose a deferral?
 5. Which bounded actions may an agent perform, and should the default policy be `read_only`,
    `preview`, or `approve_each`?
@@ -40,7 +40,7 @@ categories. Save these exact preference keys:
 
 Both `preferredAutomaticActions` and `preferredMutationPolicy` are durable guidance for the agent,
 not access control. Saving or activating either value does not grant, revoke, or enforce mutation
-authority. Token scopes and Ilo's API policy remain authoritative. A draft may contain only the
+authority. Token scopes and nohmi's API policy remain authoritative. A draft may contain only the
 answers learned so far; do not invent missing preferences. Activate only after all canonical
 preferences are present and the user accepts the summary.
 
@@ -49,7 +49,7 @@ preferences are present and the user accepts the summary.
 - Read a Reminder before updating, completing, reopening, or trashing it and pass its `updatedAt` as
   `expectedUpdatedAt`. `delete_reminder` returns the deleted revision required by
   `restore_reminder`. On a conflict, reload available state and ask again if the changed fields
-  affect intent. Ilo enforces this revision requirement for agent principals at the API service
+  affect intent. nohmi enforces this revision requirement for agent principals at the API service
   boundary, regardless of whether the caller uses MCP or another API client.
 - Create, update, complete, reopen, trash, and restore only one identified Reminder per direct tool
   call. Trash is recoverable; do not describe it as permanent deletion.
@@ -59,7 +59,7 @@ preferences are present and the user accepts the summary.
   the safety limit is exceeded, narrow the cutoff or priority.
 - Show IDs, titles, current due times, proposed due time, and time zone. Apply an accepted set with
   guarded individual updates; stop and report any conflict instead of silently changing the set.
-- Use `create_reminder_attention_item` when an ambiguous or conflicted Reminder needs review. Ilo
+- Use `create_reminder_attention_item` when an ambiguous or conflicted Reminder needs review. nohmi
   validates the active Reminder and derives its source, current revision, and related entity ID;
   never submit those provenance fields through the generic attention tool. Resolve the item when
   the review is complete.

@@ -1,5 +1,12 @@
 import type { TaskList, TaskProject, TaskWorkspaceItem } from "@personal-os/domain";
-import { MoreHorizontalIcon } from "@/components/icons";
+import {
+  CheckSquareIcon,
+  CircleCheckIcon,
+  EyeIcon,
+  MoreHorizontalIcon,
+  RefreshIcon,
+  TrashIcon,
+} from "@/components/icons";
 import { ReminderItem, ReminderItemCompletion } from "@/components/reminder-item";
 import {
   TaskItem,
@@ -17,6 +24,7 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { formatRelativeMaterialDateTime } from "../../lib/date-format";
@@ -43,7 +51,7 @@ export function WorkspaceRow({
   selectionMode: boolean;
   selected: boolean;
   disabled: boolean;
-  onSelect: () => void;
+  onSelect?: () => void;
   onOpen: () => void;
   onAction: (action: WorkspaceAction) => void;
 }) {
@@ -61,7 +69,6 @@ export function WorkspaceRow({
   const context =
     item.kind === "task" ? [list?.name, project?.name].filter(Boolean).join(" / ") : "";
   const meta = [
-    context,
     item.kind === "task" && details.includes("estimate") && item.record.estimateMinutes
       ? `${item.record.estimateMinutes} min`
       : null,
@@ -72,12 +79,12 @@ export function WorkspaceRow({
     .join(" · ");
   return (
     <Row
-      className="task-workspace-row min-h-0 items-center gap-x-2 py-2 data-[selected=true]:bg-accent"
+      className="task-workspace-row min-h-0 items-start gap-x-2 py-2 data-[selected=true]:bg-accent"
       data-completed={completed}
       data-priority={record.priority}
       data-selected={selected}
     >
-      <Completion className="self-center pt-0">
+      <Completion>
         <Checkbox
           aria-label={
             selectionMode
@@ -86,7 +93,7 @@ export function WorkspaceRow({
           }
           checked={selectionMode ? selected : completed}
           disabled={disabled || (selectionMode ? item.readOnly : !actions.includes(completeAction))}
-          onCheckedChange={() => (selectionMode ? onSelect() : onAction(completeAction))}
+          onCheckedChange={() => (selectionMode ? onSelect?.() : onAction(completeAction))}
         />
       </Completion>
       <TaskItemPrimaryAction aria-label={`Open ${record.title}`} onClick={onOpen}>
@@ -96,12 +103,12 @@ export function WorkspaceRow({
           </TaskItemTitle>
           {record.priority === "high" ? <span className="sr-only">High priority</span> : null}
           {item.kind === "reminder" ? <span className="sr-only">Reminder</span> : null}
-          {record.dueAt || (item.kind === "task" && item.record.scheduledAt) || meta ? (
+          {record.dueAt || (item.kind === "task" && item.record.scheduledAt) || context || meta ? (
             <TaskItemDescription>
               {item.kind === "task" && item.record.scheduledAt ? (
                 <span>
                   Reserved {formatRelativeMaterialDateTime(item.record.scheduledAt, timeZone)}
-                  {record.dueAt || meta ? " · " : ""}
+                  {record.dueAt || context || meta ? " · " : ""}
                 </span>
               ) : null}
               {record.dueAt ? (
@@ -109,19 +116,21 @@ export function WorkspaceRow({
                   <span className={overdue ? "text-destructive" : undefined}>
                     Due {formatRelativeMaterialDateTime(record.dueAt, timeZone)}
                   </span>
-                  {meta ? " · " : ""}
+                  {context || meta ? " · " : ""}
                 </>
               ) : null}
+              {context ? <span data-user-content>{context}</span> : null}
+              {context && meta ? " · " : null}
               {meta}
             </TaskItemDescription>
           ) : null}
           {details.includes("notes") && record.notes ? (
-            <TaskItemDescription>{record.notes}</TaskItemDescription>
+            <TaskItemDescription data-user-content>{record.notes}</TaskItemDescription>
           ) : null}
           {details.includes("tags") && item.kind === "task" && item.record.tags.length ? (
             <span className="flex flex-wrap gap-1">
               {item.record.tags.map((tag) => (
-                <Badge variant="secondary" key={tag}>
+                <Badge data-user-content variant="secondary" key={tag}>
                   {tag}
                 </Badge>
               ))}
@@ -129,33 +138,62 @@ export function WorkspaceRow({
           ) : null}
         </TaskItemContent>
       </TaskItemPrimaryAction>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            disabled={disabled}
-            aria-label={`${record.title} options`}
-          >
-            <MoreHorizontalIcon aria-hidden="true" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuGroup>
-            <DropdownMenuItem onSelect={onOpen}>Open {item.kind}</DropdownMenuItem>
-            {!item.readOnly ? (
-              <DropdownMenuItem onSelect={onSelect}>
-                {selected ? "Deselect" : "Select"}
+      {item.readOnly && actions.length === 0 ? (
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          disabled={disabled}
+          aria-label={`Open ${record.title} details`}
+          title="Open details"
+          onClick={onOpen}
+        >
+          <EyeIcon aria-hidden="true" />
+        </Button>
+      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              disabled={disabled}
+              aria-label={`${record.title} options`}
+            >
+              <MoreHorizontalIcon aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuGroup>
+              <DropdownMenuItem onSelect={onOpen}>
+                <EyeIcon />
+                Open {item.kind}
               </DropdownMenuItem>
-            ) : null}
-            {actions.map((action) => (
-              <DropdownMenuItem key={action} onSelect={() => onAction(action)}>
-                {workspaceActionLabels[action]}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
+              {!item.readOnly && onSelect ? (
+                <DropdownMenuItem onSelect={onSelect}>
+                  <CheckSquareIcon />
+                  {selected ? "Deselect" : "Select"}
+                </DropdownMenuItem>
+              ) : null}
+              {actions
+                .filter((action) => action !== "trash")
+                .map((action) => (
+                  <DropdownMenuItem key={action} onSelect={() => onAction(action)}>
+                    {action === "complete" ? <CircleCheckIcon /> : <RefreshIcon />}
+                    {workspaceActionLabels[action]}
+                  </DropdownMenuItem>
+                ))}
+              {actions.includes("trash") ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onSelect={() => onAction("trash")}>
+                    <TrashIcon />
+                    Move to Trash
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </Row>
   );
 }

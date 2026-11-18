@@ -1,6 +1,7 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import { Slot } from "radix-ui";
-import type * as React from "react";
+import * as React from "react";
+import { CardSurfaceContext } from "./card-context";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
@@ -60,12 +61,14 @@ function Item({
   ...props
 }: React.ComponentProps<"div"> & VariantProps<typeof itemVariants> & { asChild?: boolean }) {
   const Comp = asChild ? Slot.Root : "div";
+  const inCard = React.useContext(CardSurfaceContext);
+  const resolvedVariant = inCard && (variant === "default" || variant === "outline") ? "secondary" : variant;
   return (
     <Comp
       data-slot="item"
-      data-variant={variant}
+      data-variant={resolvedVariant}
       data-size={size}
-      className={cn(itemVariants({ variant, size, className }))}
+      className={cn(itemVariants({ variant: resolvedVariant, size, className }))}
       {...props}
     />
   );

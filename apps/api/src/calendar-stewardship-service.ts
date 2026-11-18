@@ -109,6 +109,7 @@ async function readAssessmentSnapshot(
       remoteCalendarId: calendars.remoteCalendarId,
       syncGeneration: calendarAccounts.syncGeneration,
       syncRecovery: calendarAccounts.syncRecovery,
+      syncCapabilities: calendarAccounts.syncCapabilities,
       syncStatus: calendarAccounts.syncStatus,
     })
     .from(calendars)
@@ -270,25 +271,37 @@ async function readAssessmentSnapshot(
     scope,
     scopeEnd,
     scopeStart,
-    sources: sourceRows.map((source) => ({
-      accountId: source.accountId,
-      calendarId: source.calendarId,
-      calendarRevision: [
-        source.calendarUpdatedAt.toISOString(),
-        `generation=${source.syncGeneration}`,
-        `status=${source.syncStatus}`,
-        `recovery=${source.syncRecovery ?? "none"}`,
-      ].join(";"),
-      isWritable: source.isWritable,
-      lastSyncedAt:
-        (source.calendarLastSyncedAt ?? source.accountLastSyncedAt)?.toISOString() ?? null,
-      provider: source.provider,
-      recurrencePresent: recurrenceCalendarIds.has(source.calendarId),
-      remoteCalendarId: source.remoteCalendarId,
-      syncGeneration: source.syncGeneration,
-      syncRecovery: source.syncRecovery,
-      syncStatus: source.syncStatus,
-    })),
+    sources: sourceRows.map((source) => {
+      const scoped = source.syncCapabilities?.calendar;
+      const syncRecovery = scoped ? scoped.health.recovery : source.syncRecovery;
+      const syncStatus =
+        source.syncStatus === "syncing"
+          ? "syncing"
+          : scoped
+            ? scoped.errorCode
+              ? "error"
+              : "idle"
+            : source.syncStatus;
+      return {
+        accountId: source.accountId,
+        calendarId: source.calendarId,
+        calendarRevision: [
+          source.calendarUpdatedAt.toISOString(),
+          `generation=${source.syncGeneration}`,
+          `status=${syncStatus}`,
+          `recovery=${syncRecovery ?? "none"}`,
+        ].join(";"),
+        isWritable: source.isWritable,
+        lastSyncedAt:
+          (source.calendarLastSyncedAt ?? source.accountLastSyncedAt)?.toISOString() ?? null,
+        provider: source.provider,
+        recurrencePresent: recurrenceCalendarIds.has(source.calendarId),
+        remoteCalendarId: source.remoteCalendarId,
+        syncGeneration: source.syncGeneration,
+        syncRecovery,
+        syncStatus,
+      };
+    }),
   };
 }
 

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { TaskList, TaskProject } from "@personal-os/domain";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -26,10 +27,14 @@ function LocationProbe() {
 
 function mount(content: React.ReactNode, entry = "/tasks") {
   render(
-    <MemoryRouter initialEntries={[entry]}>
-      {content}
-      <LocationProbe />
-    </MemoryRouter>,
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <MemoryRouter initialEntries={[entry]}>
+        {content}
+        <LocationProbe />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -52,7 +57,7 @@ it("changes every workspace sort and display option without closing detail selec
   expect(screen.getByLabelText("location")).toHaveTextContent("group=project");
   await user.click(screen.getByRole("button", { name: "Display" }));
   await user.click(screen.getByRole("menuitemcheckbox", { name: "Notes" }));
-  expect(screen.getByLabelText("location")).toHaveTextContent("details=none%2Cnotes");
+  expect(screen.getByLabelText("location")).toHaveTextContent("details=notes");
 });
 
 it("validates advanced ranges and applies the global history controls", async () => {
@@ -175,4 +180,33 @@ it("summarizes one-sided, preset, and absent ranges", () => {
     />,
   );
   expect(screen.queryByRole("group", { name: "Active task filters" })).not.toBeInTheDocument();
+});
+
+it("does not expose saved completed visibility as a removable URL filter", () => {
+  mount(
+    <WorkspaceFilterChips
+      params={new URLSearchParams("status=open_and_completed")}
+      routeParams={new URLSearchParams()}
+      timeZone="UTC"
+      lists={lists}
+      projects={projects}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: /Remove Status/ })).not.toBeInTheDocument();
+});
+it("does not freeze saved completed visibility when applying another filter", async () => {
+  const user = userEvent.setup();
+  mount(
+    <WorkspaceFilters
+      params={new URLSearchParams("status=open_and_completed")}
+      routeParams={new URLSearchParams()}
+      timeZone="UTC"
+      lists={lists}
+      projects={projects}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: /Filters/ }));
+  await user.selectOptions(screen.getByLabelText("Priority"), "high");
+  await user.click(screen.getByRole("button", { name: "Apply filters" }));
+  expect(screen.getByLabelText("location")).toHaveTextContent("/tasks?priority=high");
 });

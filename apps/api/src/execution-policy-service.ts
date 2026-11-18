@@ -6,9 +6,8 @@ import type {
 import { eq, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
-import type { Principal } from "./types.js";
-
-type MutationContext = { principal: Principal; requestId: string };
+import { guardFinanceExecutionTransaction } from "./finance/execution-owner-guard.js";
+import { assertSettingsRevision, type SettingsMutationContext } from "./settings-save.js";
 
 function serialize(
   row: Pick<typeof executionPolicySettings.$inferSelect, "reviewBypassEnabled" | "version">,
@@ -27,13 +26,14 @@ export function createExecutionPolicyService(input: { db: Database; now: () => D
 
     async update(
       update: UpdateExecutionPolicySettingsInput,
-      context: MutationContext,
+      context: SettingsMutationContext,
     ): Promise<ExecutionPolicySettings> {
       if (context.principal.actorType !== "user") {
         throw new AppError("forbidden", "Execution policy changes require an interactive user.");
       }
       return input.db.transaction(async (tx) => {
         const userId = context.principal.userId;
+        await guardFinanceExecutionTransaction(tx, userId, {});
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`execution-policy:${userId}`}, 0))`,
         );
@@ -41,11 +41,12 @@ export function createExecutionPolicyService(input: { db: Database; now: () => D
           where: eq(executionPolicySettings.userId, userId),
         });
         const before = existing ? serialize(existing) : { reviewBypassEnabled: false, version: 1 };
-        if (before.version !== update.expectedVersion) {
-          throw new AppError("conflict", "Execution policy changed. Refresh and try again.", {
-            currentVersion: before.version,
-          });
-        }
+        assertSettingsRevision(
+          before.version,
+          update.expectedVersion,
+          "Execution policy changed. Refresh and try again.",
+          { currentVersion: before.version },
+        );
         if (before.reviewBypassEnabled === update.reviewBypassEnabled) return before;
 
         const next = {

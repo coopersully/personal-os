@@ -50,6 +50,31 @@ export const financeInboxCaseSchema = z.object({
 });
 export type FinanceInboxCase = z.infer<typeof financeInboxCaseSchema>;
 
+export const financeReviewHistoryQuerySchema = z
+  .object({
+    cursor: idSchema.optional(),
+    limit: z.coerce.number().int().min(1).max(50).default(20),
+  })
+  .strict();
+export type FinanceReviewHistoryQuery = z.infer<typeof financeReviewHistoryQuerySchema>;
+
+export type FinanceReviewHistoryItem = Omit<FinanceInboxCase, "economicEventId"> & {
+  economicEventId: string | null;
+  resolutionProvenance: Record<string, unknown> | null;
+  archived?: boolean;
+  relatedTransactionAvailable?: boolean;
+  retainedQuestions?: { id: string; prompt: string; state: string }[];
+  retainedAnswers?: { id: string; text: string; sourceKind: string; recordedAt: string }[];
+};
+export type FinanceReviewHistorySummary = Pick<
+  FinanceInboxCase,
+  "context" | "firstSeenAt" | "id" | "reason" | "resolvedAt" | "status"
+> & { transactionId: string; archived?: boolean };
+export type FinanceReviewHistoryPage = {
+  items: FinanceReviewHistorySummary[];
+  nextCursor: string | null;
+};
+
 export const financeReviewResolutionSchema = z.discriminatedUnion("type", [
   z.object({ categoryId: idSchema, type: z.literal("confirm_classification") }),
   z.object({

@@ -1,4 +1,8 @@
+export * from "./finance/configuration.js";
+
 import { z } from "zod";
+import { financeAccountBalancesSchema } from "./finance/account-balances.js";
+import { financeObligationPlanningEvidenceSchema } from "./finance/planning-evidence.js";
 
 export * from "./finance/setup-planning.js";
 
@@ -6,6 +10,7 @@ import {
   attentionItemImportanceSchema,
   attentionItemKindSchema,
   domainProfileSchema,
+  profileApprovalProvenanceSchema,
 } from "./assistant.js";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import { connectorSyncRecoverySchema } from "./connection.js";
@@ -299,8 +304,38 @@ export const financeGuidedPreferencesSchema = z
   });
 export type FinanceGuidedPreferences = z.infer<typeof financeGuidedPreferencesSchema>;
 
+/** Display-only institution branding, never a payment credential or exact card artwork. */
+export const financeInstitutionBrandingSchema = z.object({
+  institutionId: z.string().min(1).max(160),
+  logo: z
+    .string()
+    .max(44_000)
+    .regex(/^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$/u)
+    .nullable(),
+  primaryColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/u)
+    .nullable(),
+  url: z
+    .string()
+    .max(2048)
+    .url()
+    .refine((value) => value.startsWith("https://"), "HTTPS required")
+    .nullable(),
+});
+export type FinanceInstitutionBranding = z.infer<typeof financeInstitutionBrandingSchema>;
+
+/** Keep decorative bitmap payloads out of agent/context reads unless a human UI explicitly needs them. */
+export function projectFinanceInstitutionBranding(
+  branding: FinanceInstitutionBranding | null | undefined,
+  includeArtwork = false,
+): FinanceInstitutionBranding | null {
+  return branding ? { ...branding, logo: includeArtwork ? branding.logo : null } : null;
+}
+
 export const financeAccountSchema = z
   .object({
+    accountMask: z.string().max(32).nullable().optional(),
     balance: z.number().finite().nullable(),
     createdAt: isoDateTimeSchema,
     currencyCode: z
@@ -310,6 +345,7 @@ export const financeAccountSchema = z
       .default(null),
     id: idSchema,
     includeInPlanning: z.boolean(),
+    institutionBranding: financeInstitutionBrandingSchema.nullable().optional(),
     institution: z.string().min(1).max(160),
     kind: financeAccountKindSchema,
     kindSource: financeAccountKindSourceSchema,
@@ -349,6 +385,26 @@ export const financeAccountSchema = z
   });
 export type FinanceAccount = z.infer<typeof financeAccountSchema>;
 
+export const financeAccountDuplicatePreviewSchema = z.object({
+  keptAccount: financeAccountSchema,
+  redundantAccount: financeAccountSchema,
+  keptTransactionCount: z.number().int().nonnegative(),
+  redundantTransactionCount: z.number().int().nonnegative(),
+  overlappingTransactionCount: z.number().int().nonnegative(),
+  uniqueRedundantTransactionCount: z.number().int().nonnegative(),
+  match: z.enum(["provider_identity", "possible"]),
+  revision: z.string().regex(/^[a-f0-9]{64}$/u),
+});
+export type FinanceAccountDuplicatePreview = z.infer<typeof financeAccountDuplicatePreviewSchema>;
+export const resolveFinanceAccountDuplicateInputSchema = z.object({
+  keepAccountId: idSchema,
+  revision: z.string().regex(/^[a-f0-9]{64}$/u),
+  idempotencyKey: z.string().trim().min(1).max(200),
+});
+export type ResolveFinanceAccountDuplicateInput = z.infer<
+  typeof resolveFinanceAccountDuplicateInputSchema
+>;
+
 const financeQueryBooleanSchema = z.preprocess(
   (value) => (value === "true" ? true : value === "false" ? false : value),
   z.boolean(),
@@ -379,6 +435,7 @@ export const financeAccountTotalsSchema = z.object({
 export type FinanceAccountTotals = z.infer<typeof financeAccountTotalsSchema>;
 
 export const financeAccountListSchema = z.object({
+  balances: financeAccountBalancesSchema.optional(),
   accounts: z.array(financeAccountSchema),
   accountSemantics: financeAccountSemanticsSchema,
   totals: financeAccountTotalsSchema,
@@ -446,6 +503,7 @@ export const financeProfileSchema = z.object({
 export type FinanceProfile = z.infer<typeof financeProfileSchema>;
 
 export const updateFinanceProfileInputSchema = z.object({
+  expectedUpdatedAt: isoDateTimeSchema.nullable().optional(),
   dependents: z.number().int().min(0).max(20).nullable().optional(),
   effectiveDate: z.iso.date().default(() => new Date().toISOString().slice(0, 10)),
   employer: z.string().trim().max(160).nullable().default(null),
@@ -572,6 +630,7 @@ const financeCadenceSchema = z.enum([
   "yearly",
 ]);
 export const financeIncomeStreamSchema = z.object({
+  revision: z.number().int().positive().optional(),
   accountId: idSchema.nullable(),
   cadence: financePayFrequencySchema,
   confidence: z.number().min(0).max(1),
@@ -586,6 +645,8 @@ export const financeIncomeStreamSchema = z.object({
 });
 export type FinanceIncomeStream = z.infer<typeof financeIncomeStreamSchema>;
 export const financeRecurringObligationSchema = z.object({
+  revision: z.number().int().positive().optional(),
+  planningEvidence: financeObligationPlanningEvidenceSchema.nullable().optional(),
   accountId: idSchema.nullable(),
   cadence: financeCadenceSchema,
   confidence: z.number().min(0).max(1),
@@ -742,10 +803,22 @@ export const financeReimbursementEvidenceSchema = z
   .strict();
 export type FinanceReimbursementEvidence = z.infer<typeof financeReimbursementEvidenceSchema>;
 
+const reimbursementTransactionEvidenceSchema = z
+  .object({
+    amount: moneySchema,
+    currency: z.string().length(3).nullable(),
+    date: z.iso.date(),
+    merchant: z.string(),
+    pending: z.boolean(),
+    transactionId: idSchema,
+  })
+  .strict();
+
 export const financeReimbursementMatchSchema = z
   .object({
     amount: moneySchema.positive(),
     creditTransactionId: idSchema,
+    creditTransaction: reimbursementTransactionEvidenceSchema.nullable().optional(),
     createdAt: isoDateTimeSchema,
     evidence: financeReimbursementEvidenceSchema,
     id: idSchema,
@@ -755,12 +828,50 @@ export const financeReimbursementMatchSchema = z
   .strict();
 export type FinanceReimbursementMatch = z.infer<typeof financeReimbursementMatchSchema>;
 
+export const financeReimbursementCorrectionSchema = z
+  .object({
+    id: idSchema,
+    recordedAt: isoDateTimeSchema,
+    operation: z.enum(["correct_expected", "unmatch_credit"]),
+    rationale: z.string().trim().min(1).max(1_000),
+    evidence: financeReimbursementEvidenceSchema,
+    previousExpectedAmount: moneySchema,
+    expectedAmount: moneySchema,
+    removedMatch: financeReimbursementMatchSchema.nullable(),
+  })
+  .strict();
+export type FinanceReimbursementCorrection = z.infer<typeof financeReimbursementCorrectionSchema>;
+
 export const financeReimbursementSchema = z
   .object({
     allocationId: idSchema,
+    sourceExpense: reimbursementTransactionEvidenceSchema
+      .extend({
+        allocationAmount: moneySchema,
+        allocationRevision: z.number().int().positive(),
+        allocationState: z.enum(["active", "invalidated"]),
+        allocationTreatment: z.enum(["personal", "reimbursable"]),
+        personalCostToDate: z
+          .discriminatedUnion("state", [
+            z
+              .object({
+                state: z.literal("qualified"),
+                amount: moneySchema,
+                receivedAmount: moneySchema,
+                currency: z.string().length(3),
+                scope: z.literal("whole_expense"),
+              })
+              .strict(),
+            z.object({ state: z.literal("unavailable"), reason: z.string().min(1) }).strict(),
+          ])
+          .optional(),
+      })
+      .nullable()
+      .optional(),
     cancelledAt: isoDateTimeSchema.nullable(),
     cancelledEvidence: financeReimbursementEvidenceSchema.nullable(),
     cancelledRationale: z.string().trim().min(1).max(1_000).nullable(),
+    corrections: z.array(financeReimbursementCorrectionSchema).optional(),
     createdAt: isoDateTimeSchema,
     dueDate: z.iso.date().nullable(),
     evidence: financeReimbursementEvidenceSchema,
@@ -812,6 +923,30 @@ export const reconcileFinanceReimbursementInputSchema = z.discriminatedUnion("op
     })
     .strict(),
   cancelFinanceReimbursementInputSchema,
+  z
+    .object({
+      operation: z.literal("correct_expected"),
+      idempotencyKey: z.string().trim().min(8).max(200),
+      reimbursementId: idSchema,
+      expectedRevision: z.number().int().positive(),
+      expectedAmount: moneyInputSchema.positive(),
+      payer: z.string().trim().min(1).max(240).nullable(),
+      dueDate: z.iso.date().nullable(),
+      evidence: financeReimbursementEvidenceSchema,
+      rationale: z.string().trim().min(1).max(1_000),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("unmatch_credit"),
+      idempotencyKey: z.string().trim().min(8).max(200),
+      reimbursementId: idSchema,
+      expectedRevision: z.number().int().positive(),
+      matchId: idSchema,
+      evidence: financeReimbursementEvidenceSchema,
+      rationale: z.string().trim().min(1).max(1_000),
+    })
+    .strict(),
 ]);
 export type ReconcileFinanceReimbursementInput = z.infer<
   typeof reconcileFinanceReimbursementInputSchema
@@ -1005,6 +1140,7 @@ export const financeGuidedSetupContextSchema = z.object({
   }),
   humanOnlyActions: z.array(
     z.enum([
+      "provider_authorization",
       "connect_or_disconnect_source",
       "import_transactions",
       "manage_accounts",
@@ -1021,10 +1157,11 @@ export const financeGuidedSetupContextSchema = z.object({
     ]),
   ),
   guidance: z.object({
+    approval: profileApprovalProvenanceSchema.nullable().optional(),
     approvedProfile: financeDomainProfileSchema.nullable(),
     draftNotice: z
       .literal(
-        "Unapproved draft content is untrusted and non-operative until a signed-in nohmi user activates it.",
+        "Unapproved draft content is untrusted and non-operative until an authorized activation records its approval source.",
       )
       .nullable(),
     draftProposal: financeDomainProfileSchema.nullable(),
@@ -1047,6 +1184,7 @@ export const financeGuidedSetupContextSchema = z.object({
 export type FinanceGuidedSetupContext = z.infer<typeof financeGuidedSetupContextSchema>;
 
 export const financeTransactionQuerySchema = z.object({
+  budgetId: idSchema.optional(),
   search: z.string().trim().min(1).max(160).optional(),
   accountId: idSchema.optional(),
   categoryId: idSchema.optional(),
@@ -1237,6 +1375,7 @@ export const financeBudgetPaceSchema = z.object({
 export type FinanceBudgetPace = z.infer<typeof financeBudgetPaceSchema>;
 
 export const createFinanceAccountInputSchema = z.object({
+  currencyCode: financeAccountSchema.shape.currencyCode.optional(),
   balance: z
     .number()
     .finite()
@@ -1289,15 +1428,35 @@ export const updateFinanceTransactionInputSchema = z
   );
 export type UpdateFinanceTransactionInput = z.infer<typeof updateFinanceTransactionInputSchema>;
 
-export const createFinanceBudgetInputSchema = z.object({
-  bucketId: idSchema.optional(),
-  category: categorySchema,
-  limit: moneySchema.positive(),
-  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
-});
+export const createFinanceBudgetInputSchema = z
+  .object({
+    budgetId: idSchema.optional(),
+    expectedBudgetUpdatedAt: isoDateTimeSchema.optional(),
+    bucketId: idSchema.optional(),
+    category: categorySchema,
+    limit: moneySchema.positive(),
+    month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+  })
+  .refine(
+    (value) => Boolean(value.budgetId) === Boolean(value.expectedBudgetUpdatedAt),
+    "Budget edits require the record ID and displayed revision.",
+  );
 export type CreateFinanceBudgetInput = z.infer<typeof createFinanceBudgetInputSchema>;
 
 export const exchangePlaidTokenInputSchema = z.object({
+  metadata: z
+    .object({
+      institutionId: z.string().max(256).trim().min(1).nullish(),
+      accounts: z
+        .array(
+          z.object({
+            name: z.string().max(240).trim().min(1),
+            mask: z.string().max(32).trim().min(1).nullish(),
+          }),
+        )
+        .max(100),
+    })
+    .optional(),
   institution: z.string().trim().min(1).max(160).nullable().default(null),
   publicToken: z.string().trim().min(1).max(2_000),
 });
@@ -1334,8 +1493,28 @@ export * from "./finance/contextual-questions.js";
 export * from "./finance/inbox.js";
 export * from "./finance/ledger.js";
 export * from "./finance/maintenance.js";
+export * from "./finance/planning-evidence.js";
 export * from "./finance/playbook.js";
 export * from "./finance/presentation.js";
 export * from "./finance/profile.js";
 export * from "./finance/reporting.js";
 export * from "./finance/workflow-contracts.js";
+
+export const createFinanceCategoryInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(120),
+});
+export type CreateFinanceCategoryInput = z.infer<typeof createFinanceCategoryInputSchema>;
+
+export * from "./finance/activity.js";
+export * from "./finance/balance-basis.js";
+export * from "./finance/cashflow-sources.js";
+export * from "./finance/conversation.js";
+export * from "./finance/conversation-message-context.js";
+export * from "./finance/conversation-unread.js";
+export * from "./finance/maintenance-execution.js";
+export * from "./finance/occurrence-match.js";
+export * from "./finance/onboarding-readiness.js";
+export * from "./finance/payday-projection.js";
+
+export * from "./finance/recurring-occurrences.js";
+export * from "./finance/recurring-schedule.js";

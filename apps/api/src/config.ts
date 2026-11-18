@@ -1,7 +1,8 @@
-import { iloSetupRelease, semanticVersionSchema } from "@personal-os/domain";
+import { createPrivateKey } from "node:crypto";
+import { personalOsSetupRelease, semanticVersionSchema } from "@personal-os/domain";
 import { z } from "zod";
 
-export const officialAgentSkill = iloSetupRelease;
+export const officialAgentSkill = personalOsSetupRelease;
 
 const configSchema = z
   .object({
@@ -59,16 +60,24 @@ const configSchema = z
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
     MCP_RESOURCE_URL: z.url().optional(),
     MCP_INTERNAL_SECRET: z.string().min(32).optional(),
+    NATIVE_PUSH_ENABLED: z.enum(["true", "false"]).default("false"),
+    APNS_TEAM_ID: z.string().default(""),
+    APNS_KEY_ID: z.string().default(""),
+    APNS_PRIVATE_KEY_BASE64: z.string().default(""),
+    APNS_TOPIC: z.string().default("app.personal-os.mobile"),
+    APNS_ENVIRONMENT: z.enum(["sandbox", "production"]).default("production"),
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     OWNER_EMAILS: z.string().default(""),
     PORT: z.coerce.number().int().min(1).max(65_535).default(8788),
     PLAID_CLIENT_ID: z.string().default(""),
     PLAID_ENV: z.enum(["sandbox", "development", "production"]).default("sandbox"),
     PLAID_SECRET: z.string().default(""),
+    PLAID_IOS_REDIRECT_URI: z.string().default(""),
     RESEND_API_KEY: z.string().default(""),
     REGISTRATION_MODE: z.enum(["invite", "open"]).default("invite"),
     SESSION_COOKIE_NAME: z.string().min(1).default("personal_os_session"),
     SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+    FINANCE_SMS_ENABLED: z.enum(["true", "false"]).default("false"),
     TEXTING_ENABLED: z.enum(["true", "false"]).default("false"),
     TRUST_PROXY: z.enum(["true", "false"]).default("false"),
     TWILIO_ACCOUNT_SID: z.string().default(""),
@@ -91,6 +100,21 @@ const configSchema = z
           "AGENT_SKILL_SOURCE_URL must include AGENT_SKILL_REVISION so the guide identifies a release instead of a generic latest endpoint.",
         path: ["AGENT_SKILL_SOURCE_URL"],
       });
+    }
+    if (value.PLAID_IOS_REDIRECT_URI.trim()) {
+      try {
+        const url = new URL(value.PLAID_IOS_REDIRECT_URI.trim());
+        // Plaid accepts only an HTTPS universal link as an iOS OAuth return address.
+        if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash)
+          throw new Error();
+      } catch {
+        context.addIssue({
+          code: "custom",
+          message:
+            "PLAID_IOS_REDIRECT_URI must be an HTTPS URL without credentials, query or fragment.",
+          path: ["PLAID_IOS_REDIRECT_URI"],
+        });
+      }
     }
     if (value.GOOGLE_GMAIL_PUSH_ENABLED === "true") {
       for (const key of [
@@ -226,6 +250,7 @@ function sourceIdentifiesRevision(sourceUrl: string, revision: string): boolean 
 }
 
 export type AppConfig = {
+  nativePush?: import("./native-push-transport.js").ApnsConfig;
   agentSkillRevision?: string;
   agentSkillSourceUrl?: string;
   agentSkillVersion?: string;
@@ -256,6 +281,8 @@ export type AppConfig = {
   port: number;
   plaidClientId: string;
   plaidEnvironment: "sandbox" | "development" | "production";
+  /** The universal link Plaid returns to after bank sign-in in the iPhone app; unset by default. */
+  plaidIosRedirectUri?: string;
   plaidSecret: string;
   production: boolean;
   ownerEmails?: string[];
@@ -268,6 +295,7 @@ export type AppConfig = {
     accountSid: string;
     authToken: string;
     enabled: boolean;
+    financeSmsEnabled?: boolean;
     messagingServiceSid: string;
     senderPhoneNumber: string;
     verifyServiceSid: string;
@@ -279,6 +307,25 @@ export type AppConfig = {
 
 export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
   const value = configSchema.parse(migrateLegacyOfficialAgentSkill(environment));
+  if (value.NATIVE_PUSH_ENABLED === "true") {
+    if (
+      !/^[A-Z0-9]{10}$/.test(value.APNS_TEAM_ID) ||
+      !/^[A-Z0-9]{10}$/.test(value.APNS_KEY_ID) ||
+      value.APNS_TOPIC !== "app.personal-os.mobile" ||
+      (value.NODE_ENV === "production" && value.APNS_ENVIRONMENT !== "production")
+    )
+      throw new Error("Native push configuration is invalid.");
+    try {
+      const encoded = value.APNS_PRIVATE_KEY_BASE64;
+      if (!encoded || Buffer.from(encoded, "base64").toString("base64") !== encoded)
+        throw new Error();
+      const key = createPrivateKey(Buffer.from(encoded, "base64").toString("utf8"));
+      if (key.asymmetricKeyType !== "ec" || key.asymmetricKeyDetails?.namedCurve !== "prime256v1")
+        throw new Error();
+    } catch {
+      throw new Error("Native push requires a valid base64-encoded APNs P-256 private key.");
+    }
+  }
   return {
     agentSkillRevision: value.AGENT_SKILL_REVISION,
     agentSkillSourceUrl:
@@ -293,6 +340,14 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
           ]),
         ]
       : [value.APP_BASE_URL],
+    nativePush: {
+      enabled: value.NATIVE_PUSH_ENABLED === "true",
+      teamId: value.APNS_TEAM_ID,
+      keyId: value.APNS_KEY_ID,
+      privateKey: Buffer.from(value.APNS_PRIVATE_KEY_BASE64, "base64").toString("utf8"),
+      topic: value.APNS_TOPIC,
+      environment: value.APNS_ENVIRONMENT,
+    },
     authRateLimitMaxRequests: value.AUTH_RATE_LIMIT_MAX_REQUESTS,
     authRateLimitWindowSeconds: value.AUTH_RATE_LIMIT_WINDOW_SECONDS,
     apiBaseUrl: value.API_BASE_URL,
@@ -319,6 +374,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
     port: value.PORT,
     plaidClientId: value.PLAID_CLIENT_ID,
     plaidEnvironment: value.PLAID_ENV,
+    ...(value.PLAID_IOS_REDIRECT_URI.trim()
+      ? { plaidIosRedirectUri: value.PLAID_IOS_REDIRECT_URI.trim() }
+      : {}),
     plaidSecret: value.PLAID_SECRET,
     production: value.NODE_ENV === "production",
     ownerEmails: value.OWNER_EMAILS.split(",")
@@ -333,6 +391,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
       accountSid: value.TWILIO_ACCOUNT_SID,
       authToken: value.TWILIO_AUTH_TOKEN,
       enabled: value.TEXTING_ENABLED === "true",
+      financeSmsEnabled: value.FINANCE_SMS_ENABLED === "true",
       messagingServiceSid: value.TWILIO_MESSAGING_SERVICE_SID,
       senderPhoneNumber: value.TWILIO_PHONE_NUMBER,
       verifyServiceSid: value.TWILIO_VERIFY_SERVICE_SID,

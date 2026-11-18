@@ -1,5 +1,15 @@
 import type { AccessScope } from "@personal-os/domain";
 export const scopeLabels: Record<AccessScope, string> = {
+  "mail:execute":
+    "Execute Mail approvals, sending, and settings; with Calendar and Tasks execution, sync or disconnect shared sources when review bypass is enabled",
+  "finances:execute":
+    "Execute Finance approvals, account changes, and settings when review bypass is enabled",
+  "calendar:execute":
+    "Change Calendar settings; with Mail and Tasks execution, sync or disconnect shared sources when review bypass is enabled",
+  "tasks:execute":
+    "Change Tasks settings; with Mail and Calendar execution, sync or disconnect shared sources when review bypass is enabled",
+  "texting:execute":
+    "Change notification preferences or disconnect the verified Texting destination when review bypass is enabled",
   "audit:read": "Read activity",
   "automations:read": "Read daily brief",
   "automations:write": "Legacy automation access (inactive)",

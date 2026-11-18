@@ -1,0 +1,149 @@
+import {
+  approveFinanceReviewBatchInputSchema,
+  executeFinanceReviewBatchInputSchema,
+  financeReviewBacklogQuerySchema,
+  idSchema,
+  listFinanceReviewBatchesInputSchema,
+  previewFinanceReviewBatchInputSchema,
+  previewFinanceReviewBatchUndoInputSchema,
+  qualifyFinanceMaintenanceWorkInputSchema,
+} from "@personal-os/domain";
+import type { Context, Hono } from "hono";
+import type { createFinanceReviewBacklogService } from "../finance/review-backlog-service.js";
+import type { createFinanceReviewBatchService } from "../finance/review-batch-service.js";
+import type { AppEnv } from "../types.js";
+import { parseBody, requireScope } from "./support.js";
+
+export function registerFinanceReviewBacklogRoutes({
+  app,
+  backlog,
+  batches,
+}: {
+  app: Hono<AppEnv>;
+  backlog: ReturnType<typeof createFinanceReviewBacklogService>;
+  batches: ReturnType<typeof createFinanceReviewBatchService>;
+}) {
+  const context = (c: Context<AppEnv>) => ({
+    principal: c.get("principal"),
+    requestId: c.get("requestId"),
+  });
+  app.use("/v1/finances/review-backlog*", async (c, next) => {
+    c.header("Cache-Control", "no-store");
+    await next();
+  });
+  app.use("/v1/finances/review-batches*", async (c, next) => {
+    c.header("Cache-Control", "no-store");
+    await next();
+  });
+  app.use("/v1/finances/review-batch-corrections*", async (c, next) => {
+    c.header("Cache-Control", "no-store");
+    await next();
+  });
+  app.post(
+    "/v1/finances/review-batch-corrections",
+    requireScope("finances:read"),
+    requireScope("finances:write"),
+    async (c) =>
+      c.json(
+        await batches.previewUndo(
+          await parseBody(c, previewFinanceReviewBatchUndoInputSchema),
+          context(c),
+        ),
+        201,
+      ),
+  );
+  app.get("/v1/finances/review-batch-corrections/:id", requireScope("finances:read"), async (c) =>
+    c.json(await batches.getUndo(idSchema.parse(c.req.param("id")), context(c))),
+  );
+  app.post(
+    "/v1/finances/review-batch-corrections/:id/execute",
+    requireScope("finances:write"),
+    async (c) =>
+      c.json(
+        await batches.executeUndo(
+          idSchema.parse(c.req.param("id")),
+          await parseBody(c, executeFinanceReviewBatchInputSchema),
+          { ...context(c), signal: c.req.raw.signal },
+        ),
+      ),
+  );
+  // Owner-only: the service refuses every agent principal regardless of scope.
+  app.post(
+    "/v1/finances/review-batch-corrections/:id/decline",
+    requireScope("finances:read"),
+    requireScope("finances:write"),
+    async (c) => c.json(await batches.declineUndo(idSchema.parse(c.req.param("id")), context(c))),
+  );
+  app.post(
+    "/v1/finances/review-batches/:id/decline",
+    requireScope("finances:read"),
+    requireScope("finances:write"),
+    async (c) => c.json(await batches.declineBatch(idSchema.parse(c.req.param("id")), context(c))),
+  );
+  app.get("/v1/finances/review-backlog", requireScope("finances:read"), async (c) =>
+    c.json(await backlog.assess(c.get("principal").userId)),
+  );
+  app.get("/v1/finances/review-backlog/items", requireScope("finances:read"), async (c) =>
+    c.json(
+      await backlog.list(
+        c.get("principal").userId,
+        financeReviewBacklogQuerySchema.parse(c.req.query()),
+      ),
+    ),
+  );
+  app.get("/v1/finances/review-batches", requireScope("finances:read"), async (c) =>
+    c.json(
+      await batches.list(context(c), listFinanceReviewBatchesInputSchema.parse(c.req.query())),
+    ),
+  );
+  app.post("/v1/finances/review-batches/qualification", requireScope("finances:read"), async (c) =>
+    c.json(
+      await batches.qualify(
+        await parseBody(c, qualifyFinanceMaintenanceWorkInputSchema),
+        context(c),
+      ),
+    ),
+  );
+  app.post("/v1/finances/review-batches", requireScope("finances:write"), async (c) =>
+    c.json(
+      await batches.preview(await parseBody(c, previewFinanceReviewBatchInputSchema), context(c)),
+      201,
+    ),
+  );
+  app.get("/v1/finances/review-batches/:id", requireScope("finances:read"), async (c) =>
+    c.json(await batches.get(idSchema.parse(c.req.param("id")), context(c))),
+  );
+  app.get("/v1/finances/review-batches/:id/approval", requireScope("finances:read"), async (c) =>
+    c.json(await batches.getContinuation(idSchema.parse(c.req.param("id")), context(c))),
+  );
+  app.post(
+    "/v1/finances/review-batches/:id/approval",
+    requireScope("finances:read"),
+    requireScope("finances:write"),
+    async (c) =>
+      c.json(
+        await batches.approveForContinuation(
+          idSchema.parse(c.req.param("id")),
+          await parseBody(c, approveFinanceReviewBatchInputSchema),
+          context(c),
+        ),
+        202,
+      ),
+  );
+  app.post(
+    "/v1/finances/review-batches/:id/approval/cancel",
+    requireScope("finances:write"),
+    async (c) =>
+      c.json(await batches.cancelContinuation(idSchema.parse(c.req.param("id")), context(c))),
+  );
+  // Execution authority and revocation are checked inside every item's transaction.
+  app.post("/v1/finances/review-batches/:id/execute", requireScope("finances:write"), async (c) =>
+    c.json(
+      await batches.execute(
+        idSchema.parse(c.req.param("id")),
+        await parseBody(c, executeFinanceReviewBatchInputSchema),
+        { ...context(c), signal: c.req.raw.signal },
+      ),
+    ),
+  );
+}

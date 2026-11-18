@@ -2,7 +2,8 @@
 
 ## Purpose
 
-nohmi should feel like one coherent exoskeleton for a person and their agents.
+nohmi should feel like one coherent personal harness: context, tools, and controls built around
+the person, available to them directly and to the agents they authorize.
 Each core workspace should first behave like the familiar best-in-class product
 category it replaces for ordinary use: mail client, task manager, calendar, or
 budget and net-worth application. Intelligence simplifies and connects those
@@ -90,9 +91,13 @@ actions stay at the top of the reader, and every desktop pane remains resizable.
 An end-justified floating plus opens the human Mail composer. Compose, Reply,
 and Forward create a durable plain-text draft with From, To, optional Cc,
 Subject, and Message fields. Sending requires an explicit review of one exact
-saved revision. Attachments, Bcc, autonomous transmission, and MCP transmission
-are unavailable. Ambiguous provider acceptance is never retried automatically;
-the Drafts view keeps it visible for human reconciliation.
+saved revision. Attachments, Bcc, and autonomous maintenance transmission remain
+unavailable. Explicitly authorized MCP execution may send an exact saved draft or
+reconcile its delivery outcome with `mail:write`, `mail:execute`, and owner-enabled
+review bypass; it retains the tool's current-revision and provider prerequisites.
+Ambiguous provider acceptance is never retried automatically. The Drafts view keeps
+it visible for a person or authorized execution agent to reconcile observed evidence
+without resending. Autonomous Mail maintenance still cannot compose or send.
 
 Account identity remains visible on each conversation whenever multiple
 providers are combined. A disconnected provider is surfaced prominently without

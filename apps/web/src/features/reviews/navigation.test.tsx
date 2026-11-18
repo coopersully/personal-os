@@ -1,21 +1,25 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { SidebarProvider } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { ReviewNavigation } from "./navigation.js";
 
 const mocks = vi.hoisted(() => ({ listAgentAccessWorkItems: vi.fn() }));
 vi.mock("../../api.js", () => ({ api: mocks }));
-function renderEntry() {
+function renderEntry(
+  workspace: "calendar" | "tasks" | "mail" | "finances" = "calendar",
+  footer = false,
+) {
   return render(
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
       <MemoryRouter initialEntries={["/calendar/decisions"]}>
-        <ReviewNavigation workspace="calendar" />
+        <ReviewNavigation workspace={workspace} footer={footer} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -23,8 +27,9 @@ function renderEntry() {
 it.each([
   [1, "1 item needs review"],
   [3, "3 items need review"],
-  [0, "No items need review"],
   [1200, "1,200 items need review"],
+  [1300, "1,300 items need review"],
+  [12000, "12,000 items need review"],
 ])("shows an honest count of %s", async (count, label) => {
   mocks.listAgentAccessWorkItems.mockResolvedValue({
     summary: { byDomain: { calendar: count } },
@@ -33,8 +38,9 @@ it.each([
   renderEntry();
   const link = await screen.findByRole("button", { name: label as string });
   expect(link.querySelector(".review-navigation__count")).toHaveTextContent(
-    count === 1200 ? "1.2k" : String(count),
+    count === 1200 ? "1.2k" : count === 1300 ? "1.3k" : count === 12000 ? "12k" : String(count),
   );
+  expect(link.querySelector(".review-navigation__label")).toBeNull();
   if (count) expect(link).toHaveAttribute("data-attention", "true");
   else expect(link).not.toHaveAttribute("data-attention");
 });
@@ -46,6 +52,19 @@ it("surfaces failed counts instead of claiming there is no work", async () => {
   expect(button.querySelector(".review-navigation__count")).toHaveTextContent("!");
 });
 
+it.each([
+  "calendar",
+  "tasks",
+  "mail",
+  "finances",
+] as const)("hides zero-count entry points for %s", async (workspace) => {
+  mocks.listAgentAccessWorkItems.mockResolvedValue({
+    summary: { byDomain: { [workspace]: 0 } },
+    unavailableDomains: [],
+  });
+  renderEntry(workspace);
+  await waitFor(() => expect(screen.queryByRole("button")).not.toBeInTheDocument());
+});
 function LocationProbe() {
   return <output aria-label="Review location">{useLocation().search}</output>;
 }
@@ -59,9 +78,11 @@ it("opens footer reviews without losing the active calendar filters", async () =
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
       <MemoryRouter initialEntries={["/calendar?view=week&calendar=chosen&review=attention:one"]}>
-        <SidebarProvider>
-          <ReviewNavigation workspace="calendar" footer />
-        </SidebarProvider>
+        <TooltipProvider>
+          <SidebarProvider>
+            <ReviewNavigation workspace="calendar" footer />
+          </SidebarProvider>
+        </TooltipProvider>
         <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,

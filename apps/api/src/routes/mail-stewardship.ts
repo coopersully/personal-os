@@ -1,3 +1,4 @@
+import type { Database } from "@personal-os/database";
 import {
   answerMailQuestionInputSchema,
   createMailObligationInputSchema,
@@ -12,11 +13,13 @@ import type { Context, Hono } from "hono";
 import type { MailMaintenanceService } from "../mail-maintenance-service.js";
 import type { MailStewardshipService } from "../mail-stewardship-service.js";
 import type { AppEnv, Principal } from "../types.js";
-import { parseBody, parseOptionalBody, requireFeatureAccess, requireHuman } from "./support.js";
+import { requireWorkspaceExecutionRoute } from "../workspace-execution.js";
+import { parseBody, parseOptionalBody, requireFeatureAccess } from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 type MailStewardshipRouteOptions = {
   app: Hono<AppEnv>;
+  db?: Database;
   maintenance: MailMaintenanceService;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
   stewardship: MailStewardshipService;
@@ -26,6 +29,7 @@ type MailStewardshipRouteOptions = {
 export function registerMailStewardshipRoutes({
   app,
   maintenance,
+  db,
   mutationContext,
   stewardship,
 }: MailStewardshipRouteOptions) {
@@ -41,11 +45,15 @@ export function registerMailStewardshipRoutes({
   app.use("/v1/mail/obligations/*", requireMailAccess);
   app.use("/v1/mail/questions/*", requireMailAccess);
   app.use("/v1/mail/feedback", requireMailAccess);
-  app.use("/v1/mail/threads/*/disposition", requireHuman);
-  app.use("/v1/mail/threads/*/obligations", requireHuman);
-  app.use("/v1/mail/obligations/*", requireHuman);
-  app.use("/v1/mail/questions/*", requireHuman);
-  app.use("/v1/mail/feedback", requireHuman);
+  app.use("/v1/mail/threads/*/disposition", requireWorkspaceExecutionRoute(db, "mail"));
+  app.use("/v1/mail/threads/*/obligations", requireWorkspaceExecutionRoute(db, "mail"));
+  app.use("/v1/mail/obligations/*", requireWorkspaceExecutionRoute(db, "mail"));
+  app.use("/v1/mail/questions/*", (context, next) =>
+    context.req.method === "GET"
+      ? next()
+      : requireWorkspaceExecutionRoute(db, "mail")(context, next),
+  );
+  app.use("/v1/mail/feedback", requireWorkspaceExecutionRoute(db, "mail"));
 
   app.get("/v1/mail/status", async (context) =>
     context.json({ status: await stewardship.getStatus(context.get("principal").userId) }),

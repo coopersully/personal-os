@@ -50,7 +50,7 @@ describe("Finance status deterministic helpers", () => {
     });
   });
 
-  it("scopes ledger transactions for windows, targets, reviews, and current month", () => {
+  it("scopes ledger transactions for windows, targets, reviews, and all history", () => {
     const row = { accountId: "account", id: "transaction", transactionDate: "2026-08-15" } as never;
     expect(nextMonth("2026-12")).toBe("2027-01");
     expect(
@@ -102,6 +102,14 @@ describe("Finance status deterministic helpers", () => {
       ),
     ).toBe(false);
     expect(transactionIsInScope(row, { type: "all_outstanding" }, "2026-08", null)).toBe(true);
+    expect(
+      transactionIsInScope(
+        { transactionDate: "2020-01-01" } as never,
+        { type: "all_outstanding" },
+        "2026-08",
+        null,
+      ),
+    ).toBe(true);
   });
 
   it("selects the newest profile effective at the requested date", () => {

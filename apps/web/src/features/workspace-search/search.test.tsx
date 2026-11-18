@@ -1,0 +1,296 @@
+import { resolveWorkspaceSettings } from "@personal-os/domain";
+// @vitest-environment jsdom
+
+import type { WorkspaceSearchPage } from "@personal-os/domain";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, useLocation } from "react-router-dom";
+import { api } from "@/api";
+import { parseCalendarDateQuery } from "../calendar/search-date";
+import { workspaceCatalog } from "./catalog";
+import { WorkspaceFinder } from "./search";
+
+function Route() {
+  return (
+    <output aria-label="Current route">
+      {useLocation().pathname}
+      {useLocation().search}
+    </output>
+  );
+}
+function renderSearch(
+  workspace: "calendar" | "tasks" | "mail" | "finances" = "calendar",
+  onAction = vi.fn(),
+) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[`/${workspace}?view=week`]}>
+        <WorkspaceFinder workspace={workspace} timeZone="America/New_York" onAction={onAction} />
+        <Route />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  fireEvent.click(
+    screen.queryByRole("button", { name: /^Search / }) ??
+      screen.getByRole("combobox", { name: /^Search / }),
+  );
+  return onAction;
+}
+beforeEach(() => {
+  vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async (workspace) =>
+    resolveWorkspaceSettings(workspace),
+  );
+  vi.spyOn(api, "searchWorkspace").mockResolvedValue({
+    items: [],
+    nextOffset: null,
+    coverage: "synced",
+  });
+});
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+it("opens a setting field without modifying the underlying workspace filters while typing", async () => {
+  const user = userEvent.setup();
+  renderSearch();
+  await user.type(screen.getByRole("combobox", { name: "Search Calendar" }), "weekends");
+  expect(screen.getByLabelText("Current route")).toHaveTextContent("/calendar?view=week");
+  await user.click(await screen.findByRole("option", { name: /Show weekends/ }));
+  expect(screen.getByLabelText("Current route")).toHaveTextContent(
+    "/settings?page=calendar&field=calendar%3Ashow-weekends",
+  );
+});
+it("launches creation and reviews through existing destinations", async () => {
+  const user = userEvent.setup();
+  const onAction = renderSearch("tasks");
+  await user.type(
+    screen.getByRole("combobox", { name: /^Search (Calendar|Tasks|Mail|Finances)$/ }),
+    "new task",
+  );
+  await user.click(await screen.findByRole("option", { name: /New task/ }));
+  expect(onAction).toHaveBeenCalledWith("new-task");
+  await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
+  await user.click(screen.getByRole("combobox", { name: "Search Tasks" }));
+  await user.type(
+    screen.getByRole("combobox", { name: /^Search (Calendar|Tasks|Mail|Finances)$/ }),
+    "reviews",
+  );
+  await user.click(await screen.findByRole("option", { name: /Items needing review/ }));
+  expect(screen.getByLabelText("Current route")).toHaveTextContent("/tasks?review=open");
+});
+it("opens a server result with Enter and passes request cancellation", async () => {
+  vi.mocked(api.searchWorkspace).mockResolvedValue({
+    items: [
+      {
+        id: "event",
+        kind: "Event",
+        title: "Dentist",
+        preview: "Oct 4 · Personal",
+        href: "/calendar?event=event",
+        state: "Hidden calendar",
+      },
+    ],
+    nextOffset: null,
+    coverage: "synced",
+  });
+  const user = userEvent.setup();
+  renderSearch();
+  const input = screen.getByRole("combobox", { name: /^Search (Calendar|Tasks|Mail|Finances)$/ });
+  await user.type(input, "dentist");
+  expect(await screen.findByRole("option", { name: /Dentist/ })).toBeInTheDocument();
+  await user.keyboard("{ArrowDown}{Enter}");
+  expect(screen.getByLabelText("Current route")).toHaveTextContent("/calendar?event=event");
+  expect(api.searchWorkspace).toHaveBeenCalledWith(
+    "calendar",
+    expect.objectContaining({ q: "dentist", includeArchived: true }),
+    expect.any(AbortSignal),
+  );
+});
+it("keeps shortcuts available when record search fails, and retries", async () => {
+  vi.mocked(api.searchWorkspace).mockRejectedValueOnce(new Error("Offline"));
+  const user = userEvent.setup();
+  renderSearch("mail");
+  await user.type(
+    screen.getByRole("combobox", { name: /^Search (Calendar|Tasks|Mail|Finances)$/ }),
+    "settings",
+  );
+  expect(await screen.findByText(/Content search is unavailable/)).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: /Mail settings/ })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Retry search" }));
+  await waitFor(() =>
+    expect(screen.queryByText(/Content search is unavailable/)).not.toBeInTheDocument(),
+  );
+});
+it("shows honest pending and empty states and does not retain results from another query", async () => {
+  let finish!: (page: WorkspaceSearchPage) => void;
+  vi.mocked(api.searchWorkspace).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const user = userEvent.setup();
+  renderSearch();
+  await user.type(
+    screen.getByRole("combobox", { name: /^Search (Calendar|Tasks|Mail|Finances)$/ }),
+    "nonmatchingxyz",
+  );
+  await waitFor(() => expect(api.searchWorkspace).toHaveBeenCalled());
+  expect(screen.getByText("Searching…")).toBeInTheDocument();
+  finish({ items: [], nextOffset: null, coverage: "synced" });
+  expect(await screen.findByText("No matches found.")).toBeInTheDocument();
+});
+it("shares the settings field catalog and recognizes weekdays with the account time zone", () => {
+  expect(
+    workspaceCatalog("calendar", "time zone").some((item) => item.href.includes("page=profile")),
+  ).toBe(true);
+  expect(workspaceCatalog("finances", "reviews")[0]?.href).toBe("/finances?review=open");
+  expect(workspaceCatalog("mail", "unread")[0]?.href).toBe("/mail?unread=1");
+  expect(
+    parseCalendarDateQuery("next monday", "America/New_York", new Date("2026-10-03T12:00:00Z"))
+      ?.date,
+  ).toEqual({ day: 5, month: 10, year: 2026 });
+  expect(parseCalendarDateQuery("2026-02-30", "UTC")).toBeUndefined();
+});
+
+it("opens compact mobile search from a named button and restores keyboard focus", async () => {
+  const originalWidth = window.innerWidth;
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  try {
+    renderSearch("tasks");
+    const popup = await screen.findByRole("dialog", { name: "Search Tasks" });
+    const trigger = screen.getByRole("button", { name: "Search Tasks" });
+    expect(trigger).toHaveAttribute("tabindex", "0");
+    const input = await screen.findByRole("combobox", { name: "Search Tasks" });
+    expect(popup).toContainElement(input);
+    await waitFor(() => expect(input).toHaveFocus());
+    await userEvent.setup().keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Search Tasks" })).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(trigger).toHaveFocus());
+    await userEvent.setup().keyboard("{Enter}");
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Search Tasks" })).toHaveFocus(),
+    );
+    fireEvent.change(screen.getByRole("combobox", { name: "Search Tasks" }), {
+      target: { value: "reviews" },
+    });
+    fireEvent.click(await screen.findByRole("option", { name: /Items needing review/ }));
+    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
+    expect(screen.getByLabelText("Current route")).toHaveTextContent("/tasks?review=open");
+  } finally {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+  }
+});
+
+it.each([
+  true,
+  false,
+])("preserves mobile-to-desktop search focus only when the input owned it (focused=%s)", async (focused) => {
+  const originalWidth = window.innerWidth;
+  const media = new EventTarget();
+  vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+    matches: window.innerWidth < 768,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: media.addEventListener.bind(media),
+    removeEventListener: media.removeEventListener.bind(media),
+    dispatchEvent: media.dispatchEvent.bind(media),
+  }));
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  const outside = document.createElement("button");
+  outside.textContent = "Keep keyboard focus";
+  document.body.append(outside);
+  try {
+    renderSearch("tasks");
+    const mobile = await screen.findByRole("combobox", { name: "Search Tasks" });
+    await waitFor(() => expect(mobile).toHaveFocus());
+    fireEvent.change(mobile, { target: { value: "reviews" } });
+    act(() => {
+      if (!focused) outside.focus();
+      expect(focused ? mobile : outside).toHaveFocus();
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 1100 });
+      media.dispatchEvent(new Event("change"));
+    });
+    const desktop = screen.getByRole("combobox", { name: "Search Tasks" });
+    expect(desktop).not.toBe(mobile);
+    expect(desktop).toHaveValue("reviews");
+    await waitFor(() => expect(focused ? desktop : outside).toHaveFocus());
+  } finally {
+    outside.remove();
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+  }
+});
+
+it.each([
+  "n",
+  "i",
+])("does not select results when typing %s on a closed compact trigger", async (key) => {
+  const originalWidth = window.innerWidth;
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  try {
+    const user = userEvent.setup();
+    const onAction = renderSearch("tasks");
+    const trigger = screen.getByRole("button", { name: "Search Tasks" });
+    await screen.findByRole("option", { name: /New task/ });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(trigger).toHaveFocus());
+    await user.keyboard(key);
+    expect(onAction).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Current route")).toHaveTextContent("/tasks?view=week");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("option", { name: /New task/ }));
+    expect(onAction).toHaveBeenCalledExactlyOnceWith("new-task");
+  } finally {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+  }
+});
+
+it("filters discovery without changing the page and paginates server results", async () => {
+  vi.mocked(api.searchWorkspace).mockResolvedValue({
+    items: [],
+    nextOffset: 20,
+    coverage: "synced",
+  });
+  const user = userEvent.setup();
+  renderSearch("mail");
+  await user.type(screen.getByRole("combobox", { name: "Search Mail" }), "review");
+  await user.click(await screen.findByRole("button", { name: "More results" }));
+  await waitFor(() =>
+    expect(api.searchWorkspace).toHaveBeenLastCalledWith(
+      "mail",
+      expect.objectContaining({ offset: 20 }),
+      expect.any(AbortSignal),
+    ),
+  );
+  await user.click(screen.getByRole("button", { name: "Search result type" }));
+  await user.click(screen.getByRole("button", { name: /^Reviews$/ }));
+  await waitFor(() =>
+    expect(api.searchWorkspace).toHaveBeenLastCalledWith(
+      "mail",
+      expect.objectContaining({ kind: "reviews", offset: 0 }),
+      expect.any(AbortSignal),
+    ),
+  );
+  expect(screen.getByLabelText("Current route")).toHaveTextContent("/mail?view=week");
+});
+
+it.each([
+  "calendar",
+  "tasks",
+  "mail",
+  "finances",
+] as const)("keeps %s search icon-only while retaining its accessible name", (workspace) => {
+  renderSearch(workspace);
+  const input = screen.getByRole("combobox", { name: /^Search / });
+  expect(input).toHaveAttribute("placeholder", "");
+  expect(
+    screen.queryByRole("button", { name: input.getAttribute("aria-label") ?? "" }),
+  ).not.toBeInTheDocument();
+});

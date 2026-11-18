@@ -34,7 +34,7 @@ Ask only unanswered questions, one at a time:
 3. **Alerts and review:** What large-expense amount, low-balance amount, recurring-change
    percentage, confidence threshold, pending-transaction policy, lead time, and review cadence
    should guide attention?
-4. **Language and safety:** What should Ilo call spending and the review queue, and what additional
+4. **Language and safety:** What should nohmi call spending and the review queue, and what additional
    actions or disclosures should an agent never make?
 
 Store account meanings in `sourceContexts`; category language and examples in `categories`; custom
@@ -89,7 +89,7 @@ broad token.
 - An agent may not confirm an ambiguous transfer. Preserve the review case and direct the user to
   Finance.
 - An agent may inspect recurring obligations, merchants, and alerts, but changes require a signed-in
-  person in Finance. A recurring status such as `cancelled` changes only Ilo's forecast context; it
+  person in Finance. A recurring status such as `cancelled` changes only nohmi's forecast context; it
   never cancels a provider payment.
 
 MCP annotations are host hints, not authority. The Finance API's scope checks, human-only guards,

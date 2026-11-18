@@ -1,15 +1,22 @@
 import type { MailRule, MailSetupAccount } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { BrandMark } from "@/components/brand-marks";
+import { DataViewEmpty } from "@/components/data-view-state";
 import { ChevronRightIcon, PauseIcon } from "@/components/icons";
 import { MutationFeedback } from "@/components/mutation-feedback";
-import { SettingsRecord, SettingsRecordAction } from "@/components/settings-record";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/settings-field";
+import { SettingsRecordAction } from "@/components/settings-record";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { ItemGroup } from "@/components/ui/item";
 import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
 import { api } from "../../api.js";
-import { ConnectionHealthBadge, ConnectionHealthDescription } from "../connections/health";
+import { ConnectionHealthBadge } from "../connections/health";
+import { ProfileRow } from "./profile-rows";
 import { SettingsSection } from "./settings-layout";
 
 export function MailConfiguration({
@@ -37,93 +44,89 @@ export function MailConfiguration({
   return (
     <>
       {accounts ? (
-        <SettingsSection
-          title="Accounts & sync"
-          action={
-            <Button asChild variant="ghost" size="sm">
-              <Link to="/settings?section=connections">Manage accounts</Link>
-            </Button>
-          }
-        >
-          <ItemGroup>
-            {accounts.map((account) => (
-              <SettingsRecord
-                key={account.accountId}
-                title={account.label}
-                description={account.email}
-                metadata={<ConnectionHealthBadge health={account.health} />}
-                actions={
-                  <SettingsRecordAction asChild label={`Manage ${account.label}`}>
-                    <Link to="/settings?section=connections">
-                      <ChevronRightIcon />
-                    </Link>
-                  </SettingsRecordAction>
-                }
-              >
-                <ConnectionHealthDescription
-                  health={account.health}
-                  lastSyncedAt={account.lastSyncedAt}
+        <SettingsSection layout="rows" title="Accounts & sync">
+          {accounts.map((account) => (
+            <ProfileRow
+              key={account.accountId}
+              label={account.label}
+              icon={
+                <BrandMark
+                  brand={account.provider === "icloud" ? "apple" : account.provider}
+                  className="size-4"
                 />
-              </SettingsRecord>
-            ))}
-          </ItemGroup>
+              }
+              description={account.email}
+              value={<ConnectionHealthBadge health={account.health} />}
+              to="/settings?page=connections"
+              ariaLabel={`Manage ${account.label}`}
+            />
+          ))}
           {!accounts.length ? (
-            <p className="text-sm text-muted-foreground">No Mail accounts connected.</p>
+            <DataViewEmpty
+              title="No Mail accounts"
+              description="Connect an account to bring your mail into nohmi."
+            />
           ) : null}
+          <ProfileRow label="Manage accounts" to="/settings?page=connections" />
         </SettingsSection>
       ) : null}
       {rules ? (
-        <SettingsSection
-          title="Rules"
-          description="Inspect what each rule does. Enabling a rule requires reviewing its current sample."
-        >
+        <SettingsSection layout="rows" title="Rules">
           <MutationFeedback feedback={pause.feedback} />
-          <ItemGroup>
+          <FieldGroup>
             {rules.map((rule) => (
-              <SettingsRecord
+              <Field
                 key={rule.id}
-                title={rule.name}
-                description={`${rule.condition.field} ${rule.condition.operator.replaceAll("_", " ")} “${rule.condition.value}”`}
-                metadata={
-                  <Badge variant="secondary">{rule.enabled ? "Active" : "Needs review"}</Badge>
-                }
-                actions={
-                  <>
-                    {rule.enabled ? (
-                      <SettingsRecordAction
-                        label={`Pause ${rule.name}`}
-                        disabled={pause.isPending}
-                        onClick={() => pause.mutate(rule)}
-                      >
-                        <PauseIcon />
-                      </SettingsRecordAction>
-                    ) : null}
-                    {onReview ? (
-                      <SettingsRecordAction
-                        label={`Review ${rule.name}`}
-                        onClick={() => onReview?.(rule.id)}
-                      >
-                        <ChevronRightIcon />
-                      </SettingsRecordAction>
-                    ) : null}
-                  </>
-                }
+                orientation="horizontal"
+                data-settings-variant={!rule.enabled ? "inactive" : "default"}
               >
-                <p className="text-sm text-muted-foreground">
-                  {rule.actions
-                    .map(
-                      (action) =>
-                        `${action.type.replaceAll("_", " ")}${action.afterDays ? ` after ${action.afterDays} days` : " immediately"}`,
-                    )
-                    .join("; ")}
-                </p>
-              </SettingsRecord>
+                <FieldContent>
+                  <FieldLabel>{rule.name}</FieldLabel>
+                  <FieldDescription
+                    className="max-w-[52ch] truncate"
+                    title={`${rule.condition.field} ${rule.condition.operator.replaceAll("_", " ")} “${rule.condition.value}”`}
+                  >
+                    {rule.condition.field} {rule.condition.operator.replaceAll("_", " ")} “
+                    {rule.condition.value}” ·{" "}
+                    {rule.actions
+                      .map(
+                        (action) =>
+                          `${action.type.replaceAll("_", " ")}${action.afterDays ? ` after ${action.afterDays} days` : " immediately"}`,
+                      )
+                      .join("; ")}
+                  </FieldDescription>
+                </FieldContent>
+                <div
+                  data-settings-row-actions=""
+                  className="flex shrink-0 items-center justify-end gap-2"
+                >
+                  <Badge variant="secondary">{rule.enabled ? "Active" : "Needs review"}</Badge>
+                  {rule.enabled ? (
+                    <SettingsRecordAction
+                      label={`Pause ${rule.name}`}
+                      disabled={pause.isPending}
+                      onClick={() => pause.mutate(rule)}
+                    >
+                      <PauseIcon />
+                    </SettingsRecordAction>
+                  ) : null}
+                  {onReview ? (
+                    <SettingsRecordAction
+                      label={`Review ${rule.name}`}
+                      onClick={() => onReview(rule.id)}
+                    >
+                      <ChevronRightIcon />
+                    </SettingsRecordAction>
+                  ) : null}
+                </div>
+              </Field>
             ))}
-          </ItemGroup>
+          </FieldGroup>
           {!rules.length ? (
-            <p className="text-sm text-muted-foreground">
-              No rules configured. Proposed rules will appear here for review.
-            </p>
+            <DataViewEmpty
+              title="No rules configured"
+              description="Proposed rules will appear here for review."
+            />
           ) : null}
         </SettingsSection>
       ) : null}

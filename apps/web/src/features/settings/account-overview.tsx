@@ -1,23 +1,17 @@
 import type { User } from "@personal-os/domain";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { BrandMark } from "@/components/brand-marks";
 import { BrandPattern } from "@/components/brand-pattern";
-import { ChevronRightIcon } from "@/components/icons";
-import {
-  SettingsRecord,
-  SettingsRecordAction,
-  SettingsRecordContent,
-} from "@/components/settings-record";
-import { SidebarItemMeta } from "@/components/sidebar-item-meta";
+import { DataViewRecovery } from "@/components/data-view-state";
+import { CloudIcon } from "@/components/icons";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
-import { Item, ItemGroup } from "@/components/ui/item";
 import { workspaceIdentities, workspaceIds } from "@/components/workspace-identity";
+import { settingsPath } from "@/features/settings/settings-routes";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { ConnectionHealthBadge, connectionHealth } from "../connections/health.js";
 import { workspaceSetupNeedsPersonAction } from "./agent-access.js";
-import { SettingsSection } from "./settings-layout.js";
+import { ProfileRow, ProfileSection } from "./profile-rows.js";
 
 export function AccountIdentity({ user }: { user: User }) {
   return (
@@ -50,8 +44,8 @@ export function AccountIdentity({ user }: { user: User }) {
 export function AccountOverview() {
   const setup = useQueries({
     queries: workspaceIds.map((domain) => ({
-      queryKey: ["ilo-setup-plan", domain],
-      queryFn: () => api.getIloSetup({ domain }),
+      queryKey: ["personal-os-setup-plan", domain],
+      queryFn: () => api.getPersonalOsSetup({ domain }),
       staleTime: 30_000,
     })),
   });
@@ -66,123 +60,87 @@ export function AccountOverview() {
   });
   return (
     <div className="settings-stack">
-      <SettingsSection
-        title="Your workspaces"
-        description="Review workspace attention and manage your preferences."
-      >
+      <ProfileSection title="Workspaces">
         <QueryFeedback query={work} title="Couldn’t check workspace attention." />
-        <ItemGroup className="account-workspace-grid">
-          {workspaceIds.map((id, index) => {
-            const identity = workspaceIdentities[id];
-            const unavailable =
-              work.isError || setup[index]?.isError || work.data?.unavailableDomains.includes(id);
-            const needsSetup = workspaceSetupNeedsPersonAction(setup[index]?.data);
-            const count = work.data?.summary.byDomain[id];
-            return (
-              <Item
-                key={id}
-                role="listitem"
-                className="settings-record account-workspace"
-                data-workspace={id}
-              >
-                <SettingsRecordContent
-                  title={
-                    <span className="flex items-center gap-2">
-                      <identity.icon aria-hidden="true" className="account-workspace__icon" />
-                      {identity.label}
-                      <SidebarItemMeta
-                        inline
-                        attention={needsSetup || (!unavailable && Boolean(count))}
-                        label={identity.label}
-                      />
-                    </span>
-                  }
-                  description={
-                    unavailable
-                      ? "Attention status unavailable"
-                      : needsSetup
-                        ? `Setup needs your attention${count ? ` · ${count.toLocaleString()} pending items` : ""}`
-                        : count === undefined || setup[index]?.isPending
-                          ? "Checking workspace…"
-                          : count
-                            ? `${count.toLocaleString()} item${count === 1 ? " needs" : "s need"} your attention`
-                            : "No pending reviews or attention items"
-                  }
-                  metadata={
-                    <>
-                      <Button asChild size="sm" variant="ghost">
-                        <Link
-                          to={`/settings?section=${id}`}
-                          aria-label={`Workspace settings for ${identity.label}`}
-                        >
-                          Workspace settings
-                        </Link>
-                      </Button>
-                    </>
-                  }
-                />
-              </Item>
-            );
-          })}
-        </ItemGroup>
-      </SettingsSection>
-      <SettingsSection
-        title="Connected accounts"
-        action={
-          <Button asChild size="sm" variant="ghost">
-            <Link to="/settings?section=connections">Manage connections</Link>
-          </Button>
-        }
-      >
-        <QueryFeedback query={connectors} title="Couldn’t check connected accounts." />
-        <QueryFeedback query={bookmarks} title="Couldn’t check X bookmarks." />
-        {connectors.isPending || bookmarks.isPending ? (
-          <p className="text-sm text-muted-foreground">Checking connections…</p>
-        ) : null}
-        <ItemGroup>
-          {connectors.data?.map((account) => {
-            const health = connectionHealth(account);
-            return (
-              <SettingsRecord
-                key={account.id}
-                title={account.label}
-                description={account.email ?? "Connected account"}
-                metadata={<ConnectionHealthBadge health={health} />}
-                actions={
-                  <SettingsRecordAction asChild label={`Manage ${account.label}`}>
-                    <Link to="/settings?section=connections">
-                      <ChevronRightIcon />
-                    </Link>
-                  </SettingsRecordAction>
-                }
-              />
-            );
-          })}
-          {bookmarks.data ? (
-            <SettingsRecord
-              title="X bookmarks"
-              description={
-                bookmarks.data.syncError
-                  ? "Sync error — check your bookmark connection"
-                  : "Connected"
+        {workspaceIds.map((id, index) => {
+          const identity = workspaceIdentities[id];
+          const unavailable =
+            work.isError || setup[index]?.isError || work.data?.unavailableDomains.includes(id);
+          const needsSetup = workspaceSetupNeedsPersonAction(setup[index]?.data);
+          const count = work.data?.summary.byDomain[id];
+          return (
+            <ProfileRow
+              key={id}
+              icon={
+                <span
+                  className="workspace-icon profile-workspace-icon"
+                  data-size="md"
+                  data-workspace={id}
+                >
+                  <identity.icon weight="Filled" />
+                </span>
               }
-              actions={
-                <SettingsRecordAction asChild label="Manage X bookmarks">
-                  <Link to="/settings?section=connections">
-                    <ChevronRightIcon />
-                  </Link>
-                </SettingsRecordAction>
+              label={identity.label}
+              to={settingsPath(id)}
+              value={
+                unavailable
+                  ? "Unavailable"
+                  : needsSetup
+                    ? "Setup needed"
+                    : count === undefined || setup[index]?.isPending
+                      ? "Checking…"
+                      : count
+                        ? `${count} pending`
+                        : "Up to date"
               }
             />
-          ) : null}
-        </ItemGroup>
-        {connectors.isSuccess &&
-        bookmarks.isSuccess &&
-        !connectors.data.length &&
-        !bookmarks.data ? (
-          <p className="text-sm text-muted-foreground">No accounts connected yet.</p>
+          );
+        })}
+      </ProfileSection>
+      <ProfileSection title="Connections">
+        <DataViewRecovery
+          query={connectors}
+          title="Couldn’t check connected accounts."
+          unavailableLabel="Connections unavailable"
+        />
+        <DataViewRecovery
+          query={bookmarks}
+          title="Couldn’t check X bookmarks."
+          unavailableLabel="X bookmarks unavailable"
+        />
+        {connectors.data?.map((account) => (
+          <ProfileRow
+            key={account.id}
+            icon={<BrandMark brand={account.provider} className="size-5" />}
+            label={account.label}
+            value={
+              <span className="flex items-center gap-2">
+                <span className="truncate">{account.email ?? "Connected"}</span>
+                <ConnectionHealthBadge health={connectionHealth(account)} />
+              </span>
+            }
+            to="/settings?page=connections"
+          />
+        ))}
+        {bookmarks.data ? (
+          <ProfileRow
+            icon={<BrandMark brand="x" className="size-5" />}
+            label="X bookmarks"
+            value={bookmarks.data.syncError ? "Needs attention" : "Connected"}
+            to="/settings?page=connections"
+          />
         ) : null}
-      </SettingsSection>
+        <ProfileRow
+          icon={
+            <span className="profile-destination-icon">
+              <CloudIcon weight="Filled" />
+            </span>
+          }
+          label="Manage connections"
+          value={connectors.isPending || bookmarks.isPending ? "Checking…" : undefined}
+          to="/settings?page=connections"
+        />
+      </ProfileSection>
     </div>
   );
 }

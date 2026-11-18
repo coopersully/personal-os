@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { ConnectorError, classifyICloudError, connectorHttpError } from "./failures.js";
+import {
+  ConnectorError,
+  classifyICloudError,
+  connectorHttpError,
+  transportDiagnostics,
+} from "./failures.js";
+import { providerFetch } from "./http.js";
+import { throwIfProviderOperationCancelled } from "./types.js";
 
 describe("connector failure boundary", () => {
   it.each([
@@ -25,7 +32,7 @@ describe("connector failure boundary", () => {
 
   it.each([
     [401, "authorization", "reconnect", "google_authorization_failed"],
-    [403, "authorization", "reconnect", "google_authorization_failed"],
+    [403, "rejected", "operator", "google_permission_denied"],
     [404, "not_found", "operator", "google_resource_not_found"],
     [408, "temporary", "retry", "google_temporary_failure"],
     [429, "rate_limited", "retry", "google_rate_limited"],
@@ -38,6 +45,83 @@ describe("connector failure boundary", () => {
 
     expect(error).toMatchObject({ category, code, disposition, status });
     expect(error.message).not.toContain("provider-authored secret");
+  });
+
+  it.each([
+    "rateLimitExceeded",
+    "userRateLimitExceeded",
+    "dailyLimitExceeded",
+    "quotaExceeded",
+  ])("retries Google 403 %s without invalidating authorization", async (reason) => {
+    const error = await connectorHttpError(
+      Response.json(
+        {
+          error: {
+            errors: [{ reason }],
+            message: "private-token-canary",
+          },
+        },
+        { status: 403, headers: { "retry-after": "120" } },
+      ),
+      "google",
+    );
+    expect(error).toMatchObject({
+      category: "rate_limited",
+      disposition: "retry",
+      retryAfterMs: 120_000,
+    });
+    expect(JSON.stringify(error)).not.toContain("private-token-canary");
+  });
+
+  it.each([
+    { error: { status: "PERMISSION_DENIED", message: "private-token-canary" } },
+    { error: { errors: [{ reason: "provider_private_reason" }], message: "private-token-canary" } },
+  ])("keeps unrecognized Google 403 details out of recovery evidence", async (body) => {
+    const error = await connectorHttpError(Response.json(body, { status: 403 }), "google");
+    expect(error).toMatchObject({ code: "google_permission_denied", disposition: "operator" });
+    expect(JSON.stringify(error)).not.toMatch(/private-token-canary|provider_private_reason/);
+  });
+
+  it("retries a Google quota response without a Retry-After header", async () => {
+    const error = await connectorHttpError(
+      Response.json({ error: { errors: [{ reason: "quotaExceeded" }] } }, { status: 403 }),
+      "google",
+    );
+    expect(error).toMatchObject({
+      code: "google_rate_limited",
+      disposition: "retry",
+      retryAfterMs: null,
+    });
+  });
+
+  it("distinguishes missing Google scopes from disabled APIs", async () => {
+    for (const [reason, code, disposition] of [
+      ["insufficientPermissions", "google_permission_missing", "reconnect"],
+      ["accessNotConfigured", "google_configuration_invalid", "operator"],
+    ]) {
+      const error = await connectorHttpError(
+        Response.json(
+          {
+            error: {
+              errors: [{ reason }],
+              message: "private-token-canary",
+            },
+          },
+          { status: 403 },
+        ),
+        "google",
+      );
+      expect(error).toMatchObject({ code, disposition });
+      expect(JSON.stringify(error)).not.toContain("private-token-canary");
+    }
+  });
+
+  it("does not treat a collection-level iCloud 403 as a revoked password", () => {
+    expect(classifyICloudError("calendar", { status: 403 })).toMatchObject({
+      category: "rejected",
+      disposition: "operator",
+      code: "icloud_calendar_permission_denied",
+    });
   });
 
   it("uses only allowlisted Google OAuth error codes as positive recovery evidence", async () => {
@@ -242,4 +326,110 @@ describe("connector failure boundary", () => {
     });
     expect(cancel).toHaveBeenCalled();
   });
+});
+
+describe("sanitized transport diagnostics", () => {
+  it("fails closed when error inspection throws", () => {
+    for (const field of ["code", "cause", "errors"]) {
+      const error = Object.defineProperty({}, field, {
+        get() {
+          throw new Error("PRIVATE_CANARY");
+        },
+      });
+      expect(transportDiagnostics(error)).toEqual({});
+    }
+    const proxy = Proxy.revocable({}, {});
+    proxy.revoke();
+    expect(transportDiagnostics(proxy.proxy)).toEqual({});
+    expect(
+      transportDiagnostics(
+        new Proxy(
+          {},
+          {
+            getPrototypeOf() {
+              throw new Error("PRIVATE_CANARY");
+            },
+          },
+        ),
+      ),
+    ).toEqual({});
+  });
+  it("recognizes the real HTTP timeout and provider deadline without exception text", async () => {
+    const timeout = await providerFetch(
+      async (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+            once: true,
+          });
+        }),
+      "https://example.com",
+      {},
+      1,
+    ).catch((error: unknown) => error);
+    expect(transportDiagnostics(timeout)).toEqual({
+      transportCode: "ETIMEDOUT",
+      transportPhase: "timeout",
+    });
+    try {
+      throwIfProviderOperationCancelled({ deadlineMs: 0 });
+      throw new Error("Expected an expired provider deadline");
+    } catch (error) {
+      expect(transportDiagnostics(error)).toEqual({
+        transportCode: "ETIMEDOUT",
+        transportPhase: "timeout",
+      });
+    }
+    expect(transportDiagnostics(new DOMException("PRIVATE_CANARY", "AbortError"))).toEqual({});
+    expect(
+      transportDiagnostics({ name: "TimeoutError", code: 23, message: "PRIVATE_CANARY" }),
+    ).toEqual({});
+  });
+  it.each([
+    ["ENOTFOUND", "dns"],
+    ["EAI_AGAIN", "dns"],
+    ["CERT_HAS_EXPIRED", "tls"],
+    ["ERR_TLS_CERT_ALTNAME_INVALID", "tls"],
+    ["ECONNRESET", "socket"],
+    ["ECONNREFUSED", "socket"],
+    ["UND_ERR_CONNECT_TIMEOUT", "timeout"],
+  ])("retains nested %s without private context", (code, transportPhase) => {
+    const error = new Error("PRIVATE_CANARY", {
+      cause: Object.assign(new Error("PRIVATE_CANARY"), {
+        code,
+        hostname: "PRIVATE_CANARY",
+        address: "PRIVATE_CANARY",
+        syscall: "PRIVATE_CANARY",
+      }),
+    });
+    const result = classifyICloudError("calendar", error);
+    expect(result).toMatchObject({ transportCode: code, transportPhase, disposition: "retry" });
+    expect(JSON.stringify(result)).not.toContain("PRIVATE_CANARY");
+  });
+  it("handles aggregate errors and cycles with bounded traversal", () => {
+    const cycle: { cause?: unknown } = {};
+    cycle.cause = cycle;
+    expect(
+      classifyICloudError("mail", new AggregateError([cycle, { code: "EPIPE" }])),
+    ).toMatchObject({ transportCode: "EPIPE", transportPhase: "socket" });
+    expect(classifyICloudError("mail", cycle).transportCode).toBeUndefined();
+  });
+  it("does not infer diagnostics from messages or arbitrary codes", () => {
+    expect(
+      classifyICloudError("calendar", { code: "PRIVATE_CANARY", message: "ENOTFOUND" })
+        .transportCode,
+    ).toBeUndefined();
+    expect(classifyICloudError("calendar", { code: "toString" }).transportCode).toBeUndefined();
+  });
+});
+
+it("bounds diagnostic traversal of large and deeply nested error graphs", () => {
+  let nested: unknown = { code: "ENOTFOUND" };
+  for (let i = 0; i < 20; i++) nested = { cause: nested };
+  expect(transportDiagnostics(nested)).toEqual({});
+  expect(
+    transportDiagnostics(new AggregateError([...Array(20).fill(null), { code: "EPIPE" }])),
+  ).toEqual({});
+  for (const value of [null, undefined, "ENOTFOUND", 1, { code: 1 }]) {
+    expect(transportDiagnostics(value)).toEqual({});
+  }
 });

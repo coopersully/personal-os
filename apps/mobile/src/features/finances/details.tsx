@@ -1,0 +1,212 @@
+import { router, Stack, useLocalSearchParams } from "expo-router";
+import { View } from "react-native";
+import { editorActionsOptions } from "../../components/editor-header";
+import { useTheme } from "../../theme";
+import { AccountActions } from "./account-actions";
+import { AccountPreferences } from "./account-preferences";
+import { ReconnectBank } from "./bank-link";
+import { categoryIcon, categoryLabel } from "./category-presentation";
+import { csvFed, csvSourceLabel } from "./csv-import";
+import { useFinanceRead } from "./data";
+import { InstitutionLogo } from "./institution-logo";
+import { financeLabel, formatLocalDate, formatMoney, recordAmount } from "./presentation";
+import { Transactions } from "./spending";
+import { activeAllocations, isSplit } from "./splits";
+import { TransactionActions } from "./transaction-actions";
+import { TransactionCategory } from "./transaction-category";
+import { TransactionNotes } from "./transaction-notes";
+import { Card, Copy, FinanceRow, FinanceScreen, Metric, ReadState, Section } from "./ui";
+
+export function FinanceAccountScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const query = useFinanceRead(["accounts"], (api) => api.listFinanceAccounts());
+  const account = query.data?.accounts.find((item) => item.id === id);
+  const duplicates = query.data?.accountSemantics?.possibleDuplicateGroups?.some((group) =>
+    group.accountIds.includes(id),
+  );
+  return (
+    <FinanceScreen title={account?.name ?? "Account"}>
+      <ReadState query={query}>
+        {account ? (
+          <>
+            <AccountActions account={account} duplicate={!!duplicates} />
+            <Metric
+              label={account.institution}
+              value={
+                csvFed(account) && account.balance == null
+                  ? "Not set"
+                  : formatMoney(account.balance, account.currencyCode)
+              }
+              hint={account.accountMask ? `••${account.accountMask}` : undefined}
+            >
+              <InstitutionLogo account={account} />
+            </Metric>
+            <Card rows>
+              <FinanceRow
+                centered
+                title="Source"
+                value={
+                  csvFed(account)
+                    ? csvSourceLabel(account.provider)
+                    : financeLabel(account.provider)
+                }
+                icon="finances"
+              />
+              {csvFed(account) ? (
+                // Kept by hand: there is no connection whose status or sync time could be shown.
+                <FinanceRow centered title="Records" value="Added by CSV import" icon="receipt" />
+              ) : (
+                <>
+                  <FinanceRow
+                    centered
+                    title="Status"
+                    value={financeLabel(account.status)}
+                    valueTone={account.status === "needs_reauth" ? "attention" : undefined}
+                    accessibilityHint={
+                      account.status === "needs_reauth"
+                        ? "Reconnect this account to refresh its data."
+                        : undefined
+                    }
+                    icon="attention"
+                  />
+                  <ReconnectBank account={account} />
+                  <FinanceRow
+                    centered
+                    title="Updated"
+                    valueTone={
+                      account.status !== "manual" &&
+                      (!account.lastSyncedAt ||
+                        (account.synchronization && account.synchronization.state !== "current"))
+                        ? "attention"
+                        : undefined
+                    }
+                    value={
+                      account.lastSyncedAt
+                        ? new Date(account.lastSyncedAt).toLocaleString()
+                        : "Not synced"
+                    }
+                    icon="clock"
+                  />
+                </>
+              )}
+              {duplicates ? (
+                <FinanceRow
+                  title="Review possible duplicate"
+                  subtitle="Check for unique history before you stop tracking an account."
+                  onPress={() =>
+                    router.push({ pathname: "/finance-account-duplicate", params: { id } })
+                  }
+                />
+              ) : null}
+              <AccountPreferences key={account.id} account={account} />
+            </Card>
+            <Section title="Transactions">
+              <Transactions accountId={id} />
+            </Section>
+          </>
+        ) : (
+          <Copy secondary>This account is unavailable.</Copy>
+        )}
+      </ReadState>
+    </FinanceScreen>
+  );
+}
+export function FinanceTransactionScreen() {
+  const t = useTheme();
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const query = useFinanceRead(["transaction", id], (api) => api.getFinanceTransaction(id), !!id);
+  const accounts = useFinanceRead(["accounts"], (api) => api.listFinanceAccounts());
+  const reviews = useFinanceRead(["reviews"], (api) => api.getFinanceReviewQueue());
+  const item = query.data?.data;
+  // One part is an ordinary categorized transaction, not a split.
+  const splits = item && isSplit(item) ? activeAllocations(item) : [];
+  const categories = useFinanceRead(
+    ["categories"],
+    (api) => api.getFinanceCategories(),
+    splits.length > 0,
+  );
+  const review = reviews.data?.find(
+    (entry) => entry.transaction.id === id && entry.status !== "resolved",
+  );
+  const account = accounts.data?.accounts.find((entry) => entry.id === item?.accountId);
+  return (
+    <FinanceScreen title={item?.merchant ?? "Transaction"}>
+      {/* Without a loaded record the bar offers nothing rather than an empty control. */}
+      {item ? (
+        <TransactionActions item={item} manualAccount={account?.provider === "manual"} />
+      ) : (
+        <Stack.Screen options={editorActionsOptions("Transaction actions", [], t)} />
+      )}
+      <ReadState query={query}>
+        {item ? (
+          <>
+            <Metric
+              label={financeLabel(item.direction)}
+              value={recordAmount(item.amount, item.currencyCode)}
+              hint={item.pending ? "Pending" : "Posted"}
+            />
+            <ReadState query={reviews}>{null}</ReadState>
+            <Card rows>
+              <FinanceRow
+                centered
+                title="Date"
+                value={formatLocalDate(item.date)}
+                icon="calendar"
+              />
+              <ReadState query={accounts}>
+                <FinanceRow
+                  centered
+                  title="Account"
+                  value={account?.name ?? "Unavailable"}
+                  icon="finances"
+                />
+              </ReadState>
+              <TransactionCategory key={item.id} item={item} review={review} />
+              {item.categoryRationale && (
+                <View style={{ paddingVertical: 12 }}>
+                  <Copy secondary>{item.categoryRationale}</Copy>
+                </View>
+              )}
+            </Card>
+            <Card rows>
+              <FinanceRow
+                title="Message nohmi"
+                subtitle="Discuss this transaction"
+                icon="mail"
+                onPress={() =>
+                  router.navigate({
+                    pathname: "/finances/assistant",
+                    params: { view: "Conversation", transactionId: id },
+                  })
+                }
+              />
+              <TransactionNotes key={item.id} item={item} />
+            </Card>
+            {splits.length > 0 && (
+              <Section title="Splits">
+                <Card rows>
+                  {splits.map((allocation) => {
+                    const name = categories.data?.find(
+                      (category) => category.id === allocation.categoryId,
+                    )?.name;
+                    return (
+                      <FinanceRow
+                        key={allocation.id}
+                        title={name ? categoryLabel(name) : "Category"}
+                        icon={categoryIcon(name ?? "Category")}
+                        subtitle={financeLabel(allocation.treatment)}
+                        value={recordAmount(allocation.amount, item.currencyCode)}
+                      />
+                    );
+                  })}
+                </Card>
+              </Section>
+            )}
+          </>
+        ) : (
+          <Copy secondary>This transaction is unavailable.</Copy>
+        )}
+      </ReadState>
+    </FinanceScreen>
+  );
+}

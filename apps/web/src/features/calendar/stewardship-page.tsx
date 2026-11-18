@@ -213,7 +213,7 @@ function SourceEvidencePanel({ status }: { status: CalendarStatus }) {
           {canOpenConnections ? (
             <AlertAction>
               <Button asChild size="sm" variant="outline">
-                <Link to="/settings?section=connections">Open Connections</Link>
+                <Link to="/settings?page=connections">Open Connections</Link>
               </Button>
             </AlertAction>
           ) : null}

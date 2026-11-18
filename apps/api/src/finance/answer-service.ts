@@ -1,11 +1,13 @@
 import {
   auditEvents,
+  financeAnswerContinuations,
   financeContextualAnswers,
   financeContextualQuestions,
 } from "@personal-os/database";
 import {
   type FinanceAnswer,
   type FinanceDomainOutcome,
+  type FinanceOutcomeReasonCode,
   type FinanceSmsAnswerCommand,
   financeAnswerSchema,
   financeDomainOutcomeSchema,
@@ -29,7 +31,8 @@ import {
   lockContextualQuestion,
   maxContextualRevision,
 } from "./contextual-question-store.js";
-
+import { recordFinanceConversationAcceptedAnswer } from "./conversation-service.js";
+import { guardFinanceExecutionTransaction } from "./execution-owner-guard.js";
 import type { AdmitSmsAnswer } from "./sms-answer-port.js";
 
 type Consume = (accepted: FinanceDomainOutcome & { state: "accepted" }) => Promise<void>;
@@ -40,6 +43,7 @@ function outcome(
   operationId: string,
   state: "unavailable" | "blocked" | "accepted",
   resultRevision: string | null = null,
+  unavailableReason: FinanceOutcomeReasonCode = "producer_not_registered",
 ): FinanceDomainOutcome {
   return financeDomainOutcomeSchema.parse({
     operationId,
@@ -47,11 +51,7 @@ function outcome(
     work: [],
     resultRevision,
     reasonCode:
-      state === "unavailable"
-        ? "producer_not_registered"
-        : state === "blocked"
-          ? "stale_revision"
-          : null,
+      state === "unavailable" ? unavailableReason : state === "blocked" ? "stale_revision" : null,
   });
 }
 /** A narrow dispatcher; unsupported public kinds/sources never enter receipt admission. */
@@ -105,6 +105,10 @@ async function answerCore(
   const sourceKind = input.source.kind;
   if (input.work.kind !== "question") return outcome(input.operationId, "unavailable");
   return contextualTransaction(options.db, executor, async (tx) => {
+    await guardFinanceExecutionTransaction(tx, context.principal.userId, {
+      actorIds: context.principal.actorType === "agent" ? [context.principal.actorId] : [],
+      hostSchedules: true,
+    });
     const authority = await loadFinanceAuthorization({ db: tx, ...context });
     return executeFinanceAdmittedMutation<Prepared, FinanceDomainOutcome>(
       tx,
@@ -123,7 +127,10 @@ async function answerCore(
             userId: context.principal.userId,
           });
           if (admitted.state !== "verified")
-            return { state: "unavailable", result: outcome(input.operationId, "unavailable") };
+            return {
+              state: "unavailable",
+              result: outcome(input.operationId, "unavailable", null, admitted.reasonCode),
+            };
           consume = admitted.consume;
         }
         // Stored subtype is checked only here, after an exact completed receipt can replay.
@@ -186,6 +193,26 @@ async function answerCore(
           })
           .returning({ id: financeContextualAnswers.id });
         if (!answer) throw new AppError("internal_error", "The context answer was not recorded.");
+        await writeTx.insert(financeAnswerContinuations).values({
+          userId: context.principal.userId,
+          operationId: input.operationId,
+          reviewCaseId: question.reviewCaseId,
+          transactionId: question.transactionId,
+          resultingWorkRevision: revision,
+          sourceKind: "manual_question",
+          contextualQuestionId: question.id,
+        });
+        if (context.principal.actorType === "user") {
+          await recordFinanceConversationAcceptedAnswer(writeTx, {
+            userId: context.principal.userId,
+            operationId: input.operationId,
+            caseId: question.reviewCaseId,
+            questionId: question.id,
+            transactionId: question.transactionId,
+            text: input.text,
+            recordedAt,
+          });
+        }
         await writeTx.insert(auditEvents).values(
           auditValues({
             ...context,

@@ -17,6 +17,7 @@ import type {
   GoogleAuthorizationService,
   GoogleConnector,
   GoogleCredentials,
+  MailSyncResult,
   NormalizedRemoteEvent,
   NormalizedRemoteMailThread,
   ProviderOperationOptions,
@@ -213,6 +214,28 @@ type GoogleConnectorOptions = {
 const MAX_GMAIL_HISTORY_PAGES = 10;
 const MAX_GMAIL_FULL_SYNC_PAGES = 10;
 const MAX_GMAIL_SYNC_THREADS = 100;
+const MAX_GMAIL_BATCH_THREADS = 25;
+const GMAIL_BATCH_COOLDOWN_MS = 65_000;
+const GMAIL_CURSOR_PREFIX = "nohmi:gmail-sync:v1:";
+const gmailSyncCursorSchema = z
+  .object({
+    version: z.literal(1),
+    historyId: z.string().min(1).max(256),
+    remainingThreadIds: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(256)
+          .regex(/^[A-Za-z0-9_/-]+$/u),
+      )
+      .max(MAX_GMAIL_SYNC_THREADS),
+    reset: z.boolean(),
+    notBefore: z.iso.datetime(),
+  })
+  .strict()
+  .refine((value) => new Set(value.remainingThreadIds).size === value.remainingThreadIds.length);
+type GmailSyncCursor = z.infer<typeof gmailSyncCursorSchema>;
 
 export function createGoogleConnector(options: GoogleConnectorOptions): GoogleConnector {
   const request = options.fetch ?? globalThis.fetch;
@@ -266,13 +289,16 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       }),
       operation,
     );
-    return {
+    const refreshed = {
       accessToken: token.access_token,
       expiresAt: new Date(now().getTime() + token.expires_in * 1_000).toISOString(),
       refreshToken: token.refresh_token ?? credentials.refreshToken,
       scope: token.scope || credentials.scope,
       tokenType: token.token_type,
     };
+    return operation?.persistGoogleCredentials
+      ? operation.persistGoogleCredentials(refreshed)
+      : refreshed;
   }
 
   async function authenticatedRequest(
@@ -471,23 +497,75 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       if (nextPageToken) seenPageTokens.add(nextPageToken);
       pageToken = nextPageToken;
     } while (pageToken);
+    return fetchMailBatch(
+      currentCredentials,
+      mailboxes,
+      {
+        historyId: profile.historyId,
+        remainingThreadIds: [...new Set(threadIds)],
+        reset: true,
+        version: 1,
+        notBefore: now().toISOString(),
+      },
+      operation,
+    );
+  }
+
+  function encodeMailCursor(cursor: GmailSyncCursor): string {
+    return `${GMAIL_CURSOR_PREFIX}${Buffer.from(JSON.stringify(gmailSyncCursorSchema.parse(cursor))).toString("base64url")}`;
+  }
+
+  function decodeMailCursor(value: string): GmailSyncCursor {
+    try {
+      const encoded = value.slice(GMAIL_CURSOR_PREFIX.length);
+      if (value.length > 40_000 || !/^[A-Za-z0-9_-]+$/u.test(encoded))
+        throw new Error("Invalid cursor");
+      const decoded = Buffer.from(encoded, "base64url");
+      if (decoded.toString("base64url") !== encoded) throw new Error("Invalid cursor");
+      return gmailSyncCursorSchema.parse(JSON.parse(decoded.toString("utf8")));
+    } catch {
+      throw new ConnectorError({
+        category: "invalid_response",
+        code: "google_mail_cursor_invalid",
+        disposition: "retry",
+        message: "Google Mail synchronization progress could not be read safely.",
+        status: 502,
+      });
+    }
+  }
+
+  async function fetchMailBatch(
+    credentials: GoogleCredentials,
+    mailboxes: RemoteMailbox[],
+    cursor: GmailSyncCursor,
+    operation?: ProviderOperationOptions,
+  ): Promise<MailSyncResult> {
     const threads: NormalizedRemoteMailThread[] = [];
     const deletedThreadIds: string[] = [];
-    for (const threadId of threadIds) {
+    let currentCredentials = credentials;
+    const batch = cursor.remainingThreadIds.slice(0, MAX_GMAIL_BATCH_THREADS);
+    for (const threadId of batch) {
       throwIfProviderOperationCancelled(operation);
       const result = await fetchMailThread(currentCredentials, threadId, operation);
       currentCredentials = result.credentials;
       if (result.value) threads.push(result.value);
       else deletedThreadIds.push(threadId);
     }
+    const remainingThreadIds = cursor.remainingThreadIds.slice(batch.length);
+    // Retain the cooldown even on the terminal batch; manual and push syncs must
+    // not immediately spend another full batch in the same provider quota window.
+    const notBefore = new Date(now().getTime() + GMAIL_BATCH_COOLDOWN_MS).toISOString();
     return {
       credentials: currentCredentials,
       value: {
         deletedThreadIds,
         mailboxes,
-        nextSyncToken: profile.historyId,
-        reset: true,
+        nextSyncToken: batch.length
+          ? encodeMailCursor({ ...cursor, remainingThreadIds, notBefore, reset: false })
+          : cursor.historyId,
+        reset: cursor.reset && remainingThreadIds.length === 0,
         threads,
+        ...(remainingThreadIds.length ? { continuation: { notBefore } } : {}),
       },
     };
   }
@@ -535,6 +613,92 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
   }
 
   return {
+    async downloadMailAttachment(credentials, messageId, attachment, operation) {
+      const attachmentError = (
+        message: string,
+        category: "not_found" | "invalid_response" = "invalid_response",
+      ) =>
+        new ConnectorError({
+          category,
+          code: `google_attachment_${category}`,
+          disposition: "operator",
+          message,
+          status: category === "not_found" ? 404 : 502,
+        });
+      const attachmentId =
+        attachment.providerAttachmentId === undefined && !attachment.id.startsWith("part:")
+          ? attachment.id
+          : attachment.providerAttachmentId;
+      const partId =
+        attachment.providerPartId ??
+        (attachment.id.startsWith("part:") ? attachment.id.slice(5) : null);
+      if (!attachmentId && partId === null)
+        throw attachmentError("Attachment locator is unavailable.", "not_found");
+      const root = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}`;
+      const result = await authenticatedRequest(
+        credentials,
+        attachmentId
+          ? `${root}/attachments/${encodeURIComponent(attachmentId)}`
+          : `${root}?format=full`,
+        {},
+        operation,
+      );
+      if (!result.response.ok) throw await connectorHttpError(result.response, "google");
+      const reader = result.response.body?.getReader();
+      if (!reader) throw attachmentError("Attachment response is empty.");
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      try {
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          size += chunk.value.length;
+          if (size > 15 * 1024 * 1024)
+            throw attachmentError("Attachment exceeds the download limit.");
+          chunks.push(chunk.value);
+        }
+      } finally {
+        await reader.cancel().catch(() => undefined);
+      }
+      let payload: { payload?: unknown };
+      try {
+        payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      } catch {
+        throw attachmentError("Google returned malformed attachment data.");
+      }
+      if (!payload || typeof payload !== "object")
+        throw attachmentError("Google returned malformed attachment data.");
+      let body: unknown = payload;
+      if (!attachmentId) {
+        const pending = [payload.payload];
+        body = undefined;
+        for (let count = 0; pending.length && count < 256; count++) {
+          const part = pending.pop();
+          if (!part || typeof part !== "object") continue;
+          if (
+            ("partId" in part && partId !== null && part.partId === partId) ||
+            (partId === "root" &&
+              part === payload.payload &&
+              (!("partId" in part) || part.partId === ""))
+          ) {
+            body = "body" in part ? part.body : undefined;
+            break;
+          }
+          if ("parts" in part && Array.isArray(part.parts))
+            pending.push(...part.parts.slice(0, 256));
+        }
+      }
+      if (!body && !attachmentId)
+        throw attachmentError("The attachment is no longer available.", "not_found");
+      const parsed = z.object({ data: z.string().regex(/^[A-Za-z0-9_-]*={0,2}$/) }).safeParse(body);
+      if (!parsed.success || parsed.data.data.replace(/=+$/, "").length % 4 === 1)
+        throw attachmentError("Google returned malformed attachment data.");
+      const data = parsed.data.data;
+      const bytes = Buffer.from(data, "base64url");
+      if (bytes.length > 10 * 1024 * 1024)
+        throw attachmentError("Attachment exceeds the download limit.");
+      return { credentials: result.credentials, value: bytes };
+    },
     authorizationUrl(
       state: string,
       codeChallenge: string,
@@ -713,7 +877,36 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
 
     async syncMail(credentials, syncToken, operation) {
       throwIfProviderOperationCancelled(operation);
+      let pending: GmailSyncCursor | undefined;
+      if (syncToken?.startsWith("nohmi:gmail-sync:")) {
+        if (!syncToken.startsWith(GMAIL_CURSOR_PREFIX)) {
+          throw new ConnectorError({
+            category: "invalid_response",
+            code: "google_mail_cursor_invalid",
+            disposition: "retry",
+            message: "Google Mail synchronization progress could not be read safely.",
+            status: 502,
+          });
+        }
+        pending = decodeMailCursor(syncToken);
+        if (Date.parse(pending.notBefore) > now().getTime()) {
+          return {
+            credentials,
+            value: {
+              deletedThreadIds: [],
+              mailboxes: [],
+              nextSyncToken: syncToken,
+              reset: false,
+              threads: [],
+              continuation: { notBefore: pending.notBefore, deferred: true },
+            },
+          };
+        }
+        syncToken = pending.historyId;
+      }
       const mailboxResult = await listMailboxes(credentials, operation);
+      if (pending?.remainingThreadIds.length)
+        return fetchMailBatch(mailboxResult.credentials, mailboxResult.value, pending, operation);
       if (!syncToken) {
         return fullMailSync(mailboxResult.credentials, mailboxResult.value, operation);
       }
@@ -761,25 +954,18 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
           return fullMailSync(currentCredentials, mailboxResult.value, operation);
         }
       } while (pageToken);
-      const threads: NormalizedRemoteMailThread[] = [];
-      const deletedThreadIds: string[] = [];
-      for (const threadId of threadIds) {
-        throwIfProviderOperationCancelled(operation);
-        const result = await fetchMailThread(currentCredentials, threadId, operation);
-        currentCredentials = result.credentials;
-        if (result.value) threads.push(result.value);
-        else deletedThreadIds.push(threadId);
-      }
-      return {
-        credentials: currentCredentials,
-        value: {
-          deletedThreadIds,
-          mailboxes: mailboxResult.value,
-          nextSyncToken,
+      return fetchMailBatch(
+        currentCredentials,
+        mailboxResult.value,
+        {
+          historyId: nextSyncToken,
+          remainingThreadIds: [...threadIds],
           reset: false,
-          threads,
+          version: 1,
+          notBefore: now().toISOString(),
         },
-      };
+        operation,
+      );
     },
 
     /* v8 ignore start -- provider command variants are covered by connector contract tests */

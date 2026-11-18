@@ -46,6 +46,7 @@ import { AppError } from "./errors.js";
 import { assessMail, type MailAssessment, type MailAssessmentSnapshot } from "./mail-assessment.js";
 import { MAIL_PLAYBOOK } from "./mail-playbook.js";
 import type { Principal } from "./types.js";
+import { requireWorkspaceExecution } from "./workspace-execution.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 type Options = { db: Database; now: () => Date };
@@ -676,6 +677,7 @@ export function createMailStewardshipService({ db, now }: Options) {
             ...context,
           }),
         );
+        await requireWorkspaceExecution(tx, context.principal, "mail", now());
         return row;
       });
       return serializeObligation(created);
@@ -729,6 +731,7 @@ export function createMailStewardshipService({ db, now }: Options) {
             ...context,
           }),
         );
+        await requireWorkspaceExecution(tx, context.principal, "mail", now());
         return row;
       });
       return serializeObligation(updated);
@@ -795,6 +798,7 @@ export function createMailStewardshipService({ db, now }: Options) {
             ...context,
           }),
         );
+        await requireWorkspaceExecution(tx, context.principal, "mail", now());
         return row;
       });
       return serializeDisposition(created);
@@ -955,6 +959,7 @@ export function createMailStewardshipService({ db, now }: Options) {
             }),
           );
         }
+        await requireWorkspaceExecution(tx, context.principal, "mail", now());
         return row;
       });
       return serializeQuestion(answered);
@@ -1183,6 +1188,7 @@ export function createMailStewardshipService({ db, now }: Options) {
             ...context,
           }),
         );
+        await requireWorkspaceExecution(tx, context.principal, "mail", now());
         return row;
       });
       return serializeFeedback(created);

@@ -1,4 +1,10 @@
-import type { AccountSetupStep, AccountSetupWorkspace, User } from "@personal-os/domain";
+import type { CalendarAccount } from "@personal-os/api-client";
+import type {
+  AccountSetupStep,
+  AccountSetupWorkspace,
+  FinanceAccount,
+  User,
+} from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isTauri } from "@tauri-apps/api/core";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -43,6 +49,7 @@ import { FeedbackForm } from "../../components/feedback-form.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { ConnectionAuthorizationOutcome } from "../connections/authorization-outcome.js";
+import { BankAccount } from "../finances/bank-account";
 import { PlaidConnectButton } from "../finances/plaid-connect.js";
 import { ConnectionList } from "./connection-list.js";
 import { ProviderConnectionStep } from "./provider-connection-step.js";
@@ -176,7 +183,7 @@ export function SetupPage({ user }: { user: User }) {
   const stepIndex = Math.max(0, steps.indexOf(currentStep));
   const exitSetup = () => {
     setCompletionSucceeded(false);
-    setPendingDestination(replaying ? "/settings?section=setup" : "/today");
+    setPendingDestination(replaying ? "/settings?page=profile&subpage=setup" : "/today");
     if (replaying) setCompletionSucceeded(true);
     else save.mutate({ action: "dismiss" });
   };
@@ -184,7 +191,7 @@ export function SetupPage({ user }: { user: User }) {
     setCompletionSucceeded(false);
     setPendingDestination(
       replaying && redirectDestination === "/today"
-        ? "/settings?section=setup"
+        ? "/settings?page=profile&subpage=setup"
         : redirectDestination,
     );
     save.mutate(replaying ? { action: "preferences", selectedWorkspaces } : { action: "complete" });
@@ -288,7 +295,9 @@ export function SetupPage({ user }: { user: User }) {
         {currentStep === "ready" ? (
           <ReadyStep
             complete={() => completeSetup()}
-            connectAgent={() => completeSetup("/settings?section=agent-connections")}
+            connectAgent={() =>
+              completeSetup("/settings?page=connections&subpage=agent-connections")
+            }
             connectedAccounts={connectors.data?.length ?? 0}
             financeAccounts={finances.data?.accounts.length ?? 0}
             pending={save.isPending}
@@ -416,13 +425,7 @@ function GoogleStep({
   registerContinue,
   selectedWorkspaces,
 }: {
-  accounts: Array<{
-    calendarEnabled: boolean;
-    email: string | null;
-    id: string;
-    label: string;
-    mailEnabled: boolean;
-  }>;
+  accounts: CalendarAccount[];
   continueSetup: () => void;
   onConnected: () => void;
   registerContinue: (handler: () => void) => void;
@@ -471,6 +474,7 @@ function GoogleStep({
         <ConnectionList
           addLabel={accounts.length ? "Add another Google account" : "Add a Google account"}
           connections={accounts.map((account) => ({
+            account,
             description:
               [account.calendarEnabled ? "Calendar" : null, account.mailEnabled ? "Mail" : null]
                 .filter(Boolean)
@@ -528,13 +532,7 @@ function ICloudStep({
   registerContinue,
   selectedWorkspaces,
 }: {
-  accounts: Array<{
-    calendarEnabled: boolean;
-    email: string | null;
-    id: string;
-    label: string;
-    mailEnabled: boolean;
-  }>;
+  accounts: CalendarAccount[];
   continueSetup: () => void;
   registerContinue: (handler: () => void) => void;
   selectedWorkspaces: AccountSetupWorkspace[];
@@ -579,6 +577,7 @@ function ICloudStep({
         <ConnectionList
           addLabel={accounts.length ? "Add another Apple account" : "Add an Apple account"}
           connections={accounts.map((account) => ({
+            account,
             description:
               [account.calendarEnabled ? "Calendar" : null, account.mailEnabled ? "Mail" : null]
                 .filter(Boolean)
@@ -678,7 +677,7 @@ function FinancesStep({
   registerContinue,
   refresh,
 }: {
-  accounts: Array<{ id: string; institution: string; name: string }>;
+  accounts: FinanceAccount[];
   continueSetup: () => void;
   registerContinue: (handler: () => void) => void;
   refresh: () => Promise<unknown>;
@@ -706,6 +705,7 @@ function FinancesStep({
         <ConnectionList
           addLabel={accounts.length ? "Add another institution" : "Add a financial institution"}
           connections={accounts.map((account) => ({
+            identity: <BankAccount account={account} />,
             description: account.institution,
             id: account.id,
             label: account.name,

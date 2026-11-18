@@ -6,7 +6,7 @@ import {
   createTwilioConnector,
   createXConnector,
 } from "@personal-os/connectors";
-import { mailThreads } from "@personal-os/database";
+import { financeOnboardingLegacyAccess, mailThreads } from "@personal-os/database";
 import {
   type AgentConnectionGuide,
   assistantDomains,
@@ -36,9 +36,11 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { z } from "zod";
 import { createAgentAccessWorkItemService } from "./agent-access-work-items.js";
+import { createAgentAccountService } from "./agent-account-service.js";
 import { createAssistantService } from "./assistant-service.js";
 import { createAuditService } from "./audit.js";
 import { createAuthService } from "./auth-service.js";
+import { createAutomationHostService } from "./automation-host-service.js";
 import { calendarProviderReconciliationLog } from "./calendar-provider-log.js";
 import { createCalendarService } from "./calendar-service.js";
 import { createCalendarStewardshipService } from "./calendar-stewardship-service.js";
@@ -50,28 +52,57 @@ import { createDesktopReleaseService } from "./desktop-release-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
+import { createFinanceActivityService } from "./finance/activity-service.js";
+import { createFinanceAttentionService } from "./finance/attention-service.js";
+import { createFinanceBudgetBaselineQualificationService } from "./finance/baseline-qualification-service.js";
 import { createFinanceBudgetPolicyService } from "./finance/budget-policy-service.js";
+import { loadFinanceAuthorization } from "./finance/context.js";
 import { createFinanceContextualQuestionService } from "./finance/contextual-question-service.js";
 import {
   type ContextualPrincipal,
   contextualTransaction,
 } from "./finance/contextual-question-store.js";
+import { createFinanceConversationEvidenceService } from "./finance/conversation-evidence-service.js";
+import { createFinanceConversationService } from "./finance/conversation-persistence.js";
+import { createFinanceConversationUnreadService } from "./finance/conversation-unread-service.js";
+import { createFinanceEvidenceRefreshService } from "./finance/evidence-refresh-service.js";
+import { createFinanceMaintenanceExecutionService } from "./finance/maintenance-execution-service.js";
 import { createFinanceMaintenanceIntentService } from "./finance/maintenance-intent-service.js";
+import { runFinanceMaintenanceTick } from "./finance/maintenance-tick.js";
+import { createFinanceOnboardingEvidenceLoader } from "./finance/onboarding-evidence.js";
+import { createFinanceOnboardingRepository } from "./finance/onboarding-repository.js";
+import { createFinanceOpeningPositionService } from "./finance/opening-position-service.js";
 import { createFinancePositionService } from "./finance/position-service.js";
+import { createFinanceReviewBacklogService } from "./finance/review-backlog-service.js";
+import { createFinanceReviewBatchService } from "./finance/review-batch-service.js";
 import { createFinanceSmsPort } from "./finance/sms-answer-port.js";
+import { createFinanceSmsApprovalService } from "./finance/sms-approval-service.js";
+import { createFinanceSmsContextDispatcher } from "./finance/sms-context-dispatcher.js";
+import { createFinanceSpendingService } from "./finance/spending-service.js";
+import { resolveFinanceWorks } from "./finance/work-resolver.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceChallengeService } from "./finance-challenge-service.js";
+import { createFinanceHostDispatcher } from "./finance-host-dispatcher.js";
 import { createFinanceMaintenanceService } from "./finance-maintenance-service.js";
+import {
+  createFinanceNotificationDispatcher,
+  runFinanceReconciliationStages,
+} from "./finance-notification-runtime.js";
+import { createFinanceOnboardingService } from "./finance-onboarding-service.js";
 import { createFinancePeriodReviewService } from "./finance-period-review-service.js";
 import { createFinancePlaybookService } from "./finance-playbook-service.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService } from "./finance-service.js";
+import { createFinanceSmsAcknowledgementDispatcher } from "./finance-sms-acknowledgement.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
 import { createGoalsService } from "./goals-service.js";
 import { createGooglePubSubAuth, GooglePubSubAuthError } from "./google-pubsub-auth.js";
 import { createMailMaintenanceService } from "./mail-maintenance-service.js";
 import { createMailService } from "./mail-service.js";
 import { createMailStewardshipService } from "./mail-stewardship-service.js";
+import { createNativePushRuntime } from "./native-push-runtime.js";
+import { createNativePushService } from "./native-push-service.js";
+import { createApnsTransport } from "./native-push-transport.js";
 import { createNotificationService } from "./notification-service.js";
 import { createOAuthService } from "./oauth-service.js";
 import { createOpenApiDocument } from "./openapi.js";
@@ -81,12 +112,22 @@ import { readinessPayload } from "./release-revision.js";
 import { createReminderService } from "./reminder-service.js";
 import { readBoundedRequestBody } from "./request-body.js";
 import { createRitualService } from "./ritual-service.js";
+import { registerAgentAccountRoutes } from "./routes/agent-accounts.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
+import { registerAutomationHostRoutes } from "./routes/automation-hosts.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
+import { registerFinanceActivityRoutes } from "./routes/finance-activity.js";
+import { registerFinanceAttentionRoutes } from "./routes/finance-attention.js";
+import { registerFinanceConversationRoutes } from "./routes/finance-conversation.js";
+import { registerFinanceConversationEvidenceRoutes } from "./routes/finance-conversation-evidence.js";
+import { registerFinanceConversationUnreadRoutes } from "./routes/finance-conversation-unread.js";
+import { registerFinanceMaintenanceExecutionRoutes } from "./routes/finance-maintenance-execution.js";
+import { registerFinanceOnboardingRoutes } from "./routes/finance-onboarding.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
 import { registerMailRoutes } from "./routes/mail.js";
 import { registerMailStewardshipRoutes } from "./routes/mail-stewardship.js";
+import { registerNativePushRoutes } from "./routes/native-push.js";
 import { registerNotificationRoutes } from "./routes/notifications.js";
 import { registerReminderRoutes } from "./routes/reminders.js";
 import { registerRitualRoutes } from "./routes/rituals.js";
@@ -102,16 +143,24 @@ import { registerTaskProjectRoutes } from "./routes/task-projects.js";
 import { registerTaskWorkspaceRoutes } from "./routes/task-workspace.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 import { registerTextingRoutes } from "./routes/texting.js";
+import { registerTextingAgentRoutes } from "./routes/texting-agent.js";
 import { registerTextingRecoveryRoutes } from "./routes/texting-recovery.js";
+import { registerWorkspaceSearchRoutes } from "./routes/workspace-search.js";
 import { createTaskListService } from "./task-list-service.js";
 import { createTaskProjectService } from "./task-project-service.js";
 import { createTaskService } from "./task-service.js";
 import { createTaskWorkspaceService } from "./task-workspace-service.js";
+import { createTextingAgentDispatcher } from "./texting-agent-dispatcher.js";
+import { createTextingAgentNotices } from "./texting-agent-notices.js";
+import { createTextingAgentService } from "./texting-agent-service.js";
+import { createTextingRecoveryDispatcher } from "./texting-recovery-dispatcher.js";
+import { createTextingRecoveryRuntime } from "./texting-recovery-runtime.js";
 import { createTextingRecoveryService } from "./texting-recovery-service.js";
 import { createTextingService } from "./texting-service.js";
-import { createSmsAdmission } from "./texting-sms-admission.js";
+import { createSmsAdmission, createSmsApprovalAdmission } from "./texting-sms-admission.js";
 import type { AppDependencies, AppEnv, Principal } from "./types.js";
 import { createWeatherService } from "./weather-service.js";
+import { requireWorkspaceSourceExecution } from "./workspace-execution.js";
 import { createWorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
 import { createXBookmarksService } from "./x-bookmarks-service.js";
 
@@ -143,6 +192,10 @@ export type PersonalOsApp = Hono<AppEnv> & {
   dispatchDueMailRuleWork: () => Promise<void>;
   dispatchDueMailMaintenance: () => Promise<void>;
   dispatchDueFinanceMaintenance: () => Promise<void>;
+  runTextingRecovery: () => Promise<void> | null;
+  runFinanceNotifications: () => Promise<void> | null;
+  dispatchNativePush: () => Promise<void> | null;
+  quiesceTextingRecovery: () => void;
   superviseICloudMail: () => Promise<void>;
   syncDueConnectors: () => Promise<{
     attempted: number;
@@ -441,6 +494,10 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
   const finances = createFinanceService({
     db: dependencies.db,
+    plaidEnvironment: dependencies.config.plaidEnvironment,
+    ...(dependencies.config.plaidIosRedirectUri
+      ? { plaidIosRedirectUri: dependencies.config.plaidIosRedirectUri }
+      : {}),
     encryptionKey: dependencies.config.encryptionKey,
     ...(dependencies.log ? { log: dependencies.log } : {}),
     now,
@@ -448,17 +505,37 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ...(plaid ? { plaid } : {}),
     providerItems: financeProviderItems,
   });
+  const baselineQualification = createFinanceBudgetBaselineQualificationService({
+    db: dependencies.db,
+    now,
+  });
   const financeBudgetPolicies = createFinanceBudgetPolicyService({ db: dependencies.db, now });
   const financeContextualQuestions = createFinanceContextualQuestionService({
     db: dependencies.db,
     now,
   });
+  const financeEvidenceRefresh = createFinanceEvidenceRefreshService({ db: dependencies.db, now });
+  const financeReviewBatches = createFinanceReviewBatchService({
+    db: dependencies.db,
+    now,
+    finance: finances,
+  });
+  const financeActions = createFinanceActionService({ db: dependencies.db, finances, now });
   const financeSms = createFinanceSmsPort({
-    admitSmsAnswer: createSmsAdmission({ enabled: () => textingConfig.enabled }),
+    decideSmsApproval: createFinanceSmsApprovalService({
+      db: dependencies.db,
+      actions: financeActions,
+      admit: createSmsApprovalAdmission({
+        enabled: () => textingConfig.enabled && textingConfig.financeSmsEnabled === true,
+      }),
+      now,
+    }),
+    admitSmsAnswer: createSmsAdmission({
+      enabled: () => textingConfig.enabled && textingConfig.financeSmsEnabled === true,
+    }),
     db: dependencies.db,
     now,
   });
-  const financeActions = createFinanceActionService({ db: dependencies.db, finances, now });
   const financePlaybook = createFinancePlaybookService({ finances, now });
   const assistant = createAssistantService({
     appBaseUrl: dependencies.config.appBaseUrl,
@@ -473,6 +550,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       status,
       actorType,
       preferences,
+      principal,
     ) => {
       if (domain === "mail") {
         await mail.validateProfileSources(transaction, userId, sourceIds);
@@ -490,7 +568,14 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
         );
       }
       if (domain === "finances") {
-        await finances.validateProfileSources(transaction, userId, sourceIds, status, actorType);
+        await finances.validateProfileSources(
+          transaction,
+          userId,
+          sourceIds,
+          status,
+          actorType,
+          principal,
+        );
       }
     },
   });
@@ -498,6 +583,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     cursorSigningKey: dependencies.config.encryptionKey,
     db: dependencies.db,
     now,
+    ...(dependencies.log ? { log: dependencies.log } : {}),
   });
   const agentSkillRevision = dependencies.config.agentSkillRevision ?? officialAgentSkill.revision;
   const agentSkillSourceUrl =
@@ -580,6 +666,54 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     maintenance,
     now,
   });
+  const financeSpending = createFinanceSpendingService({
+    db: dependencies.db,
+    now,
+    readBudgetQualification: baselineQualification.getQualification,
+  });
+  const financeActivity = createFinanceActivityService({
+    db: dependencies.db,
+    cursorSecret: dependencies.config.encryptionKey,
+  });
+  const financeConversationEvidence = createFinanceConversationEvidenceService({
+    db: dependencies.db,
+    cursorSecret: dependencies.config.encryptionKey,
+    now,
+  });
+  const financeMaintenanceExecution = createFinanceMaintenanceExecutionService({
+    db: dependencies.db,
+  });
+  const financeConversationUnread = createFinanceConversationUnreadService({ db: dependencies.db });
+  const financeConversation = createFinanceConversationService({ db: dependencies.db, now });
+  const loadFinanceOnboardingEvidence = createFinanceOnboardingEvidenceLoader({
+    now,
+    onChatFailure: ({ category, durationMs }) =>
+      dependencies.log?.({
+        event: "finance_onboarding_chat_unavailable",
+        category,
+        durationMs,
+        method: "INTERNAL",
+        path: "finance/onboarding/chat-readiness",
+        requestId: randomUUID(),
+        status: 503,
+      }),
+    hasLegacyAccess: async (executor, userId) => {
+      const [grant] = await executor
+        .select({ userId: financeOnboardingLegacyAccess.userId })
+        .from(financeOnboardingLegacyAccess)
+        .where(eq(financeOnboardingLegacyAccess.userId, userId))
+        .limit(1);
+      return grant !== undefined;
+    },
+  });
+  const financeOnboarding = createFinanceOnboardingService({
+    now,
+    repository: createFinanceOnboardingRepository({
+      db: dependencies.db,
+      now,
+      loadEvidence: loadFinanceOnboardingEvidence,
+    }),
+  });
   const financePosition = createFinancePositionService({ db: dependencies.db, now });
   const financeChallenges = createFinanceChallengeService({
     actions: financeActions,
@@ -630,6 +764,25 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ...(twilio ? { twilio } : {}),
     now,
   });
+  const textingAgent = createTextingAgentService({
+    db: dependencies.db,
+    enabled: () => textingConfig.enabled,
+    now,
+    texting,
+  });
+  const dispatchTextingAgent = createTextingAgentDispatcher({
+    db: dependencies.db,
+    enabled: () => textingConfig.enabled,
+    now,
+    encryptionKey: dependencies.config.encryptionKey,
+    fetch: dependencies.fetch ?? globalThis.fetch,
+  });
+  const dispatchTextingAgentNotices = createTextingAgentNotices({
+    db: dependencies.db,
+    enabled: () => textingConfig.enabled,
+    now,
+    texting,
+  });
   const textingRecovery = createTextingRecoveryService({
     db: dependencies.db,
     enabled: () => textingConfig.enabled,
@@ -652,11 +805,78 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     },
     now,
   });
+  const textingRecoveryDispatcher = createTextingRecoveryDispatcher({
+    db: dependencies.db,
+    recovery: textingRecovery,
+  });
+  const textingRecoveryRuntime = createTextingRecoveryRuntime(async (shouldContinue) => {
+    await dispatchTextingAgent(shouldContinue);
+    await dispatchTextingAgentNotices(shouldContinue);
+    const result = await textingRecoveryDispatcher.runPass({ shouldContinue });
+    if (result.failed) {
+      throw new Error(`Texting recovery failed for ${result.failed} claims.`);
+    }
+  });
   const notifications = createNotificationService({
     db: dependencies.db,
+    resolveWork: resolveFinanceWorks,
+    deliveryEnabled: () => textingConfig.enabled && textingConfig.financeSmsEnabled === true,
     origin: dependencies.config.appBaseUrl,
     transport: texting,
     now,
+  });
+  const pushConfig = dependencies.config.nativePush ?? {
+    enabled: false,
+    teamId: "",
+    keyId: "",
+    privateKey: "",
+    topic: "app.personal-os.mobile",
+    environment: "production" as const,
+  };
+  const nativePush = createNativePushService({
+    appBaseUrl: dependencies.config.appBaseUrl,
+    db: dependencies.db,
+    encryptionKey: dependencies.config.encryptionKey,
+    config: pushConfig,
+    transport: createApnsTransport(pushConfig),
+    ...(dependencies.now ? { now: dependencies.now } : {}),
+  });
+  const nativePushRuntime = createNativePushRuntime({
+    db: dependencies.db,
+    enabled: () => pushConfig.enabled,
+    dispatch: nativePush.dispatch,
+  });
+  const dispatchFinanceNotifications = createFinanceNotificationDispatcher({
+    db: dependencies.db,
+    notifications,
+    enabled: () => textingConfig.enabled && textingConfig.financeSmsEnabled === true,
+  });
+  const dispatchFinanceHosts = createFinanceHostDispatcher({
+    db: dependencies.db,
+    now,
+    encryptionKey: dependencies.config.encryptionKey,
+    fetch: dependencies.fetch ?? globalThis.fetch,
+    ...(dependencies.log ? { log: dependencies.log } : {}),
+  });
+  const dispatchFinanceSmsContext = createFinanceSmsContextDispatcher({
+    db: dependencies.db,
+    enabled: () => textingConfig.enabled && textingConfig.financeSmsEnabled === true,
+    now,
+  });
+  const dispatchFinanceAcknowledgements = createFinanceSmsAcknowledgementDispatcher({
+    db: dependencies.db,
+    recovery: textingRecovery,
+    texting,
+    enabled: () => textingConfig.enabled && textingConfig.financeSmsEnabled === true,
+    now,
+  });
+  const financeNotificationRuntime = createTextingRecoveryRuntime(async (shouldContinue) => {
+    await runFinanceReconciliationStages([
+      { name: "context", run: () => dispatchFinanceSmsContext(shouldContinue) },
+      { name: "acknowledgement", run: () => dispatchFinanceAcknowledgements(shouldContinue) },
+      { name: "host", run: () => dispatchFinanceHosts(shouldContinue) },
+      { name: "notification", run: () => dispatchFinanceNotifications(shouldContinue) },
+    ]);
   });
 
   app.use("*", async (context, next) => {
@@ -1000,6 +1220,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       principal = await auth.authenticateAccessToken(
         authorization.slice(7),
         audience && internalKey === dependencies.config.mcpInternalSecret ? audience : undefined,
+        context.get("requestId"),
       );
     } else if (authorization?.startsWith("Session ")) {
       principal = await auth.authenticateSession(authorization.slice(8));
@@ -1033,6 +1254,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/tasks/*", authenticate);
   app.use("/v1/tasks", authenticate);
   app.use("/v1/task-workspace", authenticate);
+  app.use("/v1/workspaces/*", authenticate);
   app.use("/v1/texting/*", authenticate);
   app.use("/v1/texting", authenticate);
   app.use("/v1/calendars/*", authenticate);
@@ -1046,8 +1268,13 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/rituals/*", authenticate);
   app.use("/v1/motives/*", authenticate);
   app.use("/v1/motives", authenticate);
+  app.use("/v1/agent-accounts", authenticate);
+  app.use("/v1/agent-accounts/*", authenticate);
+  app.use("/v1/automation-hosts", authenticate);
+  app.use("/v1/automation-hosts/*", authenticate);
   app.use("/v1/finances/*", authenticate);
   app.use("/v1/finances", authenticate);
+  app.use("/v1/native-push/*", authenticate, requireHuman);
   app.use("/v1/mailboxes", authenticate);
   app.use("/v1/audit", authenticate, requireScope("audit:read"));
   app.use("/v1/daily-brief", authenticate, requireScope("automations:read"));
@@ -1059,8 +1286,25 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       throw new AppError("forbidden", "Verify your email before connecting an account.");
     await next();
   };
-  app.use("/v1/connectors", authenticate, requireHuman);
-  app.use("/v1/connectors/*", authenticate, requireHuman);
+  app.use("/v1/connectors", authenticate, async (context, next) => {
+    if (context.get("principal").actorType === "agent")
+      for (const scope of ["mail:read", "calendar:read", "reminders:read"] as const)
+        await requireScope(scope)(context, async () => {});
+    await next();
+  });
+  app.use("/v1/connectors/*", authenticate, async (context, next) => {
+    if (context.req.method === "GET" && context.req.path === "/v1/connectors") {
+      await next();
+      return;
+    }
+    const sharedMutation =
+      (context.req.method === "DELETE" && /^\/v1\/connectors\/[^/]+$/.test(context.req.path)) ||
+      (context.req.method === "POST" && /^\/v1\/connectors\/[^/]+\/sync$/.test(context.req.path));
+    if (sharedMutation) {
+      await requireWorkspaceSourceExecution(dependencies.db, context.get("principal"), now());
+      await next();
+    } else await requireHuman(context, next);
+  });
   app.use("/v1/connectors/google/start", requireVerifiedEmail);
   app.use("/v1/connectors/icloud", requireVerifiedEmail);
   app.use("/v1/x-bookmarks", authenticate);
@@ -1140,9 +1384,15 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ),
   );
 
-  app.get("/v1/sessions", async (context) =>
-    context.json({ sessions: await auth.listSessions(context.get("principal").userId) }),
-  );
+  app.get("/v1/sessions", async (context) => {
+    const authorization = context.req.header("authorization");
+    const token = authorization?.startsWith("Session ")
+      ? authorization.slice(8)
+      : getCookie(context, dependencies.config.sessionCookieName);
+    return context.json({
+      sessions: await auth.listSessions(context.get("principal").userId, token),
+    });
+  });
   app.delete("/v1/sessions/:id", async (context) => {
     await auth.revokeSession(context.get("principal").userId, context.req.param("id"));
     return context.body(null, 204);
@@ -1205,6 +1455,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       result: await connectors.syncAccount(
         context.get("principal").userId,
         context.req.param("id"),
+        { context: mutationContext(context) },
       ),
     }),
   );
@@ -1213,6 +1464,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       context.get("principal").userId,
       context.req.param("id"),
       context.get("requestId"),
+      context.get("principal"),
     );
     return context.body(null, 204);
   });
@@ -1304,9 +1556,17 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     });
   });
 
-  registerMailRoutes({ app, mail, mutationContext });
+  registerWorkspaceSearchRoutes({
+    app,
+    now,
+    db: dependencies.db,
+    mutationContext,
+    workItems: agentAccessWorkItems,
+  });
+  registerMailRoutes({ app, db: dependencies.db, mail, mutationContext });
   registerMailStewardshipRoutes({
     app,
+    db: dependencies.db,
     maintenance: mailMaintenance,
     mutationContext,
     stewardship: mailStewardship,
@@ -1328,22 +1588,48 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     mutationContext,
   });
 
+  registerFinanceAttentionRoutes({
+    app,
+    attention: createFinanceAttentionService({ db: dependencies.db, now }),
+    opening: createFinanceOpeningPositionService({ db: dependencies.db, now }),
+    refresh: financeEvidenceRefresh,
+  });
   registerFinanceRoutes({
+    reviewBacklog: createFinanceReviewBacklogService(dependencies.db, { now }),
+    reviewBatches: financeReviewBatches,
     actions: financeActions,
     app,
     db: dependencies.db,
     financeChallenges,
     financeBudgetPolicies,
+    baselineQualification,
     contextualQuestions: financeContextualQuestions,
     canonicalFinanceMaintenance,
     financeMaintenance,
     financePeriodReviews,
     financePlaybook,
     financePosition,
+    financeSpending,
     financeStatus,
     finances,
     mutationContext,
   });
+
+  registerFinanceConversationRoutes({ app, conversation: financeConversation });
+  registerFinanceMaintenanceExecutionRoutes({ app, execution: financeMaintenanceExecution });
+  registerFinanceConversationUnreadRoutes({ app, unread: financeConversationUnread });
+  registerFinanceConversationEvidenceRoutes({ app, evidence: financeConversationEvidence });
+  registerFinanceOnboardingRoutes({
+    app,
+    onboarding: financeOnboarding,
+    authorize: (context) =>
+      loadFinanceAuthorization({
+        db: dependencies.db,
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+  });
+  registerFinanceActivityRoutes({ app, activity: financeActivity });
 
   registerReminderRoutes({ app, mutationContext, reminders });
 
@@ -1363,11 +1649,26 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
 
   registerTextingRoutes({
     app,
+    apiBaseUrl: dependencies.config.apiBaseUrl,
     texting,
     ...(twilio ? { validateWebhook: twilio.validateWebhook } : {}),
   });
   registerTextingRecoveryRoutes({ app, recovery: textingRecovery });
+  registerTextingAgentRoutes(app, textingAgent);
+  registerAgentAccountRoutes({
+    app,
+    accounts: createAgentAccountService({ db: dependencies.db, now }),
+  });
+  registerAutomationHostRoutes({
+    app,
+    hosts: createAutomationHostService({
+      db: dependencies.db,
+      now,
+      encryptionKey: dependencies.config.encryptionKey,
+    }),
+  });
   registerNotificationRoutes({ app, notifications });
+  registerNativePushRoutes(app, nativePush);
 
   app.get("/v1/audit", async (context) => {
     const query = auditQuerySchema.parse(context.req.query());
@@ -1396,6 +1697,20 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   }
 
   return Object.assign(app, {
+    runTextingRecovery() {
+      return textingRecoveryRuntime.run();
+    },
+    runFinanceNotifications() {
+      return financeNotificationRuntime.run();
+    },
+    dispatchNativePush() {
+      return nativePushRuntime.run();
+    },
+    quiesceTextingRecovery() {
+      nativePushRuntime.quiesce();
+      financeNotificationRuntime.quiesce();
+      textingRecoveryRuntime.quiesce();
+    },
     async backfillFinanceProviderItems() {
       return financeProviderItems.backfillLegacyItems();
     },
@@ -1503,7 +1818,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     async syncDueFinances() {
       const startedAt = Date.now();
       try {
-        return await finances.syncDuePlaidAccounts();
+        try {
+          return await finances.syncDuePlaidAccounts();
+        } finally {
+          await financeEvidenceRefresh.reconcilePending();
+        }
       } catch {
         dependencies.log?.({
           code: "finance_sync_scheduler_failed",
@@ -1519,10 +1838,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       }
     },
     async dispatchDueFinanceMaintenance() {
-      const recovery = await canonicalFinanceMaintenance.recoverAcceptedWork();
-      await financeMaintenance.dispatchDue(5);
-      if (recovery.failedRecoveries)
-        throw new Error("Some Finance maintenance handoffs could not be recovered.");
+      await runFinanceMaintenanceTick({
+        recoverAcceptedWork: () => canonicalFinanceMaintenance.recoverAcceptedWork(),
+        dispatchDue: () => financeMaintenance.dispatchDue(5),
+        processApprovedBatches: () => financeReviewBatches.processApproved(),
+        log: dependencies.log,
+      });
     },
   });
 }
@@ -1556,6 +1877,18 @@ function escapeHtml(value: string): string {
 }
 
 const oauthScopeLabels: Record<string, string> = {
+  "mail:execute":
+    "With review bypass enabled, send exact saved drafts, activate reviewed rules, reconcile delivery, and manage Mail stewardship and preferences. Combined Mail, Calendar, and Tasks execution grants also permit source sync and disconnection. Sending cannot be undone.",
+  "finances:execute":
+    "With review bypass enabled, activate inspected budgets and guidance, manage policies, accounts, reviews, bank sync, host recovery and Finance preferences.",
+  "calendar:execute":
+    "With review bypass enabled, manage Calendar workspace preferences and, with Mail and Tasks execution grants, sync or disconnect shared sources.",
+  "tasks:execute":
+    "With review bypass enabled, manage Tasks workspace preferences and, with Mail and Calendar execution grants, sync or disconnect shared sources.",
+  "texting:read": "Read Texting and notification status",
+  "texting:write": "Manage Texting messages",
+  "texting:execute":
+    "With review bypass enabled, manage notification preferences and disconnect the verified Texting destination, without widening the global disclosure ceiling.",
   "audit:read": "Read nohmi activity history",
   "automations:read": "Read the generated daily brief",
   "automations:write": "Legacy automation access (inactive)",

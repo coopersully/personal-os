@@ -1,5 +1,5 @@
 import { type CSSProperties, useState } from "react";
-import { NohmiBrandMark } from "@/components/brand-marks";
+import { PersonalOsBrandMark } from "@/components/brand-marks";
 import { cn } from "@/lib/utils";
 
 /** Decorative only: timings stay stable when surrounding UI changes. */
@@ -51,7 +51,7 @@ export function BrandPattern({
               : tile.style
           }
         >
-          <NohmiBrandMark symbol />
+          <PersonalOsBrandMark symbol />
         </span>
       ))}
     </div>

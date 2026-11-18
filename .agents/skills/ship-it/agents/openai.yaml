@@ -1,4 +1,6 @@
 interface:
   display_name: "Ship It"
-  short_description: "Take one Nohmi pull request through verified merge."
-  default_prompt: "Use $ship-it to take the current Nohmi pull request through every gate and merge it autonomously."
+  short_description: "Delivery engine for handoff: gates, merge, production."
+  default_prompt: "Use $handoff to take the current Nohmi pull request through acceptance; it runs $ship-it's gates and merges only with explicit merge authority."
+policy:
+  allow_implicit_invocation: false

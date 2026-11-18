@@ -4,7 +4,9 @@ import {
   normalizeTextingPhoneNumber,
   parseTextReply,
   sendTextMessageInputSchema,
+  startTextingVerificationInputSchema,
   textConversationQuerySchema,
+  textingConsentVersion,
 } from "./texting.js";
 
 it("keeps exact Finance SMS reply status finite and free of private evidence", () => {
@@ -67,6 +69,31 @@ it("keeps exact Finance SMS reply status finite and free of private evidence", (
   ).toThrow();
 });
 
+it.each([
+  undefined,
+  "2026-09-12",
+])("rejects enrollment with missing or stale consent version %s", (consentVersion) => {
+  expect(
+    startTextingVerificationInputSchema.safeParse({
+      consentAccepted: true,
+      consentVersion,
+      country: "US",
+      phoneNumber: "+12125550123",
+    }).success,
+  ).toBe(false);
+});
+
+it("retains the consent version acknowledged by the enrollment screen", () => {
+  expect(
+    startTextingVerificationInputSchema.parse({
+      consentAccepted: true,
+      consentVersion: textingConsentVersion,
+      country: "US",
+      phoneNumber: "+12125550123",
+    }).consentVersion,
+  ).toBe(textingConsentVersion);
+});
+
 describe("texting contracts", () => {
   it("normalizes US and Canadian NANP numbers", () => {
     expect(normalizeTextingPhoneNumber({ country: "US", phoneNumber: "(212) 555-0123" })).toEqual({
@@ -92,6 +119,19 @@ describe("texting contracts", () => {
 
   it("bounds conversation and send inputs", () => {
     expect(textConversationQuerySchema.parse({})).toEqual({ limit: 100 });
+    expect(textConversationQuerySchema.parse({ aroundCursor: "anchor", limit: 50 })).toEqual({
+      aroundCursor: "anchor",
+      limit: 50,
+    });
+    expect(() =>
+      textConversationQuerySchema.parse({ aroundCursor: "anchor", afterCursor: "a" }),
+    ).toThrow();
+    expect(() =>
+      textConversationQuerySchema.parse({ aroundCursor: "anchor", beforeCursor: "b" }),
+    ).toThrow();
+    expect(() =>
+      textConversationQuerySchema.parse({ aroundCursor: "anchor", limit: 101 }),
+    ).toThrow();
     expect(() =>
       textConversationQuerySchema.parse({ afterCursor: "a", beforeCursor: "b" }),
     ).toThrow();

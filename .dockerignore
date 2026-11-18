@@ -18,3 +18,8 @@ infra/terraform.tfvars
 **/.build
 .superpowers
 .context
+
+# Native development/build artifacts are not inputs to the web/API runtime.
+apps/mobile/ios
+apps/mobile/build
+apps/mobile/.expo

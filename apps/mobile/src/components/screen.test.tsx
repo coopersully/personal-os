@@ -1,0 +1,144 @@
+// @vitest-environment jsdom
+import { cleanup, render, screen } from "@testing-library/react";
+import type { PropsWithChildren } from "react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { Screen, tabBarClearance } from "./screen";
+
+vi.mock("react", async () => {
+  const { createRequire } = await import("node:module");
+  return createRequire(`${process.cwd()}/package.json`)("react");
+});
+const h = vi.hoisted(() => ({
+  platform: { OS: "web" },
+  inset: 80,
+  motion: true,
+  region: vi.fn(),
+  scroll: {} as Record<string, unknown>,
+  fixed: undefined as number | undefined,
+}));
+vi.mock("react-native", async () => {
+  const native = await import("../../test/native");
+  return {
+    ...native,
+    Platform: h.platform,
+    Animated: { View: native.View },
+    View: ({ children, style }: PropsWithChildren<{ style?: unknown }>) => {
+      const bottom = [style]
+        .flat(3)
+        .map((entry) => (entry as { paddingBottom?: number } | undefined)?.paddingBottom)
+        .findLast((value) => value !== undefined);
+      if (bottom !== undefined) h.fixed = bottom;
+      return <div>{children}</div>;
+    },
+    ScrollView: ({ children, ...props }: PropsWithChildren<Record<string, unknown>>) => {
+      h.scroll = props;
+      return <div data-testid="scroll">{children}</div>;
+    },
+  };
+});
+vi.mock("react-native-safe-area-context", () => ({
+  useSafeAreaInsets: () => ({ top: 44, bottom: 34 }),
+}));
+vi.mock("../navigation/workspace-motion", () => ({
+  useWorkspaceMotion: () =>
+    h.motion ? { workspaceProgress: "vertical", pageProgress: "horizontal" } : null,
+  regionMotion: h.region,
+}));
+vi.mock("./workspace-header-inset", () => ({ useWorkspaceHeaderInset: () => h.inset }));
+beforeEach(() => {
+  vi.clearAllMocks();
+  h.platform.OS = "web";
+  h.inset = 80;
+  h.motion = true;
+});
+afterEach(cleanup);
+it("keeps hero bounds fixed and delegates native iOS horizontal motion to native navigation", () => {
+  h.platform.OS = "ios";
+  const onScroll = vi.fn();
+  render(
+    <Screen chrome edgeToEdge bounces={false} onScroll={onScroll}>
+      Briefing
+    </Screen>,
+  );
+  expect(screen.getByText("Briefing")).toBeVisible();
+  expect(h.region).toHaveBeenCalledWith("vertical", 20);
+  expect(h.region).not.toHaveBeenCalledWith("horizontal", 24, "x");
+  expect(h.scroll).toMatchObject({
+    bounces: false,
+    onScroll,
+    contentInsetAdjustmentBehavior: "never",
+    automaticallyAdjustKeyboardInsets: true,
+    keyboardDismissMode: "interactive",
+    scrollIndicatorInsets: { top: 80 },
+  });
+  expect(h.scroll.contentContainerStyle).toEqual(
+    expect.arrayContaining([expect.objectContaining({ paddingTop: 0, paddingBottom: 34 })]),
+  );
+});
+it("clears the floating native tab bar on iPhone tab pages and nowhere else", () => {
+  const bottom = () =>
+    (h.scroll.contentContainerStyle as { paddingBottom?: number }[]).at(-1)?.paddingBottom;
+  h.platform.OS = "ios";
+  const view = render(
+    <Screen chrome tabBar>
+      Overview
+    </Screen>,
+  );
+  expect(bottom()).toBe(tabBarClearance);
+  expect(tabBarClearance).toBeGreaterThan(34 + 60);
+  view.rerender(<Screen chrome>Calendar</Screen>);
+  expect(bottom()).toBe(34);
+  // Web keeps its dock outside the page, so a tab page needs no extra room there.
+  h.platform.OS = "web";
+  view.rerender(
+    <Screen chrome tabBar>
+      Overview
+    </Screen>,
+  );
+  expect(bottom()).toBe(34);
+  // A fixed page, such as a pinned composer, gets the same clearance on iPhone only.
+  const fixed = () => h.fixed;
+  view.rerender(
+    <Screen chrome scroll={false} tabBar>
+      Conversation
+    </Screen>,
+  );
+  expect(fixed()).toBe(34);
+  h.platform.OS = "ios";
+  view.rerender(
+    <Screen chrome scroll={false} tabBar>
+      Conversation
+    </Screen>,
+  );
+  expect(fixed()).toBe(tabBarClearance);
+  view.rerender(
+    <Screen chrome scroll={false}>
+      Editor
+    </Screen>,
+  );
+  expect(fixed()).toBe(34);
+});
+it("uses safe-area adjustment without shared chrome and preserves compact non-scrolling forms", () => {
+  h.inset = 0;
+  h.motion = false;
+  const view = render(<Screen backgroundColor="#ffffff">Form</Screen>);
+  expect(h.scroll.contentInsetAdjustmentBehavior).toBe("automatic");
+  expect(h.scroll.contentContainerStyle).toEqual(
+    expect.arrayContaining([expect.objectContaining({ paddingTop: 16 })]),
+  );
+  view.rerender(<Screen scroll={false}>Fixed form</Screen>);
+  expect(screen.getByText("Fixed form")).toBeVisible();
+  expect(screen.queryByTestId("scroll")).toBeNull();
+  expect(h.region).not.toHaveBeenCalled();
+});
+it("keeps web page motion separate from workspace motion and leaves room for sticky chrome", () => {
+  render(<Screen chrome>Tasks</Screen>);
+  expect(h.region).toHaveBeenCalledWith("horizontal", 24, "x");
+  expect(h.scroll.contentContainerStyle).toEqual(
+    expect.arrayContaining([expect.objectContaining({ paddingTop: 84 })]),
+  );
+});
+
+vi.mock("../features/auth/context", () => ({ useOptionalAuth: () => null }));
+
+vi.mock("sonner-native", () => ({ toast: { error: vi.fn() } }));

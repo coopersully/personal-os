@@ -1,12 +1,21 @@
 import type {
   CheckTextingVerificationInput,
   FinanceTextReplyStatus,
+  NotificationAttemptDetail,
   NotificationPreferences,
   NotificationStatus,
   SendTextMessageInput,
   StartTextingVerificationInput,
   TextConversationPage,
   TextConversationQuery,
+  TextingAgentCheckpoint,
+  TextingAgentClaim,
+  TextingAgentClaimInput,
+  TextingAgentRecovery,
+  TextingAgentReply,
+  TextingAgentRun,
+  TextingAgentSettingsInput,
+  TextingAgentStatus,
   TextingConnection,
   TextingVerificationChallenge,
   TextMessage,
@@ -16,11 +25,54 @@ type Request = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 export function createTextingApiClient(request: Request, toQuery: (query: object) => string) {
   return {
+    recoverTextingAgentRun: (runId: string, input: TextingAgentRecovery) =>
+      request<TextingAgentStatus>(`/v1/texting/agent/runs/${encodeURIComponent(runId)}/recover`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    getTextingAgentStatus: (input: { beforeRun?: string } = {}) =>
+      request<TextingAgentStatus>(
+        `/v1/texting/agent${input.beforeRun ? `?${toQuery(input)}` : ""}`,
+        { cache: "no-store" },
+      ),
+    configureTextingAgent: (input: TextingAgentSettingsInput) =>
+      request<TextingAgentStatus>("/v1/texting/agent", {
+        method: "PUT",
+        body: JSON.stringify(input),
+      }),
+    claimTextingAgentRun: (runId: string, input: TextingAgentClaimInput) =>
+      request<TextingAgentClaim>(`/v1/texting/agent/runs/${encodeURIComponent(runId)}/claim`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    checkpointTextingAgentRun: (runId: string, input: TextingAgentCheckpoint) =>
+      request<TextingAgentRun>(`/v1/texting/agent/runs/${encodeURIComponent(runId)}/checkpoint`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    replyToTextingAgentRun: (runId: string, input: TextingAgentReply) =>
+      request<TextingAgentRun>(`/v1/texting/agent/runs/${encodeURIComponent(runId)}/reply`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
     async getFinanceTextReplyStatus(inboundMessageId: string): Promise<FinanceTextReplyStatus> {
       return request(`/v1/texting/finance-replies/${encodeURIComponent(inboundMessageId)}/status`);
     },
+    async getNotificationAttempt(attemptId: string): Promise<NotificationAttemptDetail> {
+      return request(`/v1/texting/notifications/attempts/${encodeURIComponent(attemptId)}`, {
+        cache: "no-store",
+      });
+    },
     async getNotificationStatus(): Promise<NotificationStatus> {
       return request("/v1/texting/notifications");
+    },
+    async resetFinanceNotificationPreferences(input: {
+      expectedRevision: number;
+    }): Promise<{ scope: "finances"; inherited: true }> {
+      return request("/v1/texting/notifications/preferences/finances", {
+        method: "DELETE",
+        body: JSON.stringify(input),
+      });
     },
     async saveNotificationPreferences(
       scope: "global" | "finances",

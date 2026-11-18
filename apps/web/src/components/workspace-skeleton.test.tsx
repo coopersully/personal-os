@@ -22,6 +22,11 @@ describe("WorkspaceSkeleton", () => {
     expect(screen.getByRole("status")).toHaveAccessibleName(/workspace preview/);
   });
 
+  it("preserves the selected calendar view while events load", () => {
+    render(<WorkspaceSkeleton kind="calendar" calendarView="day" />);
+    expect(screen.getByRole("status")).toHaveAttribute("data-calendar-view", "day");
+  });
+
   it("marks the default mode as busy", () => {
     render(<WorkspaceSkeleton kind="today" />);
     expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "true");

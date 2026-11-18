@@ -56,14 +56,14 @@ function testApp(
 }
 
 describe("Mail stewardship routes", () => {
-  it("loads an exact question for a signed-in Mail reader and denies agents", async () => {
+  it("loads an exact question for human and agent Mail readers", async () => {
     const { app, stewardship } = testApp(["mail:read"]);
     const response = await app.request(`/v1/mail/questions/${id}`);
     expect(response.status).toBe(200);
     expect(stewardship.getQuestion).toHaveBeenCalledWith(id, id);
-    const denied = testApp(["mail:read"], "agent");
-    expect((await denied.app.request(`/v1/mail/questions/${id}`)).status).toBe(403);
-    expect(denied.stewardship.getQuestion).not.toHaveBeenCalled();
+    const agent = testApp(["mail:read"], "agent");
+    expect((await agent.app.request(`/v1/mail/questions/${id}`)).status).toBe(200);
+    expect(agent.stewardship.getQuestion).toHaveBeenCalledWith(id, id);
   });
 
   it("dispatches one maintenance intent and returns the honest API result", async () => {

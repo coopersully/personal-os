@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-    types: [edited, opened, ready_for_review, reopened, synchronize]
+    types: [opened, ready_for_review, reopened, synchronize]
   push:
     branches: [main, "feature/**"]
 
@@ -14,23 +14,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  pr-work-map:
-    name: PR Work map
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v7
-      - name: Validate submitted PR body
-        env:
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: ./.codex/scripts/check-pr-body.sh
-
   changes:
     name: Classify changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      required_jobs: ${{ steps.scope.outputs.required_jobs }}
+      lane: ${{ steps.scope.outputs.lane }}
       full: ${{ steps.scope.outputs.full }}
       repo: ${{ steps.scope.outputs.repo }}
       terraform: ${{ steps.scope.outputs.terraform }}
@@ -51,34 +41,56 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
+          CI_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full') }}
+          # A draft runs the fast lane: the classifier omits the browser and desktop
+          # matrices from required_jobs and the aggregate below reports nothing.
+          CI_DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          changed_files="$RUNNER_TEMP/changed-files.txt"
           scope_json="$RUNNER_TEMP/ci-scope.json"
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            if ! git diff --name-only --diff-filter=ACMRD "$BASE_SHA...$HEAD_SHA" > "$changed_files"; then
-              echo "Unable to calculate the pull-request diff; selecting full CI." >&2
-              : > "$changed_files"
-            fi
-          else
-            : > "$changed_files"
+          scope_args=(--base "$BASE_SHA" --head "$HEAD_SHA")
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            scope_args=(--github-push)
           fi
           node .github/scripts/ci-scope.mjs \
-            --files "$changed_files" \
-            --json \
-            --github-output "$GITHUB_OUTPUT" | tee "$scope_json"
+            "${scope_args[@]}" \
+            --json --github-output "$GITHUB_OUTPUT" | tee "$scope_json"
           {
-            echo "## CI scope (shadow mode)"
+            echo "## CI scope"
             echo '```json'
             cat "$scope_json"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Record source event and canonical scope
+        if: github.event_name == 'pull_request'
+        run: node .github/scripts/source-receipt.mjs "$RUNNER_TEMP/source-candidate.json"
+      - name: Retain attempt-specific source receipt
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/source-candidate.json
+          if-no-files-found: error
+          retention-days: 7
+      # The gate at the end of this run rejects an invalid Work map, and only a complete
+      # rerun or a new push clears that. Say so now, without hiding source results.
+      - name: Warn early about an invalid Work map
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          bash .codex/scripts/check-pr-body.sh || echo "::warning title=Work map::CI required will fail for this run. Fix the pull request description, then rerun the whole workflow or push."
+      - name: Explain the draft fast lane
+        if: steps.scope.outputs.lane == 'fast'
+        run: |
+          echo "::notice title=Draft fast lane::Browser and desktop acceptance are deferred and Source verification is not reported. Mark the pull request ready for review, or add the ci:full label and push, to run complete verification."
+
   infrastructure:
     name: Terraform
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.terraform == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'infrastructure') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -95,7 +107,7 @@ jobs:
   repository:
     name: Repository contracts
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.repo == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'repository') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -111,7 +123,7 @@ jobs:
   lint-and-format:
     name: Lint and format
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.node == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'lint-and-format') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -126,12 +138,77 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
 
+  # Node quality is the canonical result for types, tests, coverage and builds. The
+  # two jobs below are its inputs: it needs both, so their failure, cancellation or
+  # absence skips it and fails the required gate.
+  tests:
+    name: Node tests (${{ matrix.shard }}/6)
+    needs: changes
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'quality') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v7
+        with:
+          cache: pnpm
+          node-version: 22
+      - id: install
+        run: pnpm install --frozen-lockfile
+      # Each shard runs its share of the suite and exports raw V8 coverage without
+      # converting it or checking coverage floors; Node quality merges every shard.
+      - id: node
+        env:
+          NOHMI_COVERAGE_SHARD_DIR: ${{ runner.temp }}/coverage-shards/${{ matrix.shard }}
+        run: pnpm test:coverage:shard --shard=${{ matrix.shard }}/6
+        timeout-minutes: 15
+      - name: Retain raw shard coverage for the merge
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-shard-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/coverage-shards/${{ matrix.shard }}/
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    name: Node build
+    needs: changes
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'quality') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v7
+        with:
+          cache: pnpm
+          node-version: 22
+      - id: install
+        run: pnpm install --frozen-lockfile
+      - id: audit
+        run: pnpm audit --prod
+      - id: typecheck
+        run: pnpm typecheck
+        timeout-minutes: 5
+      - id: build
+        run: pnpm build
+        timeout-minutes: 10
+
   quality:
     name: Node quality
-    needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.node == 'true' || needs.changes.outputs.database == 'true' }}
+    needs: [changes, tests, build]
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'quality') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -141,16 +218,74 @@ jobs:
         with:
           cache: pnpm
           node-version: 22
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check:node
-      - run: pnpm audit --prod
+      - id: coverage-prepare
+        name: Prepare attempt-bound coverage diagnostics
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node .github/scripts/collect-node-coverage.mjs prepare "$RUNNER_TEMP/node-coverage"
+      - id: install
+        run: pnpm install --frozen-lockfile
+      - id: shards
+        name: Collect raw coverage from every shard of this attempt
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-shard-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: ${{ runner.temp }}/coverage-shards
+      # Merges raw V8 results before conversion, as a single run does, then writes the
+      # reports and enforces the coverage floors for the whole suite.
+      - id: node
+        env:
+          NOHMI_COVERAGE_SHARD_DIR: ${{ runner.temp }}/coverage-shards
+        run: pnpm test:coverage:merge
+        timeout-minutes: 10
+      - id: coverage
+        name: Collect bounded coverage diagnostics
+        if: always()
+        timeout-minutes: 1
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          # This job runs only after Node build succeeded as a whole.
+          AUDIT_OUTCOME: ${{ needs.build.result }}
+          TYPECHECK_OUTCOME: ${{ needs.build.result }}
+          COVERAGE_OUTCOME: ${{ steps.node.outcome }}
+          BUILD_OUTCOME: ${{ needs.build.result }}
+        run: node .github/scripts/collect-node-coverage.mjs collect "$RUNNER_TEMP/node-coverage"
+      - name: Retain attempt-bound Node coverage diagnostics
+        if: ${{ always() && steps.coverage.outputs.artifact_ready == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: node-coverage-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: |
+            ${{ runner.temp }}/node-coverage/manifest.json
+            ${{ runner.temp }}/node-coverage/coverage-summary.json
+            ${{ runner.temp }}/node-coverage/coverage-final.json
+          if-no-files-found: error
+          retention-days: 7
 
   browser:
-    name: Browser acceptance
+    name: Browser acceptance (${{ matrix.project }}, ${{ matrix.shard }}/6)
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.browser == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'browser') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Leave setup/download headroom outside the bounded test execution.
+    timeout-minutes: 50
+    env:
+      BROWSER_PROJECT: ${{ matrix.project }}
+      BROWSER_SHARD: ${{ matrix.shard }}
+      BROWSER_DIAGNOSTIC_CONTEXT: local-e2e-fixtures
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [desktop-chromium, mobile-chromium]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -160,29 +295,57 @@ jobs:
         with:
           cache: pnpm
           node-version: 22
+      - name: Prepare attempt-bound browser diagnostics
+        run: node .github/scripts/collect-browser-diagnostics.mjs prepare "$RUNNER_TEMP/browser-diagnostics"
       - run: pnpm install --frozen-lockfile
       - name: Install Playwright browser
         run: |
           grep -rl "dl.google.com/linux/chrome" /etc/apt/sources.list.d 2>/dev/null \
             | xargs -r sudo rm -f
           pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e
-      - if: failure()
+      - id: browser_tests
+        run: pnpm test:e2e --project=${{ matrix.project }} --shard=${{ matrix.shard }}/6
+        timeout-minutes: 30
+      - id: browser_diagnostics
+        name: Collect bounded browser diagnostics
+        if: always()
+        timeout-minutes: 1
+        env:
+          BROWSER_TEST_OUTCOME: ${{ steps.browser_tests.outcome }}
+        run: node .github/scripts/collect-browser-diagnostics.mjs collect "$RUNNER_TEMP/browser-diagnostics"
+      - name: Retain attempt-bound browser diagnostics
+        if: ${{ always() && steps.browser_diagnostics.outputs.artifact_ready == 'true' }}
+        timeout-minutes: 2
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: browser-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.project }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/browser-diagnostics/artifact/
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 7
+
+      - name: Retain synthetic duplicate review evidence
+        if: ${{ always() && hashFiles('test-results/**/duplicate-counts.png', 'test-results/**/duplicate-comparison.png', 'test-results/**/duplicate-layout.json') != '' }}
+        timeout-minutes: 2
+        uses: actions/upload-artifact@v7
+        with:
+          name: duplicate-review-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.project }}-${{ matrix.shard }}
           path: |
-            playwright-report
-            test-results
+            test-results/**/duplicate-counts.png
+            test-results/**/duplicate-comparison.png
+            test-results/**/duplicate-layout.json
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 7
 
   desktop:
     name: Desktop (${{ matrix.os }})
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.desktop == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'desktop') }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, windows-latest]
+        os: [macos-15, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -194,7 +357,23 @@ jobs:
         with:
           cache: pnpm
           node-version: 22
-      - uses: dtolnay/rust-toolchain@stable
+      - id: rust
+        uses: dtolnay/rust-toolchain@stable
+      # Compiled dependencies come from the most recent main build with the same
+      # compiler and operating system. Only main writes this cache, so a pull request
+      # can read it but never change what another run restores.
+      - id: rust-cache
+        name: Restore Rust dependencies compiled on main
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            apps/desktop/src-tauri/target
+          key: rust-${{ matrix.os }}-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            rust-${{ matrix.os }}-${{ steps.rust.outputs.cachekey }}-
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @personal-os/web build
       - name: Compile native overlay
@@ -212,11 +391,20 @@ jobs:
           swift test --package-path macos
           bash macos/scripts/build-widgets.sh
           python3 -m unittest discover -s macos/scripts -p 'test_*.py'
+      - name: Save Rust dependencies for later runs
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            apps/desktop/src-tauri/target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
 
   required:
-    name: CI required
+    name: Source verification
     needs:
-      - pr-work-map
       - changes
       - infrastructure
       - repository
@@ -224,7 +412,9 @@ jobs:
       - quality
       - browser
       - desktop
-    if: ${{ !cancelled() }}
+    # A fast-lane draft run reports no aggregate. A classification that failed before
+    # choosing a lane still does, and fails.
+    if: ${{ !cancelled() && needs.changes.outputs.lane != 'fast' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -259,8 +449,36 @@ jobs:
               "",
             ].join("\n"),
           );
-          if (!requiredGate(results)) {
-            console.error("One or more required CI dependencies did not succeed or skip.", results);
+          if (!requiredGate(results, JSON.parse(scope))) {
+            console.error("One or more required CI dependencies are missing or did not satisfy the selected scope.", results);
             process.exit(1);
           }
           NODE
+
+  # The protected context. A pull request event is one whose job checks branch
+  # protection accepts, and reporting here means no runner waits for the run to end.
+  # `always()` is deliberate: this job must fail, never skip, when the run was
+  # cancelled, failed or took the draft fast lane, because a skipped required job
+  # counts as passing. Every decision is made inside the script.
+  gate:
+    name: CI required
+    needs: [changes, required]
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Require source verification from this run and a valid live Work map
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SOURCE_RESULT: ${{ needs.required.result }}
+          SOURCE_LANE: ${{ needs.changes.outputs.lane }}
+        run: node .github/scripts/wait-source-ci.mjs --gate

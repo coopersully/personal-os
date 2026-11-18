@@ -52,7 +52,19 @@ export const weatherLocationDetailsSchema = z.object({
 });
 export type WeatherLocationDetails = z.infer<typeof weatherLocationDetailsSchema>;
 
+export const weatherAtmosphereSchema = z.object({
+  weatherCode: z.number().int(),
+  cloudCoverPercent: z.number().finite().min(0).max(100).nullable(),
+  windSpeedKmh: z.number().finite().min(0).nullable(),
+  isDay: z.boolean().nullable(),
+  sunriseAt: isoDateTimeSchema.nullable(),
+  sunsetAt: isoDateTimeSchema.nullable(),
+  observedAt: isoDateTimeSchema,
+});
+export type WeatherAtmosphere = z.infer<typeof weatherAtmosphereSchema>;
+
 export const weatherSnapshotSchema = z.object({
+  atmosphere: weatherAtmosphereSchema.optional(),
   alerts: z.array(weatherAlertSchema),
   condition: z.string().min(1),
   location: weatherLocationDetailsSchema,

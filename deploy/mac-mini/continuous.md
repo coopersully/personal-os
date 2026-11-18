@@ -64,6 +64,49 @@ A later merge does not inherit the allowance. Success consumes it, and all later
 updates require normal ancestry. The source reader can fetch the original public
 migration commit by its full SHA to verify ancestry after a squash merge.
 
+## Attended one-release CI exception
+
+The normal exact-main CI gate is unchanged. For COO-208 — One-release deployment,
+there is one supported exception pinned in source to
+`76de239aa764cc0642c4b0a15375766353213c16`. Only an explicitly authorized production
+operator may install the independently reviewed controller source and authorize it:
+
+```sh
+node /Users/nohmi-production/controller/deploy/mac-mini/continuous-cli.mjs override-ci /Users/nohmi-production/nohmi-production/config.json /Users/nohmi-production/releases/continuous.git EXPECTED_RUNNING_SHA 76de239aa764cc0642c4b0a15375766353213c16 --attended-ci-override "Cooper-authorized one-release CI exception; COO-208"
+```
+
+Replace `EXPECTED_RUNNING_SHA` with the inspected full serving revision. This is
+an attended production write, not part of source review or a read-only check. Do
+not include secrets or personal data in the bounded reason. Authorization holds
+the normal operation lock, requires matching state/config/activation revisions,
+idle/non-maintenance operation, exact current main and normal descendant history,
+and checks the existing prepared runtime. It refuses an already recorded override
+and refuses when exact-main CI already succeeded: use the normal path then.
+
+The private state retains expected/target revisions, reason, authorization time
+and CI observation. No run or CI result is invented or changed. The next eligible
+tick checks CI normally; success takes precedence. Otherwise only that exact
+unused allowance may satisfy eligibility, including bounded CI transport failure.
+It is durably consumed **before** runtime checking or building, so failure, crash
+or lost response cannot authorize another attempt. `status` exposes its receipt
+and the transaction's actual eligibility source. A later target, changed serving
+revision, or replay does not inherit it. No automatic retry/reset or new target
+allowance is provided; preserve the receipt for attended diagnosis.
+
+All existing build/image checks, maintenance gates, current-main rechecks, writer
+drain, encrypted backup, health/start/publication and blocked failure recovery
+remain active. There is still no automatic schema/config rollback. Authorization
+changes neither serving revision nor runtime configuration. Confirm the actual
+deployed revision and public/provider acceptance separately after completion.
+
+**Release ordering:** target `76de239a` must still be current main at authorization
+and both switch rechecks. Merging this controller change first advances main and
+correctly invalidates the allowance. A separately authorized attended installation
+from reviewed source may precede that release; do not weaken the main checks to
+compensate. If the original CI succeeds first, stop this exception path and let the
+normal controller deploy. Installation, capacity and real transaction behavior
+remain production evidence gaps until the assigned operator verifies them.
+
 Install `me.coopersully.nohmi.continuous.plist` in the existing operator's
 `/Users/anchor/Library/LaunchAgents/`. Verify UID and executable paths before
 bootstrapping, as for the Colima supervisor:
@@ -116,6 +159,68 @@ the failed `continuous-state.json` outside its active path. The next controller
 start seeds its deployed revision from the repaired active configuration. Never
 clear a lock/state receipt merely to repeat a failed migration.
 
+## Docker disk headroom
+
+On 2026-11-14 the dedicated VM's 24 GiB Docker disk filled with about 208 old
+release images (roughly 820 MB per revision) and build cache. PostgreSQL failed
+with ENOSPC while a deploy was quiescing, blocking it for attended recovery. The
+controller now bounds that growth itself, under the same operation lock:
+
+- **Headroom preflight.** Before building it requires 6 GiB free on the VM's
+  `/var/lib/docker` (4 GiB plus a 2 GiB build allowance, because the build grows
+  the disk the live PostgreSQL uses). After building, and before quiescing, it
+  requires 4 GiB. The probe runs `df` from the pinned local PostgreSQL image
+  through the dedicated socket with `--pull never`, no network, a read-only root
+  and a read-only mount. When space is short, or the probe itself fails (a full
+  disk can prevent creating the probe container), it reclaims (below) and
+  measures again. A partial reclaim failure is recorded but still re-measured.
+  Still short: the attempt ends `idle` with `error: insufficient-docker-disk`
+  and the normal fifteen-minute backoff. Still unmeasurable: `prepare-failed`.
+  Either way no writer is stopped and the live release keeps serving. `status`
+  shows the last measurement as `dockerFree`.
+- **Rollback release.** On each completed switch the controller records the
+  replaced release's revision and API/MCP/web image IDs as `rollback` (shown by
+  `status`). Only completion sets it, so a resumed or failed attempt never
+  displaces it. State from an earlier controller falls back to its completed
+  transaction's previous configuration; a first install has none until its
+  first switch.
+- **Retention.** After a successful switch (skipped while maintenance is
+  requested) it keeps the new revision and the rollback release; a preflight
+  reclaim keeps the serving revision, the candidate and the rollback release.
+  Every other `ilo-local/{api,mcp,web}:<40-hex SHA>` tag is removed in batches
+  of 50. Images referenced by any container (running or stopped), the active
+  configuration's image IDs and the rollback image IDs are excluded, under any
+  tag. A container whose image identity is not an exact ID fails the reclaim
+  before anything is removed. Removal is by tag without `--force`: removing an
+  image's last tag deletes it (Docker still refuses one a container uses);
+  otherwise it is only untagged. It then runs `docker builder prune --force
+  --keep-storage 3GB`. Volumes, containers, digest-pinned ancillary images and
+  other repositories are never touched. Dangling untagged images are not pruned.
+- A reclaim failure records `retentionError: image-retention-failed` in `status`
+  and never blocks or rolls back a release; the next reclaim retries and clears it.
+- Pruning build cache means the next build re-downloads and re-verifies pinned
+  remote files such as the AWS RDS CA bundle. A rotated upstream file then fails
+  that build (`prepare-failed`, live release unaffected) until its checksum pin
+  is updated.
+
+If the preflight keeps failing, inspect `docker system df` through the dedicated
+socket. Space held by the kept revisions, PostgreSQL data or non-release images
+needs an attended decision; do not delete volumes to make room.
+
+**Attended installation verification.** Tests cannot prove the live daemon's
+behavior. When installing this controller, before loading the LaunchAgent and
+again after its first completed switch, record on the tracking issue: `docker
+version`; `docker info --format '{{.Driver}} {{.DriverStatus}}'` (overlay2 or
+the containerd image store, which keeps image content under `/var/lib/containerd`
+and may sit on a different filesystem than the probe measures); `docker buildx
+ls` and `docker builder du` (the builder pruned through the dedicated socket);
+`docker system df`; and `colima ssh -- df -h /var/lib/docker /var/lib/containerd`
+compared with the controller's `dockerFree`. Also confirm `docker builder prune
+--keep-storage` is still accepted (newer releases deprecate it for
+`--reserved-space`). With a large existing backlog, the first reclaim may hold
+the operation lock for several minutes; an attended prune of old `ilo-local`
+tags at installation avoids that.
+
 ## Bounds and evidence
 
 - Health observations run at most once per minute. Only label-matching, running
@@ -137,8 +242,10 @@ clear a lock/state receipt merely to repeat a failed migration.
   bounded restart history, one latest transaction and redacted failure codes.
   `continuous-errors.log` retains at most 100 sanitized outer errors. Both are
   owner-only. This is local observability; there is no offsite alert or backup.
-  Encrypted backups and Docker build cache accumulate until attended cleanup;
-  no automatic pruning or deletion of production recovery material is performed.
+  Encrypted backups accumulate until attended cleanup; no production recovery
+  material is pruned or deleted automatically. Release images (about 820 MB per
+  revision) and Docker build cache are bounded as described in **Docker disk
+  headroom**.
 
 Run `pnpm test:mac-production` and `pnpm verify` before publishing. Behavior tests
 exercise release eligibility, real state-file switches, maintenance, restart

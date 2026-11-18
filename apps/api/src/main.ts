@@ -2,8 +2,11 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { createDatabaseClient, migrateDatabase } from "@personal-os/database";
+import { localDateAt, localDateToIso } from "@personal-os/domain";
 import { createApp, type PersonalOsApp } from "./app.js";
 import { loadConfig } from "./config.js";
+import { financeReconciliationDiagnostic } from "./finance-reconciliation-errors.js";
+import { qaFixtureClockEnabled, refreshQaFinanceFixtures } from "./qa-fixture-clock.js";
 import {
   closeNodeHttpServer,
   createRuntimeLifecycle,
@@ -19,6 +22,27 @@ const migrationsFolder =
 
 await migrateDatabase(database.db, migrationsFolder);
 
+let lastFixtureDay: string | undefined;
+async function refreshLocalDemo(): Promise<void> {
+  if (!qaFixtureClockEnabled(process.env, config.databaseUrl)) return;
+  const now = new Date();
+  const day = localDateToIso(localDateAt(now, "America/New_York"));
+  if (lastFixtureDay === day) return;
+  try {
+    const result = await refreshQaFinanceFixtures(database.db, now);
+    if (result?.caughtUp) lastFixtureDay = day;
+    if (result?.days)
+      process.stdout.write(
+        `[personal-os] Added ${result.days} days of local demo Finance activity.\n`,
+      );
+  } catch (error) {
+    process.stderr.write(
+      `[personal-os] Local demo refresh failed; retrying next minute: ${String(error)}\n`,
+    );
+  }
+}
+await refreshLocalDemo();
+
 const app = createApp({
   config,
   db: database.db,
@@ -26,7 +50,11 @@ const app = createApp({
   runtimeLifecycle,
 });
 const server = serve({ fetch: app.fetch, port: config.port });
+runtimeLifecycle.startBackgroundTask("startup-native-push", async () => {
+  await app.dispatchNativePush();
+});
 const scheduler = setInterval(() => {
+  runtimeLifecycle.startBackgroundTask("local-demo-fixtures", refreshLocalDemo);
   runtimeLifecycle.startBackgroundTask("scheduled-connector-sync", async () => {
     await app.syncDueConnectors().catch(() => {
       process.stderr.write("[personal-os] scheduled connector sync failed\n");
@@ -48,6 +76,16 @@ const scheduler = setInterval(() => {
     dispatchFinanceSetupIntegrity,
   );
 }, 60_000);
+const textingScheduler = setInterval(() => {
+  runtimeLifecycle.startBackgroundTask("scheduled-native-push", async () => {
+    await app.dispatchNativePush();
+  });
+  runtimeLifecycle.startBackgroundTask("scheduled-texting-recovery", dispatchTextingRecovery);
+  runtimeLifecycle.startBackgroundTask(
+    "scheduled-finance-notifications",
+    dispatchFinanceNotifications,
+  );
+}, 30_000);
 runtimeLifecycle.startBackgroundTask("startup-connector-sync", async () => {
   await app.syncDueConnectors().catch(() => {
     process.stderr.write("[personal-os] startup connector sync failed\n");
@@ -67,6 +105,8 @@ runtimeLifecycle.startBackgroundTask("startup-mail-maintenance", dispatchMailMai
 runtimeLifecycle.startBackgroundTask("startup-finance-sync", dispatchFinanceSync);
 runtimeLifecycle.startBackgroundTask("startup-finance-maintenance", dispatchFinanceMaintenance);
 runtimeLifecycle.startBackgroundTask("startup-finance-backfill", dispatchFinanceBackfill);
+runtimeLifecycle.startBackgroundTask("startup-texting-recovery", dispatchTextingRecovery);
+runtimeLifecycle.startBackgroundTask("startup-finance-notifications", dispatchFinanceNotifications);
 runtimeLifecycle.startBackgroundTask(
   "startup-finance-setup-integrity",
   dispatchFinanceSetupIntegrity,
@@ -111,6 +151,26 @@ async function dispatchFinanceBackfill(): Promise<void> {
     process.stderr.write(`[personal-os] finance learning backfill failed: ${String(error)}\n`);
     throw error;
   }
+}
+
+async function dispatchFinanceNotifications(): Promise<void> {
+  const pass = app.runFinanceNotifications();
+  if (pass)
+    await pass.catch((error: unknown) => {
+      process.stderr.write(
+        `[personal-os] Finance notification reconciliation failed: ${financeReconciliationDiagnostic(error)}\n`,
+      );
+      throw new Error("Finance notification reconciliation failed.");
+    });
+}
+
+async function dispatchTextingRecovery(): Promise<void> {
+  const pass = app.runTextingRecovery();
+  if (pass)
+    await pass.catch((error: unknown) => {
+      process.stderr.write(`[personal-os] Texting recovery failed: ${String(error)}\n`);
+      throw error;
+    });
 }
 
 async function dispatchFinanceSetupIntegrity(): Promise<void> {
@@ -170,7 +230,11 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
       closeDatabase: database.close,
       closeHttpServer: () => closeNodeHttpServer(server),
       lifecycle: runtimeLifecycle,
-      stopScheduling: () => clearInterval(scheduler),
+      stopScheduling: () => {
+        clearInterval(scheduler);
+        clearInterval(textingScheduler);
+        app.quiesceTextingRecovery();
+      },
       timeoutMs: config.apiShutdownTimeoutMs,
     });
     process.stdout.write("[personal-os] API drain completed successfully.\n");

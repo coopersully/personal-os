@@ -20,7 +20,7 @@ type DiscoveryOptions = {
   timeZone: string;
 };
 
-export function registerIloContextTool(server: McpServer, options: DiscoveryOptions): void {
+export function registerPersonalOsContextTool(server: McpServer, options: DiscoveryOptions): void {
   server.registerTool(
     "get_ilo_context",
     {
@@ -31,7 +31,7 @@ export function registerIloContextTool(server: McpServer, options: DiscoveryOpti
     },
     async () =>
       apiResult(async () => ({
-        ...(await options.api.getIloContext()),
+        ...(await options.api.getPersonalOsContext()),
         mcp: {
           availableTools: availableToolNames(
             options.scopes,
@@ -52,7 +52,7 @@ export function registerIloContextTool(server: McpServer, options: DiscoveryOpti
   );
 }
 
-export function registerIloDiscovery(server: McpServer, options: DiscoveryOptions): void {
+export function registerPersonalOsDiscovery(server: McpServer, options: DiscoveryOptions): void {
   server.registerResource(
     "ilo-context",
     "ilo://context/self",
@@ -68,7 +68,7 @@ export function registerIloDiscovery(server: McpServer, options: DiscoveryOption
           mimeType: "application/json",
           text: JSON.stringify(
             {
-              ...(await options.api.getIloContext()),
+              ...(await options.api.getPersonalOsContext()),
               mcp: {
                 availableTools: availableToolNames(
                   options.scopes,
@@ -109,7 +109,7 @@ export function registerIloDiscovery(server: McpServer, options: DiscoveryOption
         contents: [
           {
             mimeType: "application/json",
-            text: JSON.stringify(await options.api.getIloSetup({ domain, stepId }), null, 2),
+            text: JSON.stringify(await options.api.getPersonalOsSetup({ domain, stepId }), null, 2),
             uri: uri.href,
           },
         ],

@@ -35,7 +35,7 @@ ENV NODE_ENV=production
 ENV MIGRATIONS_DIR=/app/migrations
 WORKDIR /app
 ADD --chown=node:node --chmod=0444 \
-  --checksum=sha256:e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b91646106e466714f9de3c7e3 \
+  --checksum=sha256:90a6f1a7978a1b1b096dca6c57511ca48d3b8cf052f8e704baf358f34ea2f21b \
   https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
   /app/aws-rds-global-bundle.pem
 COPY --from=build --chown=node:node /output/api ./

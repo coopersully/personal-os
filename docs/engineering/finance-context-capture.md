@@ -72,12 +72,13 @@ one explicit financial review case and one typed question atomically. Other fina
 coexist. The question UUID is the canonical work ID; a review case ID, projection ID, or reason
 string is never an answer reference. Migration 0089 owns this storage; 0085 remains unchanged.
 
-Creation is human-only. Reads require `finances:read`; answers require `finances:write` and bind
+Creation is available to the owner and to agents with `finances:write`, `finances:execute` and enabled
+review bypass. Reads require `finances:read`; answers require `finances:write` and bind
 the authenticated user/agent and accepted app/agent source to the operation receipt. SMS and
 external message IDs remain unavailable. The HTTP route module and API client expose creation,
 read and answer handlers, with application composition and unified Reviews registration supplied
-by Foundations. This source slice does not activate an MCP answer port, Texting, host
-continuation, or maintenance scheduling.
+by Foundations. MCP exposes contextual-question creation, reads and answers; creating a question
+alone does not dispatch Texting, host continuation or maintenance scheduling.
 
 An answer stores immutable text, exact work/action revisions, resulting work revision, source,
 actor, request and operation identity. It advances the question work revision once and leaves its
@@ -99,8 +100,21 @@ Preparation only reads and locks through the supplied transaction. After admissi
 parent locks cover answer/audit foreign keys, the operation lock covers receipt uniqueness,
 question UPDATE covers answer revision uniqueness, and transaction UPDATE covers producer
 uniqueness. No pool query, external callback, child-to-parent trigger or repeated-question lock
-batch is introduced. The Reviews projection revalidates each question in its own transaction;
+batch is introduced in the answer mutation path. The Reviews projection revalidates each
+question in its own transaction;
 projection failures remain errors for the composition layer to mark as unavailable.
+
+Notification publication may carry 1–100 exact Finance work references. The internal
+`resolveContextualWorks` read port accepts that entire set in one caller-owned transaction;
+the notification caller must pass the complete set once rather than loop the single-question
+resolver. It admits the owner, previews owned contextual questions, then takes SHARE NOWAIT
+locks in stable table and ID order: accounts, transactions, review cases, questions. It checks
+the locked parent identities and revisions before returning results in input order. Duplicate
+IDs are rejected; foreign or unsupported work is unavailable; answered exact references are
+resolved; stale references are stale. Any contention or changed membership aborts the caller's
+transaction as a retryable conflict. This port is read-only and does not publish, send, or
+consume a Texting binding. Application composition and notification batch calls remain
+Integration-owned.
 
 Private database-owned parent generations detect semantic changes and ABA, including referential
 SET NULL updates. OLD/NEW-only triggers reject counter reset and overflow and exclude observation

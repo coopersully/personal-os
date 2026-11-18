@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "nohmi",
+    "slug": "personal-os",
+    "version": "0.1.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "updates": {
+      "enabled": false
+    },
+    "ios": {
+      "bundleIdentifier": "app.personal-os.mobile",
+      "buildNumber": "11",
+      "appleTeamId": "7J7HDVDCKQ",
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIViewControllerBasedStatusBarAppearance": true
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
+    },
+    "platforms": ["ios", "web"],
+    "plugins": [
+      "expo-router",
+      "expo-image",
+      "expo-font",
+      "expo-secure-store",
+      "expo-asset",
+      "expo-notifications",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow nohmi to use your location for local weather and the Today sky.",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false,
+          "locationFullAccuracyPermission": false,
+          "isIosBackgroundLocationEnabled": false
+        }
+      ]
+    ],
+    "scheme": "personal-os"
+  }
+}

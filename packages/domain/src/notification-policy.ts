@@ -35,20 +35,24 @@ export const notificationWorkSchema = z
     active: z.boolean(),
     expiresAt: isoDateTimeSchema.nullable(),
     disclosure: notificationDetailSchema,
+    questionPrompt: z.string().trim().min(1).max(120).nullable().optional(),
     context: z.string().trim().min(1).max(120).nullable(),
     occurredAt: isoDateTimeSchema.nullable(),
     destination: z.union([
-      z.literal("/settings?section=reviews"),
+      z.literal("/finances?review=open"),
       z.templateLiteral(["/finances/review?contextualQuestion=", z.uuid()]),
+      z.templateLiteral(["/finances/review?case=", z.uuid()]),
     ]),
   })
   .strict()
   .refine(
     (value) =>
-      value.destination === "/settings?section=reviews" ||
+      value.destination === "/finances?review=open" ||
       (value.work.kind === "question" &&
         value.destination ===
-          `/finances/review?contextualQuestion=${encodeURIComponent(value.work.id)}`),
+          `/finances/review?contextualQuestion=${encodeURIComponent(value.work.id)}`) ||
+      (value.work.kind === "question" &&
+        value.destination === `/finances/review?case=${encodeURIComponent(value.work.id)}`),
     { message: "Contextual destinations must match the exact question.", path: ["destination"] },
   );
 export type NotificationWork = z.infer<typeof notificationWorkSchema>;
@@ -61,6 +65,12 @@ export const saveNotificationPreferencesSchema = z
   .object({
     expectedRevision: z.int().positive().nullable(),
     preferences: notificationPreferencesSchema,
+  })
+  .strict();
+
+export const resetFinanceNotificationPreferencesSchema = z
+  .object({
+    expectedRevision: z.int().positive(),
   })
   .strict();
 
@@ -113,7 +123,32 @@ export function notificationEligibility(input: {
     (latest, a) => (!latest || a.submittedAt > latest ? a.submittedAt : latest),
     null,
   );
-  if (last) {
+  // Current repair episodes obey reminders after acceptance; known rejection gets at most
+  // two bounded retries after the most recent accepted handoff.
+  // Uncertain acceptance above always wins, including across action revisions.
+  if (work.work.kind === "repair") {
+    const accepted = sameAction
+      .filter((a) => a.state === "accepted")
+      .reduce<Date | null>(
+        (latest, a) => (!latest || a.submittedAt > latest ? a.submittedAt : latest),
+        null,
+      );
+    if (accepted) {
+      if (preferences.reminderDays === null) return "reminder_never";
+      if (now.getTime() - accepted.getTime() < preferences.reminderDays * 86400000)
+        return "reminder_wait";
+    }
+    const failures = sameAction.filter(
+      (a) => a.state === "failed" && (!accepted || a.submittedAt > accepted),
+    );
+    if (failures.length >= 3) return "retry_exhausted";
+    if (
+      failures.length &&
+      last &&
+      now.getTime() - last.getTime() < (failures.length > 1 ? 300_000 : 60_000)
+    )
+      return "retry_wait";
+  } else if (last) {
     if (preferences.reminderDays === null) return "reminder_never";
     if (now.getTime() - last.getTime() < preferences.reminderDays * 86400000)
       return "reminder_wait";
@@ -139,15 +174,17 @@ function relativeDate(instant: string, now: Date, timeZone: string) {
   }).format(date);
 }
 
-/** T0 directs review to the app; no reply vocabulary or numeric answer bindings are advertised. */
+/** Reply instructions are enabled only when the caller creates exact durable answer bindings. */
 export function composeNotification(input: {
   works: NotificationWork[];
   now: Date;
   timeZone: string;
   detail: "minimal" | "context";
   origin: string;
+  replyable?: boolean;
 }) {
   const labels = input.works.slice(0, 3).map((work) => {
+    if (input.replyable && work.questionPrompt) return work.questionPrompt;
     const label = work.context;
     // Defense in depth, not a sensitivity classifier: the domain's disclosure ceiling is mandatory.
     const safe = label && !/(?:\d[ .()-]*){5}|@|https?:|[\r\n]/iu.test(label);
@@ -155,11 +192,29 @@ export function composeNotification(input: {
     const date = work.occurredAt
       ? ` (${relativeDate(work.occurredAt, input.now, input.timeZone)})`
       : "";
-    return `${label.slice(0, 60)}${date}`;
+    return `${label}${work.work.kind === "approval" ? "" : date}`;
   });
+  if (
+    input.replyable &&
+    input.works.length <= 3 &&
+    input.works.every((work) => work.work.kind === "question" && work.questionPrompt)
+  )
+    return `nohmi: ${labels.map((label, index) => `${index + 1}. ${label}`).join("; ")}. Reply with the item number and answer. Review: ${new URL(input.origin).origin}/finances?review=open`;
+  if (
+    input.replyable &&
+    input.works.length === 1 &&
+    input.works[0]?.work.kind === "approval" &&
+    input.detail === "context" &&
+    input.works[0].disclosure === "context" &&
+    input.works[0].context &&
+    labels[0] !== "Finance item"
+  )
+    return `nohmi: 1. ${labels[0]} Reply 1 approve or 1 reject. Review: ${new URL(input.origin).origin}/finances?review=open`;
+  if (input.works.length > 0 && input.works.every((work) => work.work.kind === "repair"))
+    return `nohmi: Finance maintenance needs attention. Review progress: ${new URL(input.origin).origin}/finances?review=open. For context, reply Finance: followed by your note.`;
   const overflow = input.works.length > 3 ? `; ${input.works.length - 3} more` : "";
   const origin = new URL(input.origin).origin;
-  return `nohmi: Review needed: ${labels.join("; ")}${overflow}. Review: ${origin}/settings?section=reviews`;
+  return `nohmi: Review needed: ${labels.join("; ")}${overflow}. Review: ${origin}/finances?review=open`;
 }
 
 export const notificationResolutionSchema = z.discriminatedUnion("state", [
@@ -201,7 +256,7 @@ export type NotificationDeliveryState = z.infer<typeof notificationDeliveryState
 
 export const notificationStatusSchema = z.object({
   capability: z.enum(["available", "unavailable"]),
-  reason: z.literal("producer_not_registered").nullable(),
+  reason: z.enum(["producer_not_registered", "delivery_not_enabled"]).nullable(),
   timeZone: z.string(),
   preferences: z.array(
     z.object({
@@ -234,4 +289,177 @@ export const notificationStatusSchema = z.object({
 export type NotificationStatus = z.infer<typeof notificationStatusSchema>;
 export type PublishNotificationResult =
   | { state: "accepted"; intentIds: string[] }
-  | { state: "unavailable"; reason: "producer_not_registered" };
+  | { state: "unavailable"; reason: "producer_not_registered" | "delivery_not_enabled" };
+
+/** Machine reasons only; never echo arbitrary stored/provider text into a diagnostic result. */
+export const notificationDiagnosticReasonSchema = z.enum([
+  "resolved",
+  "expired",
+  "disabled",
+  "timezone_unavailable",
+  "delivery_uncertain",
+  "reminder_never",
+  "reminder_wait",
+  "retry_exhausted",
+  "retry_wait",
+  "quiet_hours",
+  "unavailable",
+  "stale",
+  "consent_changed",
+  "unsupported_delivery_shape",
+  "delivery_blocked",
+  "provider_rejected",
+  "unknown_reason",
+]);
+const notificationCurrentIntentSchema = z
+  .object({
+    basis: z.literal("current"),
+    work: financeHumanWorkRefSchema,
+    state: z.enum(["pending", "deferred", "blocked", "resolved"]),
+    reason: notificationDiagnosticReasonSchema.nullable(),
+  })
+  .strict();
+const notificationRecordedSubmissionSchema = z
+  .object({
+    basis: z.literal("attempt_record"),
+    connectionId: z.uuid().nullable(),
+    consentEpoch: z.int().positive().nullable(),
+    timeZone: z.string().min(1).max(120).nullable(),
+    timezoneRevision: isoDateTimeSchema.nullable(),
+  })
+  .strict();
+
+export const notificationAttemptLookupSchema = z.object({ attemptId: z.uuid() }).strict();
+
+/** Exact native inspection only. Current policy and missing history cannot become send authority. */
+export const notificationAttemptDetailSchema = z
+  .object({
+    id: z.uuid(),
+    state: notificationDeliveryStateSchema,
+    reason: notificationDiagnosticReasonSchema.nullable(),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+    dispatchRecordedAt: isoDateTimeSchema.nullable(),
+    initiatingActor: z.object({ basis: z.literal("unavailable") }).strict(),
+    membership: z
+      .array(
+        z
+          .object({
+            intentId: z.uuid(),
+            work: financeHumanWorkRefSchema,
+            currentIntent: notificationCurrentIntentSchema.nullable(),
+          })
+          .strict(),
+      )
+      .max(100),
+    policy: z
+      .object({
+        historicalPreferences: z
+          .object({ basis: z.literal("unavailable"), reason: z.literal("not_persisted") })
+          .strict(),
+        recordedAttempt: notificationRecordedSubmissionSchema,
+        current: z
+          .object({
+            basis: z.literal("current"),
+            timeZone: z.string().min(1).max(120),
+            timezoneRevision: isoDateTimeSchema,
+            preferences: z
+              .array(
+                z
+                  .object({
+                    scope: notificationScopeSchema,
+                    revision: z.int().positive(),
+                    preferences: notificationPreferencesSchema,
+                  })
+                  .strict(),
+              )
+              .max(2),
+            effective: notificationPreferencesSchema,
+            connection: z
+              .object({
+                id: z.uuid(),
+                state: z.enum([
+                  "active",
+                  "opted_out",
+                  "sync_error",
+                  "suspended",
+                  "disconnected",
+                  "unknown",
+                ]),
+                consentEpoch: z.int().positive(),
+                updatedAt: isoDateTimeSchema,
+                matchesRecordedEpoch: z.boolean().nullable(),
+              })
+              .strict()
+              .nullable(),
+          })
+          .strict(),
+      })
+      .strict(),
+    transport: z
+      .object({
+        message: z
+          .object({
+            id: z.uuid(),
+            status: z.enum([
+              "accepted",
+              "queued",
+              "sending",
+              "sent",
+              "delivered",
+              "undelivered",
+              "failed",
+              "unknown",
+            ]),
+            providerSubmittedAt: isoDateTimeSchema.nullable(),
+            sentAt: isoDateTimeSchema.nullable(),
+            deliveredAt: isoDateTimeSchema.nullable(),
+            updatedAt: isoDateTimeSchema,
+          })
+          .strict()
+          .nullable(),
+        callbackProvenance: z
+          .object({ basis: z.literal("unavailable"), reason: z.literal("not_persisted") })
+          .strict(),
+      })
+      .strict(),
+    coverage: z
+      .object({
+        state: z.literal("partial"),
+        membership: z.enum(["complete", "partial", "unavailable"]),
+        limit: z.literal(100),
+        returnedItems: z.int().min(0).max(100),
+        hasMore: z.boolean(),
+        reasons: z
+          .array(
+            z.enum([
+              "historical_policy_unavailable",
+              "callback_provenance_unavailable",
+              "membership_unavailable",
+              "membership_inconsistent",
+              "membership_limit",
+              "message_unavailable",
+              "intent_unavailable",
+              "connection_state_unrecognized",
+              "message_status_unrecognized",
+            ]),
+          )
+          .min(2)
+          .max(9),
+      })
+      .strict(),
+    recovery: z.enum(["inspect_delivery_do_not_resend", "review_in_app"]),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      value.coverage.returnedItems !== value.membership.length ||
+      (value.coverage.hasMore && value.coverage.membership !== "partial") ||
+      (value.coverage.membership === "complete" && value.membership.length === 0)
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Notification membership coverage is inconsistent.",
+      });
+  });
+export type NotificationAttemptDetail = z.infer<typeof notificationAttemptDetailSchema>;

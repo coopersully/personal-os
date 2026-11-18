@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
-import { ConnectorError, type PlaidConnector } from "@personal-os/connectors";
+import { ConnectorError, createPlaidConnector, type PlaidConnector } from "@personal-os/connectors";
 import {
+  accessTokens,
   auditEvents,
   createDatabaseClient,
   type DatabaseClient,
@@ -15,6 +16,7 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, inArray } from "drizzle-orm";
+import { createFinanceEvidenceRefreshService } from "./finance/evidence-refresh-service.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceProviderItemSyncService } from "./finance-provider-item-sync-service.js";
 import { createFinanceService } from "./finance-service.js";
@@ -201,6 +203,38 @@ describe.sequential("Finance Provider Item synchronization", () => {
         .where(eq(financeAccounts.providerItemRecordId, itemId));
     });
   }
+
+  it("refreshes original provider identity metadata during fenced account projection", async () => {
+    const { accounts, userId } = await fixture({ accountCount: 1 });
+    const target = accounts[0];
+    if (!target?.providerAccountId) throw new Error("Identity fixture missing.");
+    const providerAccountId = target.providerAccountId;
+    const provider = plaid({
+      getAccounts: async () => [
+        {
+          ...remoteAccount(providerAccountId),
+          institutionId: "ins-synced",
+          mask: "0042",
+          persistentAccountId: "persistent-synced",
+          name: "Original provider checking",
+        },
+      ],
+    });
+    await service(provider).syncAccount(target.id, {
+      principal: principal(userId),
+      requestId: "identity-projection",
+    });
+    const [stored] = await database.db
+      .select()
+      .from(financeAccounts)
+      .where(eq(financeAccounts.id, target.id));
+    expect(stored).toMatchObject({
+      providerInstitutionId: "ins-synced",
+      providerAccountMask: "0042",
+      providerPersistentAccountId: "persistent-synced",
+      providerAccountName: "Original provider checking",
+    });
+  });
 
   it("commits legacy identity before paging and ignores divergent account cursor shadows", async () => {
     const { accounts, item, userId } = await fixture({ itemId: null });
@@ -1596,6 +1630,42 @@ describe.sequential("Finance Provider Item synchronization", () => {
     expect(syncTransactions).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["ENOTFOUND", "dns"],
+    ["CERT_HAS_EXPIRED", "tls"],
+    ["ECONNRESET", "socket"],
+  ])("logs sanitized %s from the real Plaid connector", async (code, transportPhase) => {
+    const { accounts, userId } = await fixture({ accountCount: 1 });
+    const target = accounts[0];
+    if (!target) throw new Error("Transport target was not created.");
+    const logs: RequestLog[] = [];
+    const provider = createPlaidConnector({
+      clientId: "PRIVATE_CANARY",
+      secret: "PRIVATE_CANARY",
+      environment: "sandbox",
+      fetch: async () => {
+        throw new TypeError("PRIVATE_CANARY", {
+          cause: Object.assign(new Error("PRIVATE_CANARY"), { code, hostname: "PRIVATE_CANARY" }),
+        });
+      },
+    });
+    await expect(
+      service(provider, (entry) => logs.push(entry)).syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "transport-diagnostics",
+      }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    expect(logs).toEqual([
+      expect.objectContaining({
+        event: "connector_sync_failed",
+        code: "plaid_transport_failure",
+        transportCode: code,
+        transportPhase,
+      }),
+    ]);
+    expect(JSON.stringify(logs)).not.toContain("PRIVATE_CANARY");
+  });
+
   it("preserves an in-progress replay marker across an automatic transport failure and logs safely", async () => {
     const { accounts, item, userId } = await fixture({ accountCount: 1 });
     const target = accounts[0];
@@ -2516,6 +2586,137 @@ describe.sequential("Finance Provider Item synchronization", () => {
     expect(pageAudit?.after).toMatchObject({ added: 0, changed: 0, modified: 0, removed: 0 });
   });
 
+  it.each([
+    "active",
+    "revoked",
+    "backoff",
+    "ordinary",
+    "claim_race",
+    "item_race",
+  ])("fences requested refresh dispatch without changing ordinary scheduling: %s", async (state) => {
+    await database.db.update(financeProviderItems).set({ nextSyncAt: null });
+    const future = new Date(now.getTime() + 3600000);
+    const f = await fixture({ accountCount: 1, nextSyncAt: future });
+    const [token] = await database.db
+      .insert(accessTokens)
+      .values({
+        userId: f.userId,
+        name: "Refresh fixture",
+        tokenHash: crypto.randomUUID(),
+        scopes: ["finances:read", "finances:write", "finances:maintain"],
+      })
+      .returning();
+    if (!token) throw new Error("Missing grant");
+    if (state === "backoff")
+      await database.db
+        .update(financeProviderItems)
+        .set({
+          syncState: "retrying",
+          syncRecovery: "automatic",
+          syncFailureCount: 1,
+          syncError: "Rate limited",
+          syncErrorCode: "RATE_LIMIT",
+          syncErrorCategory: "rate_limited",
+        })
+        .where(eq(financeProviderItems.id, f.item.id));
+    const [account] = await database.db
+      .update(financeAccounts)
+      .set({ providerItemId: f.item.providerItemId })
+      .where(eq(financeAccounts.id, f.accounts[0]?.id ?? ""))
+      .returning();
+    if (!account?.providerAccountId) throw new Error("Missing account");
+    const providerAccountId = account.providerAccountId;
+    await createFinanceEvidenceRefreshService({
+      db: database.db,
+      now: () => now,
+    }).prepareEvidenceRefresh(
+      {
+        principal: {
+          userId: f.userId,
+          actorId: token.id,
+          actorType: "agent",
+          authorizationConnectionId: token.authorizationConnectionId,
+          scopes: new Set(["finances:read", "finances:write", "finances:maintain"]),
+        },
+        requestId: crypto.randomUUID(),
+      },
+      {
+        period: "2026-08",
+        idempotencyKey: crypto.randomUUID(),
+        sourceRefs: [
+          { accountId: account.id, expectedAccountRevision: account.contextualRevision.toString() },
+        ],
+      },
+    );
+    if (state === "revoked" || state === "ordinary")
+      await database.db
+        .update(accessTokens)
+        .set({ revokedAt: now })
+        .where(eq(accessTokens.id, token.id));
+    if (state === "ordinary")
+      await database.db
+        .update(financeProviderItems)
+        .set({ nextSyncAt: now })
+        .where(eq(financeProviderItems.id, f.item.id));
+    const syncTransactions = vi.fn(async () => emptyPage("refreshed"));
+    const sync = () =>
+      service(
+        plaid({ syncTransactions, getAccounts: async () => [remoteAccount(providerAccountId)] }),
+      ).syncDueItems();
+    if (state === "item_race") {
+      const lock = await database.pool.connect();
+      await lock.query("BEGIN");
+      await lock.query("SELECT id FROM finance_provider_items WHERE id=$1 FOR UPDATE", [f.item.id]);
+      const pending = sync();
+      try {
+        await vi.waitFor(async () => {
+          const result = await database.pool.query<{ count: string }>(
+            "SELECT count(*)::text AS count FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE '%finance_provider_items%' AND query NOT LIKE '%pg_stat_activity%'",
+          );
+          expect(Number(result.rows[0]?.count)).toBeGreaterThan(0);
+        });
+        await lock.query(
+          "UPDATE finance_provider_items SET sync_state='retrying', sync_recovery='automatic', sync_failure_count=1, sync_error='Rate limited', sync_error_code='RATE_LIMIT', sync_error_category='rate_limited', last_sync_attempt_at=$2, next_sync_at=$3 WHERE id=$1",
+          [f.item.id, now, future],
+        );
+      } finally {
+        await lock.query("COMMIT");
+        lock.release();
+      }
+      await pending;
+    } else if (state === "claim_race") {
+      const lock = await database.pool.connect();
+      await lock.query("BEGIN");
+      await lock.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [f.userId]);
+      const pending = sync();
+      try {
+        await vi.waitFor(async () => {
+          const result = await database.pool.query<{ count: string }>(
+            "SELECT count(*)::text AS count FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE '%users%' AND query NOT LIKE '%pg_stat_activity%'",
+          );
+          expect(Number(result.rows[0]?.count)).toBeGreaterThan(0);
+        });
+        await database.db
+          .update(accessTokens)
+          .set({ revokedAt: now })
+          .where(eq(accessTokens.id, token.id));
+      } finally {
+        await lock.query("ROLLBACK");
+        lock.release();
+      }
+      await pending;
+    } else await sync();
+    const shouldSync = state === "active" || state === "ordinary";
+    expect(syncTransactions).toHaveBeenCalledTimes(shouldSync ? 1 : 0);
+    if (!shouldSync)
+      expect(
+        (
+          await database.db.query.financeProviderItems.findFirst({
+            where: eq(financeProviderItems.id, f.item.id),
+          })
+        )?.nextSyncAt,
+      ).toEqual(future);
+  });
   it("selects at most 25 due Items with at most three provider workers", async () => {
     await database.db.update(financeProviderItems).set({ nextSyncAt: null });
     const itemIds: string[] = [];
@@ -2601,5 +2802,188 @@ describe.sequential("Finance Provider Item synchronization", () => {
         .from(financeProviderItems)
         .where(eq(financeProviderItems.id, valid.item.id)),
     ).resolves.toEqual([{ state: "current" }]);
+  });
+  it("persists branding and masks, reuses its cache and retains last-good metadata through failure", async () => {
+    const { accounts, item, userId } = await fixture();
+    const target = accounts[0];
+    if (!target) throw new Error("Missing fixture");
+    const branding = {
+      institutionId: "ins_1",
+      logo: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/9ZkAAAAASUVORK5CYII=",
+      primaryColor: "#004466",
+      url: "https://bank.example",
+    };
+    const fetchBranding = vi.fn().mockResolvedValue(branding);
+    const provider = plaid({
+      getAccounts: async () =>
+        accounts.map((account) => ({
+          ...remoteAccount(account.providerAccountId ?? ""),
+          institutionId: "ins_1",
+          mask: "1234",
+        })),
+      getInstitutionBranding: fetchBranding,
+    });
+    const context = { principal: principal(userId), requestId: "institution-branding" };
+    await service(provider).syncAccount(target.id, context);
+    const [cached] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.id, item.id));
+    expect(cached).toMatchObject({
+      institutionId: "ins_1",
+      institutionBranding: branding,
+      brandingFailureCode: null,
+    });
+    expect(cached?.brandingNextRefreshAt).toEqual(new Date(now.getTime() + 7 * 86_400_000));
+    const { serializeFinanceAccountRows } = await import("./finance/account-service.js");
+    expect((await serializeFinanceAccountRows(database.db, accounts))[0]).toMatchObject({
+      accountMask: "1234",
+      institutionBranding: { ...branding, logo: null },
+    });
+    expect(
+      (await serializeFinanceAccountRows(database.db, accounts, true))[0]?.institutionBranding
+        ?.logo,
+    ).toBe(branding.logo);
+    await service(provider).syncAccount(target.id, context);
+    expect(fetchBranding).toHaveBeenCalledTimes(1);
+    await database.db
+      .update(financeProviderItems)
+      .set({ brandingNextRefreshAt: new Date(0) })
+      .where(eq(financeProviderItems.id, item.id));
+    fetchBranding.mockRejectedValue(new Error("raw-secret-canary"));
+    await expect(service(provider).syncAccount(target.id, context)).resolves.toEqual({
+      changed: 0,
+    });
+    const [failed] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.id, item.id));
+    expect(failed).toMatchObject({
+      syncState: "current",
+      institutionBranding: branding,
+      brandingFailureCode: "institution_branding_unavailable",
+    });
+    expect(failed?.brandingNextRefreshAt).toEqual(new Date(now.getTime() + 3_600_000));
+    expect(JSON.stringify(failed)).not.toContain("raw-secret-canary");
+    const other = await fixture({ accountCount: 1 });
+    const otherTarget = other.accounts[0];
+    if (!otherTarget) throw new Error("Missing other owner");
+    await service(
+      plaid({
+        getAccounts: async () =>
+          other.accounts.map((account) => ({
+            ...remoteAccount(account.providerAccountId ?? ""),
+            institutionId: "ins_1",
+          })),
+        getInstitutionBranding: fetchBranding,
+      }),
+    ).syncAccount(otherTarget.id, { principal: principal(other.userId), requestId: "other-owner" });
+    const [otherItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.id, other.item.id));
+    expect(otherItem?.institutionBranding).toBeNull();
+    expect(fetchBranding).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    "explicit-null",
+    "empty-snapshot",
+  ] as const)("clears branding only for an explicit missing institution identity: %s", async (scenario) => {
+    const { accounts, item, userId } = await fixture();
+    const target = accounts[0];
+    if (!target) throw new Error("Missing fixture");
+    const branding = {
+      institutionId: "ins_1",
+      logo: null,
+      primaryColor: "#004466",
+      url: null,
+    };
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        institutionId: "ins_1",
+        institutionBranding: branding,
+        brandingNextRefreshAt: new Date(now.getTime() + 86_400_000),
+      })
+      .where(eq(financeProviderItems.id, item.id));
+    const fetchBranding = vi.fn();
+    const provider = plaid({
+      getAccounts: async () =>
+        scenario === "empty-snapshot"
+          ? []
+          : accounts.map((account) => ({
+              ...remoteAccount(account.providerAccountId ?? ""),
+              institutionId: null,
+            })),
+      getInstitutionBranding: fetchBranding,
+    });
+    await expect(
+      service(provider).syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "missing-institution-branding",
+      }),
+    ).resolves.toEqual({ changed: 0 });
+    const [stored] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.id, item.id));
+    expect(stored).toMatchObject({
+      syncState: "current",
+      institutionId: scenario === "empty-snapshot" ? "ins_1" : null,
+      institutionBranding: scenario === "empty-snapshot" ? branding : null,
+    });
+    expect(fetchBranding).not.toHaveBeenCalled();
+    if (scenario === "explicit-null") {
+      const currentAccounts = await database.db
+        .select()
+        .from(financeAccounts)
+        .where(eq(financeAccounts.providerItemRecordId, item.id));
+      const { serializeFinanceAccountRows } = await import("./finance/account-service.js");
+      expect(currentAccounts[0]?.providerInstitutionId).toBeNull();
+      expect(
+        (await serializeFinanceAccountRows(database.db, currentAccounts))[0]?.institutionBranding,
+      ).toBeNull();
+    }
+  });
+
+  it("discards a branding response after its sync claim is revoked", async () => {
+    const { accounts, item, userId } = await fixture();
+    const target = accounts[0];
+    if (!target) throw new Error("Missing fixture");
+    let release!: () => void;
+    let started!: () => void;
+    const fetching = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const provider = plaid({
+      getAccounts: async () =>
+        accounts.map((account) => ({
+          ...remoteAccount(account.providerAccountId ?? ""),
+          institutionId: "ins_1",
+        })),
+      getInstitutionBranding: async () => {
+        started();
+        await gate;
+        return { institutionId: "ins_1", logo: null, primaryColor: "#004466", url: null };
+      },
+    });
+    const pending = service(provider).syncAccount(target.id, {
+      principal: principal(userId),
+      requestId: "fenced-branding",
+    });
+    await fetching;
+    await revokeClaimBridge(item.id);
+    release();
+    await expect(pending).rejects.toMatchObject({ code: "conflict" });
+    const [stored] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.id, item.id));
+    expect(stored?.institutionBranding).toBeNull();
+    expect(stored?.brandingNextRefreshAt).toBeNull();
   });
 });

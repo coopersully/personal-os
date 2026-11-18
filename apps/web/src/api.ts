@@ -14,7 +14,18 @@ if (isDesktop()) localStorage.removeItem("personal-os.desktop-session");
 // Never persist or pass a human session token through the renderer.
 export const api = createApiClient({
   baseUrl: apiBaseUrl(import.meta.env.VITE_API_BASE_URL, isDesktop()),
-  ...(isDesktop() ? { fetch: desktopFetch } : {}),
+  ...(isDesktop()
+    ? { fetch: desktopFetch }
+    : import.meta.env.DEV
+      ? {
+          fetch: async (...args: Parameters<typeof fetch>) => {
+            const { settingsDataPreviewFetch } = await import(
+              "./features/settings/dev/data-state-preview"
+            );
+            return settingsDataPreviewFetch(...args);
+          },
+        }
+      : {}),
 });
 
 export function errorMessage(error: unknown): string {

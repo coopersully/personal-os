@@ -28,8 +28,13 @@ interfaces are defined in [`workspaces and interfaces`](workspaces.md).
 Each steward's sources, maintained-state definition, maintenance guidance, notification overrides,
 rules, learning, recovery, data controls, and domain access posture have one canonical editor inside
 that workspace. Centralized Settings owns global policy, channels, connected-agent credentials and
-scopes, User Knowledge controls, and unified Reviews; its cross-workspace overview summarizes and
-deep-links to workspace controls without duplicating their editors.
+scopes, and User Knowledge controls; its cross-workspace overview summarizes and deep-links to
+workspace controls without duplicating their editors. The accepted October 1
+[Settings architecture](../design/pages/settings-architecture.md) supersedes this document’s
+earlier Settings-owned Reviews placement. Current operational Reviews use the
+[workspace flow](../design/pages/reviews.md), with domain-owned decisions and actions.
+Texting’s accepted unified cross-workspace review destination remains an implementation gap;
+the scoped UI does not satisfy it, and the old Settings URL currently falls back to Account.
 
 ## What every workspace steward owns
 
@@ -125,8 +130,9 @@ Setup may return a large proposed rule set, grouped or paginated for usability, 
 it. Each rule must remain individually inspectable and deselectable in a dedicated preview covering
 condition, scope, source selection, representative matches and non-matches, action, consequences,
 conflicts and precedence, required authority, and disable/rollback behavior. Activation binds to
-the exact previewed versions; drift requires a new preview, and global review bypass does not
-activate action rules.
+the exact previewed versions; drift requires a new preview. Explicit workspace execution grants
+and enabled review bypass permit an agent to activate eligible rules after that same inspection.
+Bypass alone and ordinary write access do not authorize action-rule activation.
 
 ## Scheduling boundary
 

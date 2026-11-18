@@ -209,7 +209,7 @@ export function createWorkspaceMaintenanceService({
           eq(workspaceMaintenanceRuns.id, input.runId),
           eq(workspaceMaintenanceRuns.status, "running"),
           eq(workspaceMaintenanceRuns.leaseClaimId, input.claimId),
-          sql`${workspaceMaintenanceRuns.leaseExpiresAt} > NOW()`,
+          sql`${workspaceMaintenanceRuns.leaseExpiresAt} > clock_timestamp()`,
         ),
       )
       .returning();
@@ -304,7 +304,7 @@ export function createWorkspaceMaintenanceService({
             eq(workspaceMaintenanceRuns.id, input.runId),
             eq(workspaceMaintenanceRuns.status, "running"),
             eq(workspaceMaintenanceRuns.leaseClaimId, input.claimId),
-            sql`${workspaceMaintenanceRuns.leaseExpiresAt} > NOW()`,
+            sql`${workspaceMaintenanceRuns.leaseExpiresAt} > clock_timestamp()`,
           ),
         )
         .returning();
@@ -515,7 +515,7 @@ export function createWorkspaceMaintenanceService({
             eq(workspaceMaintenanceRuns.id, input.runId),
             eq(workspaceMaintenanceRuns.status, "running"),
             eq(workspaceMaintenanceRuns.leaseClaimId, input.claimId),
-            sql`${workspaceMaintenanceRuns.leaseExpiresAt} > NOW()`,
+            sql`${workspaceMaintenanceRuns.leaseExpiresAt} > clock_timestamp()`,
           ),
         )
         .returning();
@@ -531,7 +531,7 @@ export function createWorkspaceMaintenanceService({
       const [run] = await db
         .update(workspaceMaintenanceRuns)
         .set({
-          leaseExpiresAt: sql`NOW() + ${leaseMilliseconds} * INTERVAL '1 millisecond'`,
+          leaseExpiresAt: sql`clock_timestamp() + ${leaseMilliseconds} * INTERVAL '1 millisecond'`,
           updatedAt: sql`NOW()`,
         })
         .where(
@@ -539,7 +539,7 @@ export function createWorkspaceMaintenanceService({
             eq(workspaceMaintenanceRuns.id, input.runId),
             eq(workspaceMaintenanceRuns.status, "running"),
             eq(workspaceMaintenanceRuns.leaseClaimId, input.claimId),
-            sql`${workspaceMaintenanceRuns.leaseExpiresAt} > NOW()`,
+            sql`${workspaceMaintenanceRuns.leaseExpiresAt} > clock_timestamp()`,
           ),
         )
         .returning();
@@ -698,7 +698,7 @@ export function createWorkspaceMaintenanceService({
             eq(workspaceMaintenanceRuns.id, input.runId),
             eq(workspaceMaintenanceRuns.status, "running"),
             eq(workspaceMaintenanceRuns.leaseClaimId, input.claimId),
-            sql`${workspaceMaintenanceRuns.leaseExpiresAt} > NOW()`,
+            sql`${workspaceMaintenanceRuns.leaseExpiresAt} > clock_timestamp()`,
           ),
         )
         .returning();

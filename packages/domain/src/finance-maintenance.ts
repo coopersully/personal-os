@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import { materialSourceReferenceSchema } from "./feature-contracts.js";
+import { financeAttentionSnapshotSchema } from "./finance/attention.js";
+import { financeBudgetPlanContextSchema } from "./finance/budget-approval.js";
+import { financeConversationCausalClaimSchema } from "./finance/conversation.js";
 import { financePositionEvidenceCheckpointSchema } from "./finance/workflow-contracts.js";
 import {
   applyFinanceCategorizationsInputSchema,
@@ -24,7 +27,11 @@ import {
   updateFinanceTransactionInputSchema,
 } from "./finance.js";
 import { goalSchema, motiveSchema } from "./goals.js";
-import { maintenanceOperationSchema, workspaceStatusSchema } from "./maintenance.js";
+import {
+  maintenanceOperationSchema,
+  maintenanceScopeSchema,
+  workspaceStatusSchema,
+} from "./maintenance.js";
 
 export const financeDataConfidenceSchema = z.enum(["insufficient", "provisional", "reliable"]);
 export type FinanceDataConfidence = z.infer<typeof financeDataConfidenceSchema>;
@@ -103,6 +110,8 @@ export const financeStatusDetailsSchema = z.object({
   activeMotives: z.array(motiveSchema),
   budget: z.object({
     approved: z.boolean(),
+    planContext: financeBudgetPlanContextSchema.optional(),
+    categoryLimitTotal: nullableMoneySchema.optional(),
     month: z.string().regex(/^\d{4}-\d{2}$/u),
     total: nullableMoneySchema,
   }),
@@ -173,6 +182,16 @@ export const financeStatusDetailsSchema = z.object({
   }),
   reviewMode: z.object({ reviewBypassEnabled: z.boolean() }),
   review: z.object({
+    // Optional only for historical status snapshots; live status supplies complete coverage.
+    coverage: z
+      .object({
+        scope: maintenanceScopeSchema,
+        complete: z.boolean(),
+        flaggedTransactions: z.int().nonnegative(),
+        outstandingReviewRows: z.int().nonnegative(),
+        transactionsWithOutstandingReviews: z.int().nonnegative(),
+      })
+      .optional(),
     byReason: z.record(z.string(), z.int().nonnegative()),
     total: z.int().nonnegative(),
   }),
@@ -188,6 +207,8 @@ export const financeStatusDetailsSchema = z.object({
 
 export const financeStatusSchema = workspaceStatusSchema(financeStatusDetailsSchema).extend({
   domain: z.literal("finances"),
+  // Older server receipts may lack this field; live API always emits it.
+  attention: financeAttentionSnapshotSchema.optional(),
   recommendedNextOperation: maintenanceOperationSchema.nullable(),
 });
 export type FinanceStatus = z.infer<typeof financeStatusSchema>;
@@ -552,6 +573,7 @@ export const financeLedgerChallengeFindingInputSchema = z
 
 export const submitFinanceLedgerChallengeInputSchema = z
   .object({
+    conversationEvidence: financeConversationCausalClaimSchema.optional(),
     candidateRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
     challengeId: idSchema,
     checked: z

@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import {
+  accessTokens,
   auditEvents,
   createDatabaseClient,
   domainProfiles,
@@ -7,6 +8,7 @@ import {
   financeAccounts,
   financeAgentActionReviews,
   financeAlerts,
+  financeBudgetPlans,
   financeBudgets,
   financeCategories,
   financeCategoryRules,
@@ -33,6 +35,7 @@ import {
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { financeCandidateEffectKey } from "./finance/candidate-effect-receipt.js";
 import { financeCandidateActionFingerprint } from "./finance-action-identity.js";
 import type { SupportedActionKind } from "./finance-action-service.js";
 import { createFinanceActionService } from "./finance-action-service.js";
@@ -398,9 +401,24 @@ describe.sequential("finance action service", () => {
     await container.stop();
   });
 
+  async function executionAgent(ownerId: string): Promise<Principal> {
+    const [grant] = await database.db
+      .insert(accessTokens)
+      .values({
+        userId: ownerId,
+        name: "Budget authority test",
+        tokenHash: crypto.randomUUID(),
+        scopes: ["finances:read", "finances:write", "finances:execute"],
+      })
+      .returning();
+    if (!grant) throw new Error("Missing execution grant.");
+    return { ...agent(ownerId, grant.id), scopes: new Set(grant.scopes) };
+  }
+
   async function createSettlementFixture(options: {
     bypass: boolean;
     includeQuestion?: boolean;
+    categoryBudget?: boolean;
     itemCount?: number;
     label: string;
   }) {
@@ -525,6 +543,18 @@ describe.sequential("finance action service", () => {
         },
       ],
     });
+    const [categoryBudget] = options.categoryBudget
+      ? await database.db
+          .insert(financeBudgets)
+          .values({
+            userId: ownerId,
+            category: category.name,
+            month: "2026-08",
+            limit: 100,
+            updatedAt: now,
+          })
+          .returning()
+      : [];
     const drafts =
       options.itemCount && options.itemCount > 3
         ? await Promise.all(
@@ -553,15 +583,23 @@ describe.sequential("finance action service", () => {
             ),
             await actions.prepareMaintenanceCandidateDraft(
               "budget_plan",
-              {
-                allocations: [{ categoryId: category.id, limit: 75 }],
-                assumptions: [],
-                goalIds: [],
-                month: "2026-08",
-                rationale: "Settlement budget evidence.",
-                replace: true,
-                scenarioFingerprint: null,
-              },
+              categoryBudget
+                ? {
+                    budgetId: categoryBudget.id,
+                    expectedBudgetUpdatedAt: categoryBudget.updatedAt.toISOString(),
+                    category: category.name,
+                    month: "2026-08",
+                    limit: 75,
+                  }
+                : {
+                    allocations: [{ categoryId: category.id, limit: 75 }],
+                    assumptions: [],
+                    goalIds: [],
+                    month: "2026-08",
+                    rationale: "Settlement budget evidence.",
+                    replace: true,
+                    scenarioFingerprint: null,
+                  },
               ownerId,
             ),
           ];
@@ -1012,6 +1050,20 @@ describe.sequential("finance action service", () => {
         requestId: "settlement-human-repeat",
       }),
     ).resolves.toMatchObject({ status: "applied" });
+    expect(
+      await database.db.query.auditEvents.findMany({
+        where: eq(auditEvents.entityId, queued.review.id),
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "finance.action_review_approved",
+          actorType: "user",
+          actorId: fixture.ownerId,
+          requestId: "settlement-human-approve",
+        }),
+      ]),
+    );
     await expect(
       fixture.actions.settleFinanceMaintenanceCandidate(
         fixture.candidate.id,
@@ -1104,32 +1156,93 @@ describe.sequential("finance action service", () => {
     ).resolves.toEqual([{ status: "pending" }]);
   });
 
-  it("commits the same real candidate directly when review bypass is enabled", async () => {
-    const fixture = await createSettlementFixture({ bypass: true, label: "Direct settlement" });
-    const [transaction] = fixture.transactions;
-    if (!transaction) throw new Error("Settlement fixture has no transaction.");
+  it("queues a budget maintenance candidate without bypass and preserves human approval under agent execution", async () => {
+    const fixture = await createSettlementFixture({
+      bypass: false,
+      label: "Budget authority settlement",
+    });
+    const queued = await fixture.actions.settleFinanceMaintenanceCandidate(
+      fixture.candidate.id,
+      fixture.candidate.revision,
+      { principal: agent(fixture.ownerId), requestId: "budget-authority-queue" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Budget changes require a review.");
+    expect(
+      await database.db.query.financeBudgets.findMany({
+        where: eq(financeBudgets.userId, fixture.ownerId),
+      }),
+    ).toEqual([]);
+    await expect(
+      fixture.actions.approve(queued.review.id, {
+        principal: await executionAgent(fixture.ownerId),
+        requestId: "budget-authority-agent-approval",
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      fixture.actions.approve(queued.review.id, {
+        principal: user(fixture.ownerId),
+        requestId: "budget-authority-human-approval",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    const effect = await database.db.query.financeMutationRecords.findFirst({
+      where: eq(
+        financeMutationRecords.idempotencyKey,
+        financeCandidateEffectKey(fixture.candidate.id, fixture.candidate.revision),
+      ),
+    });
+    if (!effect) throw new Error("Missing canonical candidate effect receipt.");
+    const audits = await database.db.query.auditEvents.findMany({
+      where: eq(auditEvents.requestId, `finance-candidate-effect:${effect.id}`),
+    });
+    expect(audits).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "finance.budget_plan_set",
+          actorType: "agent",
+          after: expect.objectContaining({
+            approvedByActorType: "user",
+            approvedByActorId: fixture.ownerId,
+            reviewId: queued.review.id,
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("commits complete budget maintenance under bypass with honest agent approval provenance", async () => {
+    const fixture = await createSettlementFixture({
+      bypass: true,
+      label: "Bypassed budget maintenance",
+    });
+    const principal = await executionAgent(fixture.ownerId);
     await expect(
       fixture.actions.settleFinanceMaintenanceCandidate(
         fixture.candidate.id,
         fixture.candidate.revision,
-        {
-          principal: agent(fixture.ownerId),
-          requestId: "settlement-direct",
-        },
+        { principal, requestId: "bypass-budget-maintenance" },
       ),
     ).resolves.toMatchObject({ status: "committed" });
-    await expect(
-      database.db
-        .select({ categoryId: financeTransactions.categoryId })
-        .from(financeTransactions)
-        .where(eq(financeTransactions.id, transaction.id)),
-    ).resolves.toEqual([{ categoryId: fixture.category.id }]);
-    await expect(
-      database.db
-        .select({ id: financeAgentActionReviews.id })
-        .from(financeAgentActionReviews)
-        .where(eq(financeAgentActionReviews.maintenanceRunId, fixture.run.id)),
-    ).resolves.toEqual([]);
+    const budgets = await database.db
+      .select()
+      .from(financeBudgets)
+      .where(eq(financeBudgets.userId, fixture.ownerId));
+    expect(budgets.length).toBeGreaterThan(0);
+    const audits = await database.db.query.auditEvents.findMany({
+      where: eq(auditEvents.userId, fixture.ownerId),
+    });
+    expect(audits).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "finance.budget_plan_set",
+          actorType: "agent",
+          after: expect.objectContaining({
+            approvalSource: "agent_self_approval",
+            approvedByActorId: principal.actorId,
+            approvedByActorType: "agent",
+          }),
+        }),
+      ]),
+    );
   });
 
   it("blocks unresolved candidate questions without changing canonical Finance records", async () => {
@@ -1230,14 +1343,62 @@ describe.sequential("finance action service", () => {
     ).resolves.toEqual([]);
   });
 
+  it("supersedes maintenance approval when a bound category budget changed", async () => {
+    const fixture = await createSettlementFixture({
+      bypass: false,
+      categoryBudget: true,
+      label: "Stale category maintenance",
+    });
+    const queued = await fixture.actions.settleFinanceMaintenanceCandidate(
+      fixture.candidate.id,
+      fixture.candidate.revision,
+      { principal: agent(fixture.ownerId), requestId: "category-maintenance-queue" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Expected maintenance review.");
+    await database.db
+      .update(financeBudgets)
+      .set({ limit: 150, updatedAt: new Date(now.getTime() + 1000) })
+      .where(eq(financeBudgets.userId, fixture.ownerId));
+    await expect(
+      fixture.actions.approve(queued.review.id, {
+        principal: user(fixture.ownerId),
+        requestId: "category-maintenance-approve",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      database.db
+        .select({ state: financeMaintenanceCandidates.state })
+        .from(financeMaintenanceCandidates)
+        .where(eq(financeMaintenanceCandidates.id, fixture.candidate.id)),
+    ).resolves.toEqual([{ state: "superseded" }]);
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, queued.review.id)),
+    ).resolves.toEqual([{ status: "superseded" }]);
+    await expect(
+      database.db
+        .select({ limit: financeBudgets.limit })
+        .from(financeBudgets)
+        .where(eq(financeBudgets.userId, fixture.ownerId)),
+    ).resolves.toEqual([{ limit: 150 }]);
+  });
+
   it("rolls back every candidate item when a later audit write fails and retries safely", async () => {
-    const fixture = await createSettlementFixture({ bypass: true, label: "Settlement rollback" });
+    const fixture = await createSettlementFixture({ bypass: false, label: "Settlement rollback" });
     const [transaction] = fixture.transactions;
     if (!transaction) throw new Error("Settlement fixture has no transaction.");
+    const queued = await fixture.actions.settleFinanceMaintenanceCandidate(
+      fixture.candidate.id,
+      fixture.candidate.revision,
+      { principal: agent(fixture.ownerId), requestId: "rollback-queue" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Expected budget approval review.");
     await database.pool.query(`
       CREATE OR REPLACE FUNCTION fail_second_settlement_audit() RETURNS trigger AS $$
       BEGIN
-        IF NEW.request_id = 'settlement-rollback' AND EXISTS (
+        IF NEW.user_id = '${fixture.ownerId}'::uuid AND NEW.request_id LIKE 'finance-candidate-effect:%' AND EXISTS (
           SELECT 1 FROM audit_events WHERE request_id = NEW.request_id
         ) THEN
           RAISE EXCEPTION 'forced later settlement audit failure';
@@ -1251,14 +1412,10 @@ describe.sequential("finance action service", () => {
     `);
     try {
       await expect(
-        fixture.actions.settleFinanceMaintenanceCandidate(
-          fixture.candidate.id,
-          fixture.candidate.revision,
-          {
-            principal: agent(fixture.ownerId),
-            requestId: "settlement-rollback",
-          },
-        ),
+        fixture.actions.approve(queued.review.id, {
+          principal: user(fixture.ownerId),
+          requestId: "settlement-rollback",
+        }),
       ).rejects.toThrow(/Failed query: insert into "audit_events"/);
     } finally {
       await database.pool.query("DROP TRIGGER fail_second_settlement_audit ON audit_events");
@@ -1275,17 +1432,13 @@ describe.sequential("finance action service", () => {
         .select({ state: financeMaintenanceCandidates.state })
         .from(financeMaintenanceCandidates)
         .where(eq(financeMaintenanceCandidates.id, fixture.candidate.id)),
-    ).resolves.toEqual([{ state: "challenged" }]);
+    ).resolves.toEqual([{ state: "awaiting_approval" }]);
     await expect(
-      fixture.actions.settleFinanceMaintenanceCandidate(
-        fixture.candidate.id,
-        fixture.candidate.revision,
-        {
-          principal: agent(fixture.ownerId),
-          requestId: "settlement-retry",
-        },
-      ),
-    ).resolves.toMatchObject({ status: "committed" });
+      fixture.actions.approve(queued.review.id, {
+        principal: user(fixture.ownerId),
+        requestId: "settlement-retry",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
   });
 
   it("queues prepared agent work when durable bypass is disabled, then applies the same action after it is enabled", async () => {
@@ -2267,6 +2420,417 @@ describe.sequential("finance action service", () => {
     }
   });
 
+  it.each([
+    { actorType: "user", bypass: false, suppliedRevision: true },
+    { actorType: "agent", bypass: false, suppliedRevision: true },
+    { actorType: "agent", bypass: true, suppliedRevision: true },
+    { actorType: "user", bypass: false, suppliedRevision: false },
+    { actorType: "agent", bypass: false, suppliedRevision: false },
+    { actorType: "agent", bypass: true, suppliedRevision: false },
+  ] as const)("conflicts on a budget changed during direct revalidation ($actorType, bypass=$bypass, revision=$suppliedRevision)", async ({
+    actorType,
+    bypass,
+    suppliedRevision,
+  }) => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        email: `budget-race-${crypto.randomUUID()}@example.com`,
+        displayName: "Budget race",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Owner fixture missing.");
+    await database.db.insert(executionPolicySettings).values({
+      userId: owner.id,
+      reviewBypassEnabled: bypass,
+    });
+    const [budget] = await database.db
+      .insert(financeBudgets)
+      .values({
+        userId: owner.id,
+        category: "Groceries",
+        month: "2026-08",
+        limit: 100,
+        updatedAt: now,
+      })
+      .returning();
+    if (!budget) throw new Error("Budget fixture missing.");
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const actions = createFinanceActionService({ db: database.db, finances, now: () => now });
+    const blocker = await database.pool.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        `finance-budget-plan:${owner.id}:${budget.month}`,
+      ]);
+      const outcome = actions
+        .performDirect(
+          "budget_plan",
+          {
+            category: budget.category,
+            month: budget.month,
+            limit: 125,
+            ...(suppliedRevision
+              ? {
+                  budgetId: budget.id,
+                  expectedBudgetUpdatedAt: budget.updatedAt.toISOString(),
+                }
+              : {}),
+          },
+          {
+            principal: actorType === "user" ? user(owner.id) : agent(owner.id),
+            requestId: `budget-race-${crypto.randomUUID()}`,
+          },
+        )
+        .then(
+          (value) => ({ status: "resolved" as const, value }),
+          (error: unknown) => ({ status: "rejected" as const, error }),
+        );
+      // Initial preparation is complete; revalidation is blocked on the month lock.
+      await waitForLockWaiter(database.pool, "pg_advisory_xact_lock");
+      await database.db
+        .update(financeBudgets)
+        .set({
+          limit: 150,
+          updatedAt: new Date(now.getTime() + 1000),
+        })
+        .where(eq(financeBudgets.id, budget.id));
+      await blocker.query("COMMIT");
+      await expect(outcome).resolves.toMatchObject({
+        status: "rejected",
+        error: { code: "conflict" },
+      });
+      await expect(
+        database.db
+          .select({ limit: financeBudgets.limit })
+          .from(financeBudgets)
+          .where(eq(financeBudgets.id, budget.id)),
+      ).resolves.toEqual([{ limit: 150 }]);
+      await expect(
+        database.db
+          .select({ id: financeAgentActionReviews.id })
+          .from(financeAgentActionReviews)
+          .where(eq(financeAgentActionReviews.userId, owner.id)),
+      ).resolves.toEqual([]);
+      await expect(
+        database.db
+          .select({ id: financeMutationRecords.id })
+          .from(financeMutationRecords)
+          .where(eq(financeMutationRecords.userId, owner.id)),
+      ).resolves.toEqual([]);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => undefined);
+      blocker.release();
+    }
+  });
+
+  it("supersedes a stale category-budget review while direct stale edits still conflict", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        email: `stale-budget-${crypto.randomUUID()}@example.com`,
+        displayName: "Stale budget review",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Owner fixture missing.");
+    const userId = owner.id;
+    await database.db
+      .insert(executionPolicySettings)
+      .values({ userId, reviewBypassEnabled: false })
+      .onConflictDoUpdate({
+        target: executionPolicySettings.userId,
+        set: { reviewBypassEnabled: false },
+      });
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const actions = createFinanceActionService({ db: database.db, finances, now: () => now });
+    const [budget] = await database.db
+      .insert(financeBudgets)
+      .values({
+        userId,
+        category: `Stale category ${crypto.randomUUID()}`,
+        month: "2026-08",
+        limit: 100,
+        updatedAt: now,
+      })
+      .returning();
+    if (!budget) throw new Error("Budget fixture missing.");
+    const input = {
+      budgetId: budget.id,
+      expectedBudgetUpdatedAt: budget.updatedAt.toISOString(),
+      category: budget.category,
+      month: budget.month,
+      limit: 125,
+    };
+    const queued = await actions.performDirect("budget_plan", input, {
+      principal: agent(userId),
+      requestId: "category-budget-queue",
+    });
+    if (queued.status !== "pending_review") throw new Error("Expected queued category budget.");
+    await database.db
+      .update(financeBudgets)
+      .set({ limit: 150, updatedAt: new Date(now.getTime() + 1000) })
+      .where(eq(financeBudgets.id, budget.id));
+    await expect(
+      actions.performDirect("budget_plan", input, {
+        principal: user(userId),
+        requestId: "category-budget-direct-stale",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      actions.approve(queued.review.id, {
+        principal: user(userId),
+        requestId: "category-budget-stale-review",
+      }),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, queued.review.id)),
+    ).resolves.toEqual([{ status: "superseded" }]);
+    await expect(
+      database.db
+        .select({ limit: financeBudgets.limit })
+        .from(financeBudgets)
+        .where(eq(financeBudgets.id, budget.id)),
+    ).resolves.toEqual([{ limit: 150 }]);
+  });
+
+  it("lets bypass execution agents approve legacy plans and rejects stale or foreign reviews", async () => {
+    await database.db
+      .insert(executionPolicySettings)
+      .values({ reviewBypassEnabled: false, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: false },
+        target: executionPolicySettings.userId,
+      });
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const actions = createFinanceActionService({ db: database.db, finances, now: () => now });
+    const budgetCase = (
+      await seedActionCases(database, userId, `Authority ${crypto.randomUUID()}`)
+    ).find((item) => item.actionKind === "budget_plan");
+    if (!budgetCase) throw new Error("Missing budget fixture.");
+    const queued = await actions.performDirect("budget_plan", budgetCase.input, {
+      principal: agent(userId),
+      requestId: "exact-budget-queue",
+    });
+    if (queued.status !== "pending_review") throw new Error("Budget must queue despite bypass.");
+    const executingAgent = await executionAgent(userId);
+    await database.db
+      .update(executionPolicySettings)
+      .set({ reviewBypassEnabled: true })
+      .where(eq(executionPolicySettings.userId, userId));
+    await expect(
+      actions.approve(queued.review.id, {
+        principal: executingAgent,
+        requestId: "exact-budget-agent",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    await expect(
+      actions.approve(queued.review.id, {
+        principal: user(crypto.randomUUID()),
+        requestId: "exact-budget-foreign",
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      actions.approve(queued.review.id, {
+        principal: user(userId),
+        requestId: "exact-budget-human",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    await expect(
+      actions.approve(queued.review.id, {
+        principal: executingAgent,
+        requestId: "exact-budget-agent-replay",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    await database.db
+      .update(executionPolicySettings)
+      .set({ reviewBypassEnabled: false })
+      .where(eq(executionPolicySettings.userId, userId));
+    const next = await actions.performDirect(
+      "budget_plan",
+      { ...budgetCase.input, rationale: "New exact review" },
+      { principal: agent(userId), requestId: "exact-budget-next" },
+    );
+    if (next.status !== "pending_review") throw new Error("Expected next review.");
+    await database.db
+      .update(financeBudgets)
+      .set({ limit: 99999, updatedAt: new Date(now.getTime() + 1000) })
+      .where(eq(financeBudgets.userId, userId));
+    await expect(
+      actions.approve(next.review.id, { principal: user(userId), requestId: "exact-budget-stale" }),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    expect(
+      await database.db.query.auditEvents.findMany({
+        where: eq(auditEvents.requestId, "exact-budget-stale"),
+      }),
+    ).toEqual([]);
+  });
+
+  it("keeps newer human plans intact after delayed proposals, stale approvals, and approval replay", async () => {
+    await database.db
+      .update(executionPolicySettings)
+      .set({ reviewBypassEnabled: false })
+      .where(eq(executionPolicySettings.userId, userId));
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const actions = createFinanceActionService({ db: database.db, finances, now: () => now });
+    const budgetCase = (
+      await seedActionCases(database, userId, `Human replay ${crypto.randomUUID()}`)
+    ).find((item) => item.actionKind === "budget_plan");
+    if (!budgetCase) throw new Error("Missing budget fixture.");
+    const context = { principal: user(userId), requestId: "human-plan" };
+    const submit = (input: Record<string, unknown>) =>
+      actions.performDirect("budget_plan", input, context);
+    const first = await submit(budgetCase.input);
+    if (first.status !== "pending_review") throw new Error("Human plan must queue.");
+    await expect(actions.approve(first.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    const delayed = await submit({ ...budgetCase.input, rationale: "Delayed A" });
+    const next = await submit({
+      ...budgetCase.input,
+      allocations: (budgetCase.input.allocations as { categoryId: string; limit: number }[]).map(
+        (allocation) => ({ ...allocation, limit: 20 }),
+      ),
+      rationale: "Newer B",
+    });
+    if (delayed.status !== "pending_review" || next.status !== "pending_review")
+      throw new Error("Expected human reviews.");
+    await expect(actions.approve(next.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    const snapshot = async () => ({
+      budgets: await database.db
+        .select()
+        .from(financeBudgets)
+        .where(eq(financeBudgets.userId, userId)),
+      plans: await database.db
+        .select()
+        .from(financeBudgetPlans)
+        .where(eq(financeBudgetPlans.userId, userId)),
+    });
+    const newer = await snapshot();
+    const writes = await database.db.$count(
+      auditEvents,
+      and(eq(auditEvents.userId, userId), eq(auditEvents.action, "finance.budget_plan_set")),
+    );
+    await expect(actions.approve(delayed.review.id, context)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await expect(actions.approve(first.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    await expect(submit(budgetCase.input)).resolves.toMatchObject({ status: "pending_review" });
+    await expect(finances.setBudgetPlan(budgetCase.input as never, context)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    expect(await snapshot()).toEqual(newer);
+    expect(
+      await database.db.$count(
+        auditEvents,
+        and(eq(auditEvents.userId, userId), eq(auditEvents.action, "finance.budget_plan_set")),
+      ),
+    ).toBe(writes);
+  });
+
+  it("binds category approvals to the whole month and never replays a removed allocation", async () => {
+    await database.db
+      .update(executionPolicySettings)
+      .set({ reviewBypassEnabled: false })
+      .where(eq(executionPolicySettings.userId, userId));
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const actions = createFinanceActionService({ db: database.db, finances, now: () => now });
+    const categories = await finances.listCategories(userId);
+    const category = categories[0];
+    const replacementCategory = categories[1];
+    if (!category || !replacementCategory) throw new Error("Missing categories.");
+    const context = { principal: user(userId), requestId: "human-category-replay" };
+    const input = { category: category.name, limit: 10, month: "2027-03" };
+    const absentInput = { category: "Absent category", limit: 5, month: input.month };
+    const first = await actions.performDirect("budget_plan", input, context);
+    if (first.status !== "pending_review") throw new Error("Expected category review.");
+    await expect(actions.approve(first.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    await expect(actions.approve(first.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    expect(
+      await database.db.$count(
+        financeBudgets,
+        and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, input.month)),
+      ),
+    ).toBe(1);
+    const pending = await actions.performDirect("budget_plan", absentInput, context);
+    if (pending.status !== "pending_review") throw new Error("Expected absent-category review.");
+    const beforeRevision = await actions.prepare("budget_plan", absentInput, userId);
+    const replacement = await actions.performDirect(
+      "budget_plan",
+      {
+        allocations: [{ categoryId: replacementCategory.id, limit: 20 }],
+        month: input.month,
+        rationale: "Replace A with B and leave absent category absent.",
+      },
+      context,
+    );
+    if (replacement.status !== "pending_review") throw new Error("Expected replacement review.");
+    await expect(actions.approve(replacement.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    const afterRevision = await actions.prepare("budget_plan", absentInput, userId);
+    if ("status" in beforeRevision || "status" in afterRevision)
+      throw new Error("Expected prepared category.");
+    expect(afterRevision.expectedRevision).not.toBe(beforeRevision.expectedRevision);
+    const snapshot = async () => ({
+      budgets: await database.db
+        .select()
+        .from(financeBudgets)
+        .where(and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, input.month))),
+      plans: await database.db
+        .select()
+        .from(financeBudgetPlans)
+        .where(
+          and(eq(financeBudgetPlans.userId, userId), eq(financeBudgetPlans.month, input.month)),
+        ),
+      audits: await database.db.$count(
+        auditEvents,
+        and(
+          eq(auditEvents.userId, userId),
+          inArray(auditEvents.action, ["finance.budget_created", "finance.budget_plan_set"]),
+        ),
+      ),
+    });
+    const newer = await snapshot();
+    await expect(actions.approve(first.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    await expect(actions.approve(pending.review.id, context)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    const delayed = await actions.performDirect("budget_plan", input, context);
+    if (delayed.status !== "pending_review")
+      throw new Error("Delayed category must need fresh review.");
+    await expect(finances.createBudget(input, context)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    expect(await snapshot()).toEqual(newer);
+    await expect(actions.approve(delayed.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    const approved = await snapshot();
+    expect(approved.budgets).toHaveLength(2);
+    expect(approved.audits).toBe(newer.audits + 1);
+    await expect(actions.approve(delayed.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    expect(await snapshot()).toEqual(approved);
+  });
+
   it("disposes every Finance action family safely across bypass, evidence, and ownership states", async () => {
     const service = createFinanceActionService({
       db: database.db,
@@ -2770,9 +3334,12 @@ describe.sequential("finance action service", () => {
 
   it("keeps bypass out of categorization evidence while allowing prepared permanent rules", async () => {
     await database.db
-      .update(executionPolicySettings)
-      .set({ reviewBypassEnabled: true, updatedAt: now })
-      .where(eq(executionPolicySettings.userId, userId));
+      .insert(executionPolicySettings)
+      .values({ userId, reviewBypassEnabled: true })
+      .onConflictDoUpdate({
+        target: executionPolicySettings.userId,
+        set: { reviewBypassEnabled: true, updatedAt: now },
+      });
     const [account] = await database.db
       .insert(financeAccounts)
       .values({
@@ -2836,6 +3403,32 @@ describe.sequential("finance action service", () => {
     const lowConfidence = await service.performDirect("categorization", decision(0.5), context);
     if (lowConfidence.status !== "needs_input") throw new Error("Expected an evidence question.");
     expect(lowConfidence.question.expectedAnswer.map((field) => field.name)).toEqual(["decisions"]);
+    expect(lowConfidence.question.sourceRefs).toEqual([
+      expect.objectContaining({ remoteId: transaction.id }),
+    ]);
+    // Persist the original deployed shape: no references in either public or private question.
+    const [storedQuestion] = await database.db
+      .select()
+      .from(financeAgentActionReviews)
+      .where(eq(financeAgentActionReviews.id, lowConfidence.question.id));
+    if (!storedQuestion) throw new Error("Missing question");
+    await database.db
+      .update(financeAgentActionReviews)
+      .set({
+        sourceRefs: [],
+        privatePayload: {
+          ...storedQuestion.privatePayload,
+          question: { ...lowConfidence.question, sourceRefs: [] },
+        },
+      })
+      .where(eq(financeAgentActionReviews.id, storedQuestion.id));
+    expect(await service.listQuestions(userId, 50, storedQuestion.id)).toEqual([
+      expect.objectContaining({
+        sourceRefs: [expect.objectContaining({ remoteId: transaction.id })],
+      }),
+    ]);
+    expect(await service.listQuestions(crypto.randomUUID(), 50, storedQuestion.id)).toEqual([]);
+
     await expect(
       database.db
         .select({ categoryId: financeTransactions.categoryId })
@@ -4816,7 +5409,9 @@ describe.sequential("finance action service", () => {
           principal: agent(userId),
           requestId: `question-descriptor-answer-${foreignCase.actionKind}`,
         }),
-      ).resolves.toMatchObject({ status: "applied" });
+      ).resolves.toMatchObject({
+        status: "applied",
+      });
     }
 
     const [foreignGoal] = await database.db
@@ -4882,7 +5477,9 @@ describe.sequential("finance action service", () => {
           principal: agent(userId),
           requestId: `question-descriptor-extra-answer-${item.fields[0]}`,
         }),
-      ).resolves.toMatchObject({ status: "applied" });
+      ).resolves.toMatchObject({
+        status: "applied",
+      });
     }
 
     await database.db.insert(financeProfiles).values({
@@ -7245,13 +7842,19 @@ describe.sequential("finance action service", () => {
       userId,
     });
 
-    const contentionDatabase = createStatementTimedDatabase(container.getConnectionUri());
+    const waiterObservationTimeoutMs = 15_000;
+    const writerStatementTimeoutMs = 30_000;
+    const contentionDatabase = createStatementTimedDatabase(
+      container.getConnectionUri(),
+      writerStatementTimeoutMs,
+    );
     const actions = createFinanceActionService({
       db: contentionDatabase.db,
       finances: createFinanceService({ db: contentionDatabase.db, now: () => now }),
       now: () => now,
     });
     const blocker = await database.pool.connect();
+    let operationSettlement: Promise<PromiseSettledResult<unknown>[]> | undefined;
     try {
       await blocker.query("BEGIN");
       await blocker.query("SET LOCAL statement_timeout = '5s'");
@@ -7271,31 +7874,39 @@ describe.sequential("finance action service", () => {
         }),
         { principal: agent(userId, "maintenance-answerer"), requestId: "question-order-answer" },
       );
-      const competingRequest = actions.performDirect(
-        "reimbursement",
-        {
-          allocationId: allocation.id,
-          dueDate: "2026-08-24",
-          evidence: {
-            sourceRefs: [
-              {
-                accountId: null,
-                provider: "local",
-                remoteId: "question-order-receipt",
-                revision: null,
-                sourceType: "local",
-              },
-            ],
-            summary: "Question-order receipt",
+      // Delay the second writer beyond the old five-second statement ceiling:
+      // both must remain blocked until the real PostgreSQL barrier is observed.
+      const competingRequest = new Promise<void>((resolvePromise) =>
+        setTimeout(resolvePromise, 6_000),
+      ).then(() =>
+        actions.performDirect(
+          "reimbursement",
+          {
+            allocationId: allocation.id,
+            dueDate: "2026-08-24",
+            evidence: {
+              sourceRefs: [
+                {
+                  accountId: null,
+                  provider: "local",
+                  remoteId: "question-order-receipt",
+                  revision: null,
+                  sourceType: "local",
+                },
+              ],
+              summary: "Question-order receipt",
+            },
+            expectedAmount: 180,
+            operation: "create",
+            payer: "Alex",
+            rationale: "Alex owes the smaller shared portion.",
           },
-          expectedAmount: 180,
-          operation: "create",
-          payer: "Alex",
-          rationale: "Alex owes the smaller shared portion.",
-        },
-        { principal: agent(userId, "competing-agent"), requestId: "question-order-competing" },
+          { principal: agent(userId, "competing-agent"), requestId: "question-order-competing" },
+        ),
       );
-      await waitForAdvisoryLockWaiters(database.pool, 2);
+      const operations = [answer, competingRequest];
+      operationSettlement = Promise.allSettled(operations);
+      await waitForAdvisoryLockWaiters(database.pool, 2, waiterObservationTimeoutMs);
       await blocker.query("COMMIT");
       const outcomes = await settleWithoutDeadlock([answer, competingRequest]);
       expect(
@@ -7307,6 +7918,7 @@ describe.sequential("finance action service", () => {
       ).toBe(true);
     } finally {
       await blocker.query("ROLLBACK").catch(() => undefined);
+      await operationSettlement;
       blocker.release();
       await contentionDatabase.close();
     }
@@ -7572,11 +8184,11 @@ describe.sequential("finance action service", () => {
     const agentContext = { principal: agent(userId), requestId: "agent-review-boundaries" };
 
     await expect(service.approve(missingId, agentContext)).rejects.toThrow(
-      "Only an interactive user",
+      "explicit finances:execute access",
     );
     await expect(service.approve(missingId, userContext)).rejects.toThrow("review was not found");
     await expect(service.dismiss(missingId, agentContext)).rejects.toThrow(
-      "Only an interactive user",
+      "explicit finances:execute access",
     );
     await expect(service.dismiss(missingId, userContext)).rejects.toThrow("review was not found");
     await expect(service.answerQuestion(missingId, "", userContext)).rejects.toThrow(

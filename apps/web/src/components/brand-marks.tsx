@@ -1,8 +1,14 @@
+import { financeInstitutionBrandingSchema } from "@personal-os/domain";
+import { useState } from "react";
 import {
+  siAmericanexpress,
   siAnthropic,
   siApple,
+  siBankofamerica,
+  siChase,
   siClaude,
   siClaudecode,
+  siDiscover,
   siGithubcopilot,
   siGooglegemini,
   siIcloud,
@@ -11,6 +17,7 @@ import {
   siPaypal,
   siPerplexity,
   siVenmo,
+  siWellsfargo,
   siX,
   siZelle,
 } from "simple-icons";
@@ -18,7 +25,7 @@ import { BRAND_NAME, BRAND_PROMISE } from "../brand.js";
 
 const ORBIT_PROMISE = BRAND_PROMISE.replace(/[.!?]+$/, "");
 const ORBIT_COPY = `✦\u00A0\u00A0${ORBIT_PROMISE}\u00A0\u00A0✦\u00A0\u00A0${ORBIT_PROMISE}\u00A0\u00A0`;
-const NOHMI_SYMBOL_PATH =
+const PERSONAL_OS_SYMBOL_PATH =
   "M145 368V144h55v42c18-31 47-48 83-48 57 0 84 37 84 103v127h-55V254c0-38-13-61-48-61-39 0-64 27-64 73v102h-55Z";
 
 /**
@@ -93,6 +100,14 @@ const googleMark: BrandMark = {
  * entitled to ship.
  */
 const brandMarks: Record<string, BrandMark> = {
+  // Institution fallbacks from the installed simple-icons release. Provider PNGs take precedence.
+  "american express": monochrome(siAmericanexpress),
+  amex: monochrome(siAmericanexpress),
+  "bank of america": monochrome(siBankofamerica),
+  chase: monochrome(siChase),
+  "jpmorgan chase": monochrome(siChase),
+  discover: monochrome(siDiscover),
+  "wells fargo": monochrome(siWellsfargo),
   anthropic: monochrome(siAnthropic),
   apple: monochrome(siApple),
   claude: monochrome(siClaude),
@@ -114,11 +129,16 @@ const brandMarks: Record<string, BrandMark> = {
 };
 
 export function hasBrandMark(brand: string) {
-  return normalize(brand) in brandMarks;
+  return lookupBrandMark(brand) !== undefined;
 }
 
 export function brandTitle(brand: string) {
-  return brandMarks[normalize(brand)]?.title;
+  return lookupBrandMark(brand)?.title;
+}
+
+function lookupBrandMark(brand: string) {
+  const key = normalize(brand);
+  return Object.hasOwn(brandMarks, key) ? brandMarks[key] : undefined;
 }
 
 function normalize(brand: string) {
@@ -137,16 +157,32 @@ export function BrandMark({
   className,
   decorative = false,
   label,
+  imageUrl,
 }: {
+  imageUrl?: string | null;
   brand: string;
   className?: string;
   decorative?: boolean;
   label?: string;
 }) {
-  const mark = brandMarks[normalize(brand)];
+  const [failedImage, setFailedImage] = useState<string | null>(null);
+  const validImage = financeInstitutionBrandingSchema.shape.logo.safeParse(imageUrl);
+  const mark = lookupBrandMark(brand);
   const name = label ?? mark?.title ?? brand;
   const monogram = brand.trim().slice(0, 1).toUpperCase() || "?";
 
+  if (validImage.success && validImage.data && failedImage !== validImage.data) {
+    const source = validImage.data;
+    return (
+      <img
+        src={source}
+        alt={decorative ? "" : name}
+        aria-hidden={decorative || undefined}
+        className={className}
+        onError={() => setFailedImage(source)}
+      />
+    );
+  }
   if (!mark) {
     return decorative ? (
       <span aria-hidden="true" className={className} data-brand-monogram="">
@@ -182,7 +218,7 @@ export function BrandMark({
   );
 }
 
-export function NohmiBrandMark({
+export function PersonalOsBrandMark({
   auth = false,
   compact = false,
   symbol = false,
@@ -194,7 +230,7 @@ export function NohmiBrandMark({
   if (symbol) {
     return (
       <svg aria-label={BRAND_NAME} role="img" className="brand-symbol" viewBox="0 0 512 512">
-        <path d={NOHMI_SYMBOL_PATH} />
+        <path d={PERSONAL_OS_SYMBOL_PATH} />
       </svg>
     );
   }
@@ -221,7 +257,7 @@ export function NohmiBrandMark({
         </svg>
         <span className="auth-brand-graphic__frame">
           <svg aria-hidden="true" className="auth-brand-graphic__mark" viewBox="0 0 512 512">
-            <path d={NOHMI_SYMBOL_PATH} />
+            <path d={PERSONAL_OS_SYMBOL_PATH} />
           </svg>
         </span>
       </span>

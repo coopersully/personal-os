@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   financeAccounts,
   financeBudgetAllocations,
+  financeBudgetBaselineQualifications,
   financeBudgetPeriodBaselines,
   financeBudgetPlans,
   financeBudgetPolicies,
@@ -14,6 +15,7 @@ import {
 import {
   type FinanceBudgetPolicyPlanSnapshot,
   type FinanceBudgetPolicyTerms,
+  financeBudgetBaselineSnapshotSchema,
   financeBudgetPolicyPlanSnapshotSchema,
   financeBudgetPolicyTermsSchema,
 } from "@personal-os/domain";
@@ -166,8 +168,23 @@ export async function policyBaseline(
   tx: FinanceTransaction,
   userId: string,
   planId: string,
-  terms: Pick<FinanceBudgetPolicyTerms, "period" | "baseline">,
+  terms: Pick<FinanceBudgetPolicyTerms, "period" | "baseline" | "currency">,
 ) {
+  const qualification = await tx.query.financeBudgetBaselineQualifications.findFirst({
+    where: and(
+      eq(financeBudgetBaselineQualifications.userId, userId),
+      eq(financeBudgetBaselineQualifications.periodMonth, terms.period.from.slice(0, 7)),
+    ),
+  });
+  if (qualification) {
+    const qualified = financeBudgetBaselineSnapshotSchema.parse(qualification.snapshot);
+    if (
+      qualified.budgetVersionId !== terms.baseline.id ||
+      qualified.currency !== terms.currency ||
+      !samePolicyValue(qualified.period, terms.period)
+    )
+      return null;
+  }
   const designation = await tx.query.financeBudgetPeriodBaselines.findFirst({
     where: and(
       eq(financeBudgetPeriodBaselines.userId, userId),

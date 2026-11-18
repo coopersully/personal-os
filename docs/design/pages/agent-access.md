@@ -2,18 +2,30 @@
 
 Agent work has three distinct user questions. nohmi gives each one a dedicated destination.
 
-## Contextual Reviews
+## Reviews within each workspace
 
-Reviews answer **What needs my judgment now?** Open the contextual flow from a workspace alert or
-its Settings header action. The flow stays within the selected workspace and renders the owning
-domain's decision material, actions, progress, deferral, and status refresh. See
-[Reviews](reviews.md) for the current contract.
+Reviews answers **What needs my judgment now?** One shared, workspace-scoped dialog or mobile
+drawer opens from the workspace attention alert or the action beside its Settings title. Today
+and centralized account summaries do not add a separate queue link.
 
-Direct navigation to `/reviews` redirects to `/settings?section=profile`; it does not open a
-cross-workspace queue or use Today navigation. Setup state remains separate from review and
-attention work. Owner-scoped previews retain concrete questions, rule conditions and future
-actions, Finance transaction evidence, and reported blockers. Missing evidence stays absent and
-partial source failures stay visible. Agent feed redaction remains unchanged.
+- The `review` URL parameter opens the flow in the owning workspace, optionally selecting an exact
+  work item. Closing removes that parameter while preserving other page state.
+- It contains only `review` and `attention` work. Setup state is never queue work.
+- Present one decision at a time with progress, remaining work, and the option to leave it for later.
+  Only a confirmed refresh showing that the item no longer needs review advances completion.
+- Each item names its work type, title, explanation, and direct action within its domain context.
+- Preview the decision before acting: rule matching conditions and proposed actions, Finance
+  transaction/reason/rationale, or the actual question and choices. Use labeled, wrapping display
+  fields from owner-scoped records; never serialize arbitrary evidence JSON. These richer previews
+  belong to signed-in people; agent feed redaction remains unchanged. Missing evidence stays absent.
+- Attention summaries describe the concrete situation and required judgment, not merely say
+  “needs attention.” Fixture data follows the same standard.
+- Partial source failure stays visible; nohmi never converts unavailable work into a successful zero.
+- Review actions retain the owning workspace's authorization. Mail maintenance reviews include
+  status, effects, questions, and the existing one-shot recovery action.
+
+The removed `/reviews` page and legacy Settings Reviews entry resolve to account Profile; they
+are not a second review queue. New links use the owning workspace's shared review flow.
 
 ## Connected agents in Settings
 

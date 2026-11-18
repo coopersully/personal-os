@@ -9,8 +9,9 @@ remain available as an app-bar visibility filter for troubleshooting and deliber
 review, not as sidebar destinations or the normal way to use Mail.
 
 Signed-in people may compose, reply, forward, and send plain-text messages. Every message is an
-nohmi-owned durable draft, autosaved before an explicit final confirmation. MCP and autonomous
-stewardship have no send capability.
+nohmi-owned durable draft, autosaved before an explicit final confirmation. Explicitly authorized
+MCP callers may send an exact saved draft under the execution boundary below; autonomous
+Mail maintenance has no send capability.
 
 The current draft and provider-delivery contracts do not preserve rich text or outbound
 attachments. Mail does not expose formatting or attachment controls until those capabilities are
@@ -65,9 +66,11 @@ The API owns the four display states:
 - **Needs your input:** material ambiguity is preserved as an open bounded question.
 - **Blocked:** stale, partial, unavailable, failed, or indeterminate evidence prevents settlement.
 
-`/mail/review` renders that state verbatim with freshness cutoff, objective/profile version,
+`/mail/review` redirects to the unified Mail review dialog. Mail run blockers embed the
+workspace stewardship controls, including recovery when there is no open question, with freshness cutoff, objective/profile version,
 ledger counts, health dimensions, questions, effects, active maintenance, and the latest immutable
-review. “Maintain Mail” makes one request and invalidates first-party queries; the browser does not
+review. “Maintain Mail” makes one request and refreshes status and the shared review queue after
+a confirmed mutation; the browser does not
 poll, sequence steps, retry effects, or decide completion.
 
 ## Authority and learning
@@ -78,7 +81,14 @@ poll, sequence steps, retry effects, or decide completion.
 | Approved rule | Mark read/unread, star/unstar, archive, or move only through an active exact rule |
 | Individual approval | Trash and rule activation |
 | Signed-in person | Compose, edit drafts, reply, forward, explicitly confirm send, and reconcile uncertain delivery |
-| Unavailable | Autonomous or MCP-originated email transmission |
+| Explicit agent execution | Exact-draft send, uncertain-delivery reconciliation, and rule activation require `mail:write`, opt-in `mail:execute`, and owner-enabled review bypass |
+| Unavailable | Email composition or transmission by autonomous Mail maintenance; response briefs remain non-transmittable |
+
+The [workspace execution contract](../../engineering/workspace-agent-capabilities.md) supersedes
+the earlier blanket MCP no-send restriction. Existing grants are not widened. Explicit agent
+operations preserve owner isolation, exact draft revisions or rule previews, provider capability,
+and audit attribution; bypass cannot supply missing scopes or evidence. Uncertain delivery must
+be reconciled from provider evidence before any resend.
 
 One-off question answers resolve only the exact record. Reusable learning requires an explicit
 generalization proposal with examples, counterexamples, and exceptions, followed by separate rule
@@ -95,8 +105,11 @@ chain-of-thought. Changed evidence produces a successor; a published review is n
 
 Mail owns all judgments and mutations in its domain/API. Shared Integration changes are limited to
 owner-fenced connector work dispatch, application composition and routing, deterministic QA data,
-and privacy-minimized projection of open Mail questions or a represented blocked run into Today’s
-Reviews destination. Reviews links back to Mail and never duplicates a mutation.
+and privacy-minimized projection of open Mail questions or a represented blocked run into the
+[workspace Reviews flow](reviews.md), opened from Mail’s attention alert, Settings header, or
+workspace search.
+The flow composes Mail-owned APIs and retains their exact question/rule revisions and approval
+bindings; it never duplicates or bypasses domain mutation authority.
 
 MCP exposes only `get_mail_status` and `maintain_mail` for complete-workspace stewardship. It is a
 stateless intent surface: it validates input, makes one authenticated API call, and returns the API
@@ -105,8 +118,8 @@ approval, learning, status inference, or completion decision. Existing surgical 
 approved-rule preview tools remain typed API adapters.
 
 In v1, nohmi does not infer intent from prose and does not use model judgment for assessment. It asks
-a bounded question when explicit evidence is absent. Only the signed-in human Mail surface can
-initiate delivery.
+a bounded question when explicit evidence is absent. Maintenance does not initiate delivery;
+the signed-in Mail surface and separately authorized exact-draft MCP calls use the delivery service.
 
 ## Acceptance
 
@@ -114,22 +127,27 @@ initiate delivery.
   available shell height like Calendar, rather than sitting in a capped card or
   narrow page column.
 - Inbox, Unread, Starred, Snoozed, Sent, and Drafts are direct unified destinations.
-- The sidebar contains destinations only. A compact app-bar avatar control filters the unified view
+- The sidebar contains destinations only. A compact shared app-bar account icon/count control filters the unified view
   by source account, defaults to every account, preserves at least one visible account, and exposes
   account health plus a direct Settings repair path.
 - Mail keeps workspace identity, search, and Sync together at the start of the primary app bar.
   Search remains available while reading and changing it returns to the conversation list. The
   account filter occupies the far edge of the same bar.
 - On desktop, the Mail sidebar and the conversation-list/reader boundary are independently
-  resizable by pointer or keyboard. Both choices persist on the current device. The navigation rail
+  resizable by pointer or keyboard. Reader width persists in account-owned Mail settings; sidebar
+  width remains device-local. The navigation rail
   also collapses into a standard icon-only rail with accessible tooltips; double-clicking its
   boundary restores the default width.
+- Mail layout preferences are now account-owned workspace settings. Earlier browser-only density
+  and pane-width values are not imported automatically because they contain no account identity
+  and survive logout. Untouched account settings start from defaults; subsequent edits persist
+  across devices without assigning unowned browser values to the current account.
 - Conversation count, list density, and reader actions share one full-workspace
   `WorkspaceSecondaryAppBar`: Archive retains its label; Snooze, Star, and read state are icon
   controls; Delete stays in the More menu. List density is a stable icon action with a standard
   radio menu rather than a labelled control that competes with message actions. The bar uses the
   shared neutral surface rather than a Mail-specific color.
-- The conversation list defaults to Comfortable and offers Compact and Expanded device-local
+- The conversation list defaults to Comfortable and offers Compact and Expanded account-owned
   layouts. Comfortable and Expanded show a sender avatar before the sender name; Compact minimizes
   vertical detail without removing the sender, subject, or received time.
 - At narrow widths, Mail presents one focused surface at a time. Selecting a
@@ -153,8 +171,62 @@ initiate delivery.
 - No provider response body, token-shaped value, socket message, or exception reaches the Mail UI.
 - The exact-thread stewardship panel exposes disposition, obligation state, question answers,
   explicit feedback, Calendar evidence handoff, and a private non-transmittable response brief.
-- No MCP or autonomous Mail surface renders a send action or obtains provider delivery authority.
+- Autonomous Mail maintenance never composes or sends. Separately invoked MCP draft/send tools
+  follow the explicit execution boundary above; they do not turn a response brief into a message.
 
 Floating action sizing, colors, and labels use the shared
 [floating workspace actions contract](../system.md#floating-workspace-actions).
 Workspace placement and opened-workflow behavior remain owned by this page.
+
+
+## Received attachments
+
+Message attachment tiles expose filename, MIME type, size, and a labelled Download action.
+Raster images (PNG, JPEG, GIF, WebP) and plain text, CSV, and calendar files also expose
+Preview using the shared responsive dialog/drawer. Text is rendered literally using its declared
+charset (UTF-8 when omitted); unsupported charset labels fall back to download. HTML, SVG,
+PDFs, documents, archives, and other file types are download-only. Show loading per file,
+disable duplicate requests, and keep an inline error with Retry when retrieval fails.
+Release preview object URLs when closed and never persist attachment bodies in browser storage.
+Downloads are user-initiated; never auto-fetch every attachment while reading a thread.
+
+The Mail API verifies message ownership and attachment membership before asking the connected
+account's provider for bytes. Gmail uses the attachment endpoint or inline MIME-part data;
+iCloud verifies mailbox UIDVALIDITY, retrieves a bounded source message by UID, and selects the
+stored attachment index. This read uses existing Gmail/IMAP authority and network paths, with
+no background handoff or provider mutation. The interactive gateway deadline is 20 seconds;
+iCloud rejects the request and closes its socket after 15 seconds or caller cancellation. Downloads cap decoded files at 10 MiB; Gmail JSON is
+bounded to 15 MiB and iCloud raw source to 10 MiB before MIME parsing. Responses are private
+`no-store` JSON; file bytes are not logged. Provider failures expose retry/connection recovery,
+not credentials or raw provider errors. Missing files return 404, provider throttling returns 429,
+and reconnection requirements return 403 with a Connections recovery message. Redacted boundary
+events identify the account and failure category. Admission allows two active downloads per
+process, one per user, and 30 per user per minute before provider I/O. No download success is
+claimed before retrieval succeeds.
+
+Local adapter, authorization, and UI tests do not prove live-provider access. Revoked scopes,
+moved/deleted messages, expired credentials, provider throttling, and disconnected accounts can
+still prevent retrieval. Demo fixtures contain attachment metadata, not live provider bytes;
+exercise downloads with a connected account or explicit mocked file bytes in browser tests.
+
+Provider reference: [Gmail attachment retrieval](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages.attachments/get).
+
+Mail guidance exposes the typed inbox style, important-email handling, low-priority disposition,
+and retention period beside the existing objective and instructions. Saving preserves the profile
+version guard and unrelated preference keys. Changing these preferences does not activate rules;
+existing previews and approval remain required. Review-only disposition clears the retention period.
+
+### Shared workspace header
+
+Mail uses the shared title row for its mailbox view selector, preserving account and search filters when changing views. Search and accounts stay in the mobile utility row; sync and list layout are under View options. The conversation toolbar appears only when a conversation is selected. See [shared header rows](../system.md#shared-workspace-header-rows) for sizing and responsive placement.
+
+Header Sync is an icon action after layout options; mobile keeps it last inside
+the shared View options surface. Search yields width before icon actions clip.
+
+
+All mailbox destinations display complete conversation totals via the owner-scoped
+Mail navigation-count read, including zero. Counts follow Inbox/Unread/Starred/Snoozed/
+Sent filters and selected accounts; Drafts mirrors the owner-wide unsent draft view.
+The counts use shared sidebar metadata and refresh with conversation/draft changes.
+
+Mobile Mail uses a Mailboxes section landing page for Inbox, Unread, Starred, Snoozed, Sent, and Drafts, reusing sidebar rows/counts and preserving selected accounts. Compose stays in a bottom-right floating action above the section app bar.

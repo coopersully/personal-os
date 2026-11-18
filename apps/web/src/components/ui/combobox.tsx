@@ -1,3 +1,4 @@
+import { useResponsiveDialogContainer } from "@/components/responsive-dialog";
 "use client"
 
 import * as React from "react"
@@ -8,6 +9,8 @@ import { cn } from "@/lib/utils"
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group"
 
 const Combobox = ComboboxPrimitive.Root
+const ComboboxGroup = ComboboxPrimitive.Group
+const ComboboxGroupLabel = ComboboxPrimitive.GroupLabel
 
 function ComboboxTrigger({ className, children, ...props }: ComboboxPrimitive.Trigger.Props) {
   return (
@@ -70,21 +73,25 @@ function ComboboxInput({
 }
 
 function ComboboxContent({
-  portalContainer,
+  portalContainer: explicitPortalContainer,
   align = "start",
   alignOffset = 0,
   anchor,
   className,
   side = "bottom",
   sideOffset = 6,
+  collisionPadding,
   ...props
 }: { portalContainer?: React.RefObject<HTMLElement | null> } & ComboboxPrimitive.Popup.Props &
-  Pick<ComboboxPrimitive.Positioner.Props, "align" | "alignOffset" | "anchor" | "side" | "sideOffset">) {
+  Pick<ComboboxPrimitive.Positioner.Props, "align" | "alignOffset" | "anchor" | "side" | "sideOffset" | "collisionPadding">) {
+  const dialogContainer = useResponsiveDialogContainer();
+  const portalContainer = explicitPortalContainer ?? dialogContainer;
   return (
     <ComboboxPrimitive.Portal container={portalContainer}>
       <ComboboxPrimitive.Positioner
         collisionBoundary={portalContainer?.current ?? undefined}
         align={align}
+        collisionPadding={collisionPadding}
         alignOffset={alignOffset}
         anchor={anchor}
         className="isolate z-50"
@@ -150,6 +157,8 @@ function ComboboxEmpty({ className, ...props }: ComboboxPrimitive.Empty.Props) {
 
 export {
   Combobox,
+  ComboboxGroup,
+  ComboboxGroupLabel,
   ComboboxClear,
   ComboboxContent,
   ComboboxEmpty,

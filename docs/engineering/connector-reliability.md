@@ -9,6 +9,42 @@ This document specializes the repository-wide
 standard's boundary record first; the rules below add connector-specific lifecycle, transport, and
 test requirements.
 
+## Current production and capability recovery
+
+The current production runtime is the Mac mini / dedicated Colima stack documented in
+[`deploy/mac-mini/README.md`](../../deploy/mac-mini/README.md). AWS-specific controls below describe
+the retained ECS deployment, not evidence that its alarms observe today's production runtime.
+The optional [Grafana Cloud package](../../deploy/observability/README.md) supplies container resource
+history, sanitized event logs and public probes once an operator creates a stack and activates it.
+
+Calendar and Mail maintain independent success/attempt timestamps, failure counts, recovery and
+next-due times. A failed capability must not suppress its healthy sibling. Automatic and notification
+syncs respect failed-capability backoff/reconnect state; explicit sync can retry immediately.
+Day-old automatic failures surface service attention while retries continue. IDLE is a wake-up
+signal; only the fenced authoritative sync updates capability/account health. UI, notification
+subscriptions, review tasks and Calendar stewardship use the relevant capability's state, with
+legacy account fallback until a capability has been observed.
+
+Google 403 reasons distinguish quota retry, missing-scope reconnect and operator/configuration
+failures. A generic Apple 403 is not sufficient evidence of revoked credentials. Google refreshes
+during synchronization persist before the next API request, including when that request later fails.
+
+Google external OAuth apps in **Testing** issue refresh tokens that expire after seven days
+for these scopes ([Google token lifecycle](https://developers.google.com/identity/protocols/oauth2)).
+Identify the project used by production's client ID, switch its audience publishing status to
+**In production**, and reconnect affected accounts. Keep development/testing in a separate project.
+Publishing and verification are distinct: unverified sensitive/restricted access retains warnings
+and user caps; finish the applicable verification before broader release. Personal-use exceptions
+may apply, but being open source does not itself establish an exception
+([audience settings](https://support.google.com/cloud/answer/15549945),
+[verification exceptions](https://support.google.com/cloud/answer/13464323)).
+Code cannot extend provider-issued token lifetime. Apple's app-specific passwords are separate:
+changing/resetting the primary Apple password revokes them
+([Apple app-specific passwords](https://support.apple.com/en-us/102654)).
+Confirm the actual provider failure before replacing credentials. After deploying this recovery
+change, explicitly retry existing stopped connections once: migration does not silently restart
+accounts already marked reconnect. Reconnect accounts whose credentials are expired or revoked.
+
 ## Interactive boundary
 
 Production's application load balancer closes an idle request after 60 seconds. Every provider HTTP
@@ -77,14 +113,43 @@ provider response bodies and unknown exception messages never populate it.
 - Initial connections and low-latency change signals coalesce by account in
   `connector_sync_triggers`. The scheduler drains claimed triggers through the same fenced sync
   engine before ordinary due-account reconciliation. A trigger arriving during a sync survives
-  completion; failed work is released for retry. The five-minute schedule remains authoritative if
-  every change signal is delayed or absent.
+  completion; newly failed work is released for retry. When every runnable capability succeeds,
+  consume the notification even if a sibling is waiting for reconnect or retry backoff. Preserve
+  that sibling's health and scheduled retry deadline; a skipped capability does not increment
+  account failure counts or emit another sync failure. If work performed now fails, its failure
+  takes precedence over a sibling's cached error. The five-minute schedule remains authoritative
+  if every change signal is delayed or absent.
 
 Google Mail uses Gmail history IDs and Google Calendar uses opaque sync tokens. iCloud Calendar
 uses WebDAV `sync-collection` only when the collection advertises it; an invalid opaque token
 restarts one bounded tokenless collection sync so the replacement token remains incremental, while
 unsupported or malformed reports fall back to a controlled full reconciliation. Provider cursors
 are opaque, bounded, and committed inside the same fenced projection transaction as their changes.
+Gmail's [current quota contract](https://developers.google.com/workspace/gmail/api/reference/quota)
+charges 120 units for each full-thread read against a 6,000-unit per-user-per-project minute.
+Bootstrap still discovers the latest 100 conversations; bootstrap and incremental bursts fetch at
+most 25 full threads per pass. A bounded, versioned opaque cursor retains the captured history
+fence, remaining thread IDs, and a 65-second not-before time. The terminal batch retains that
+cooldown too, so manual or push requests cannot immediately start another expensive batch.
+Expired raw Gmail history IDs still trigger a bounded bootstrap. Malformed internal continuations
+fail closed rather than becoming provider history IDs.
+
+Before any Google Mail provider read, the API reserves a 65-second attempt cooldown in existing
+capability health under the account/credential claim fence without advancing the mail cursor.
+Every caller, including manual and triggered requests, honors that reservation after transient
+failure, projection rollback, or process interruption. Failed attempts retain the persisted retry
+deadline for every caller, including a provider's longer rate-limit deadline. Shutdown renews the
+cooldown from interruption time before releasing the claim, even after a long Mail attempt.
+Each projected batch and continuation then commit together under that same fence. Pending Mail
+health remains `syncing`, retains its previous success timestamp, and schedules
+the next ordinary five-minute pass; it emits progress rather than completion. A cooldown-only pass
+performs no provider reads and does not reconcile mailbox membership. Partial bootstrap never
+clears previously imported conversations. The captured history fence advances only after its
+entire queue is imported; the next incremental read catches changes arriving during those batches.
+Mock tests establish these bounds and recovery semantics. Other consumers of the same user's
+Google project quota can still cause a real rate-limit failure; deployed continuation and freshness
+must be checked separately before claiming production recovery.
+
 Gmail and Calendar watches renew durably before expiry. iCloud IMAP IDLE sessions are bounded
 change signals only; they never replace the authoritative five-minute reconciliation.
 
@@ -92,16 +157,17 @@ change signals only; they never replace the authoritative five-minute reconcilia
 
 | Capability | Host or class | Protocol | Production egress |
 | --- | --- | --- | ---: |
-| OAuth and provider APIs | Google, X, Plaid, Pinterest, weather, Resend | HTTPS | TCP 443 |
+| OAuth and provider APIs | Google, X, Plaid, Pinterest, weather, Resend, Claude routine fire | HTTPS | TCP 443 |
 | iCloud Calendar | `caldav.icloud.com` | HTTPS/CalDAV | TCP 443 |
 | iCloud Mail read and projection | `imap.mail.me.com` | IMAP over TLS | TCP 993 |
-| iCloud Mail human-confirmed delivery | `smtp.mail.me.com` | SMTP submission with STARTTLS | TCP 587 |
+| iCloud Mail authorized draft delivery | `smtp.mail.me.com` | SMTP submission with STARTTLS | TCP 587 |
 
-The signed-in Mail workspace may submit a durable, human-confirmed plain-text draft. Google uses
-Gmail HTTPS with explicit `gmail.send`; iCloud requires STARTTLS before authentication and uses
-bounded authenticated SMTP submission. MCP and autonomous maintenance cannot invoke either
-delivery path. An ambiguous provider result is never automatically retried and must become a
-visible human reconciliation state.
+The signed-in Mail workspace may submit a durable, human-confirmed plain-text draft. A scoped MCP
+agent may submit an exact observed draft revision only with `mail:write`, `mail:execute` and enabled
+review bypass. Google uses Gmail HTTPS with explicit `gmail.send`; iCloud requires STARTTLS before
+authentication and uses bounded authenticated SMTP submission. Autonomous maintenance does not
+compose or send messages. An ambiguous provider result is never automatically retried and becomes
+a visible reconciliation state; the same explicit execution authority permits agent reconciliation.
 
 Adding or changing a non-HTTPS transport requires the infrastructure change in the same pull
 request. `scripts/check-provider-network-contract.mjs`, run by `pnpm lint`, checks that connector
@@ -126,7 +192,7 @@ resource, token, notification-body, or provider-error dimensions.
   SDK's connection, greeting, and socket timeouts explicitly instead.
 - Keep one provider request bounded even when a later background workflow paginates over many
   requests.
-- Persist refreshed OAuth credentials after provider calls that may rotate them.
+- Persist refreshed OAuth credentials before using them in subsequent sync provider requests.
 - Classify provider failures before persistence or public response. Google/X HTTP handling may use
   status and bounded `Retry-After`, but must discard the response body.
 - Record only the safe classified failure on the durable account before returning a structured
@@ -159,3 +225,33 @@ Before approval, answer all of these from the boundary record and diff:
 - Which non-destructive production-equivalent check proves the exact granted capability, rather
   than only the presence of a credential?
 - Do deployment and architecture docs describe any changed durable behavior?
+
+## Finance host continuation boundary
+
+Finance host setup binds a local schedule identity to one owner's live `finances:maintain`
+authorization connection. OAuth refresh preserves that connection identity; reconnecting creates a
+new grant. The host owns cadence and availability. Codex uses its externally configured recurring
+invocation; Claude Code uses a user-configured routine API trigger. An encrypted routine bearer
+credential authorizes that trigger only and never grants Finance authority.
+
+The [official routine fire API](https://platform.claude.com/docs/en/api/claude-code/routines-fire)
+was rechecked on 2026-10-09. The adapter posts only local schedule and continuation identifiers to
+the fixed HTTPS endpoint, with redirects disabled and the shared 15-second provider timeout. A
+bounded response may confirm creation of a host session; it does not confirm financial completion.
+The experimental API has no idempotency key. A durable `submitting` claim precedes transport;
+timeouts, malformed responses, and server errors remain unconfirmed and are never fired again
+automatically. Explicit rejection is visible as unavailable. The saved answer remains authoritative,
+and the original host can still poll its pending continuation and resume its persisted run.
+
+Before transport, a second transaction rechecks the unchanged schedule, live grant, pending answer,
+and shutdown state. It holds schedule and grant locks through the bounded handoff, so revocation
+that commits first prevents the fire. Finance continuation separately validates its exact accepted
+answer and source, then links one case-scoped canonical maintenance run in the same transaction.
+
+Local PostgreSQL and mocked-provider tests prove ownership, durable claims, crash-safe replay,
+answer retention, bounded discovery, and degraded outcomes. They do not prove third-party account
+entitlement, unattended tool permissions, actual scheduler availability, or measured latency and
+usage. Those require separate Codex and Claude release trials under the Finance MVP acceptance
+contract. `FINANCE_SMS_ENABLED` defaults to false; enabling it is a production configuration change.
+
+Ordered Finance reconciliation failures retain only fixed stage identifiers and validated failed-operation counts in operational diagnostics. Later phases still run; provider exception text, credentials and message content are excluded.

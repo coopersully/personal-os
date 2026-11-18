@@ -1,104 +1,93 @@
+import { type Action, toast } from "sonner";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { screen, render as testingRender, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { FinanceLinkedTransaction, FinanceTransactionControls } from "./transaction-controls.js";
 
-const api = vi.hoisted(() => ({ getFinanceTransaction: vi.fn() }));
+const workspaceReadiness = vi.hoisted(() => vi.fn());
+vi.mock("./use-finance-workspace-readiness", () => ({
+  useFinanceWorkspaceReadiness: workspaceReadiness,
+}));
+
+const api = vi.hoisted(() => ({
+  getFinanceTransaction: vi.fn(),
+  getWorkspaceSettings: vi
+    .fn()
+    .mockResolvedValue({ workspace: "finances", revision: 1, preferences: {} }),
+  updateWorkspaceSettings: vi.fn().mockImplementation(async (_workspace, input) => ({
+    workspace: "finances",
+    revision: input.expectedRevision + 1,
+    preferences: input.preferences,
+  })),
+}));
+beforeEach(() => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: true },
+    isPending: false,
+    isError: false,
+    error: null,
+    reload: vi.fn(),
+  });
+});
+function render(ui: React.ReactNode) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  client.setQueryData(["me"], { id: "owner" });
+  return testingRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 vi.mock("../../api.js", () => ({ api, errorMessage: (error: Error) => error.message }));
 function CurrentLocation() {
   return <output aria-label="Location">{useLocation().search}</output>;
 }
-it("applies shareable filters without fetching on each keystroke and clears the selected source", async () => {
+it("applies transaction filters from the header and clears only filter parameters", async () => {
   const user = userEvent.setup();
   render(
-    <MemoryRouter initialEntries={["/finances/transactions?transactionId=source"]}>
-      <FinanceTransactionControls accounts={[]} categories={[]} onAdd={vi.fn()} />
+    <MemoryRouter initialEntries={["/finances/transactions?transactionId=source&sortBy=amount"]}>
+      <FinanceTransactionControls accounts={[]} categories={[]} />
       <CurrentLocation />
     </MemoryRouter>,
   );
-  await user.type(screen.getByLabelText("Search"), "groceries");
-  expect(screen.getByLabelText("Location")).toHaveTextContent("transactionId=source");
+  expect(screen.queryByLabelText("Search")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Filters" }));
+  await user.type(screen.getByLabelText("Search"), "groceries");
   await user.selectOptions(screen.getByLabelText("Review"), "resolved");
   await user.selectOptions(screen.getByLabelText("Posting state"), "posted");
+  expect(screen.getByLabelText("Location")).toHaveTextContent("transactionId=source");
   await user.click(screen.getByRole("button", { name: "Apply filters" }));
-  expect(screen.getByLabelText("Location")).toHaveTextContent(
-    "search=groceries&pending=posted&review=resolved",
-  );
+  expect(screen.getByLabelText("Location")).toHaveTextContent("search=groceries");
+  expect(screen.getByLabelText("Location")).toHaveTextContent("reviewState=resolved");
+  expect(screen.getByLabelText("Location")).not.toHaveTextContent("review=resolved");
   expect(screen.getByLabelText("Location")).not.toHaveTextContent("transactionId");
-  await user.click(screen.getByRole("button", { name: "Clear" }));
-  expect(screen.getByLabelText("Location")).toBeEmptyDOMElement();
-  expect(screen.getByLabelText("Search")).toHaveValue("");
-  expect(screen.getByRole("button", { name: "Filters" })).toHaveAttribute("aria-expanded", "false");
-});
-it("keeps search and actions visible while preserving committed advanced filters in a closed disclosure", async () => {
-  const user = userEvent.setup();
-  render(
-    <MemoryRouter
-      initialEntries={[
-        "/finances/transactions?from=2026-09-01&to=2026-09-03&pending=posted&review=resolved&sortBy=amount",
-      ]}
-    >
-      <FinanceTransactionControls accounts={[]} categories={[]} onAdd={vi.fn()} />
-      <CurrentLocation />
-    </MemoryRouter>,
-  );
-  expect(screen.getByRole("button", { name: "Filters (4 active)" })).toHaveAttribute(
-    "aria-expanded",
-    "false",
-  );
-  expect(screen.getByLabelText("Search")).toBeVisible();
-  expect(screen.getByRole("button", { name: "Apply filters" })).toBeVisible();
-  expect(screen.getByRole("button", { name: "Clear" })).toBeVisible();
-  expect(screen.getByLabelText("From")).not.toBeVisible();
-  expect(screen.queryByRole("combobox", { name: "Review" })).not.toBeInTheDocument();
-  await user.type(screen.getByLabelText("Search"), "groceries");
-  await user.click(screen.getByRole("button", { name: "Apply filters" }));
-  const location = new URLSearchParams(screen.getByLabelText("Location").textContent ?? "");
-  expect(Object.fromEntries(location)).toEqual({
-    from: "2026-09-01",
-    to: "2026-09-03",
-    pending: "posted",
-    review: "resolved",
-    sortBy: "amount",
-    search: "groceries",
-  });
-  await user.click(screen.getByRole("button", { name: "Filters (4 active)" }));
-  expect(screen.getByLabelText("From")).toHaveValue("2026-09-01");
-  expect(screen.getByLabelText("Through")).toHaveValue("2026-09-03");
+  expect(screen.getByRole("button", { name: "Filters (3 active)" })).toHaveTextContent("3");
+  await user.click(screen.getByRole("button", { name: "Filters (3 active)" }));
+  expect(screen.getByLabelText("Search")).toHaveValue("groceries");
   expect(screen.getByLabelText("Review")).toHaveValue("resolved");
-  expect(screen.getByLabelText("Posting state")).toHaveValue("posted");
-});
-
-it("retains advanced edits across close and reopen and applies them while closed", async () => {
-  const user = userEvent.setup();
-  render(
-    <MemoryRouter initialEntries={["/finances/transactions?review=all"]}>
-      <FinanceTransactionControls accounts={[]} categories={[]} onAdd={vi.fn()} />
-      <CurrentLocation />
-    </MemoryRouter>,
-  );
-  const filters = screen.getByRole("button", { name: "Filters" });
-  await user.click(filters);
-  fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-08-01" } });
-  await user.selectOptions(screen.getByLabelText("Review"), "needs_review");
-  await user.click(filters);
-  expect(screen.getByLabelText("From")).not.toBeVisible();
-  await user.click(filters);
-  expect(screen.getByLabelText("From")).toHaveValue("2026-08-01");
-  expect(screen.getByLabelText("Review")).toHaveValue("needs_review");
-  await user.click(filters);
-  await user.click(screen.getByRole("button", { name: "Apply filters" }));
-  expect(screen.getByLabelText("Location")).toHaveTextContent(
-    "review=needs_review&from=2026-08-01",
-  );
-  expect(screen.getByRole("button", { name: "Filters (2 active)" })).toHaveAttribute(
-    "aria-expanded",
+  await user.click(screen.getByRole("button", { name: "Clear filters" }));
+  expect(screen.getByLabelText("Location")).toHaveTextContent("?sortBy=amount");
+  expect(screen.getByRole("button", { name: "Filters" })).toHaveAttribute(
+    "data-filter-active",
     "false",
   );
+});
+it("exposes mutually exclusive sort choices in the header", async () => {
+  const onSort = vi.fn();
+  render(
+    <MemoryRouter>
+      <FinanceTransactionControls accounts={[]} categories={[]} sort="date:desc" onSort={onSort} />
+    </MemoryRouter>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Sort transactions" }));
+  expect(screen.getByRole("menuitemradio", { name: "Newest first" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await userEvent.click(screen.getByRole("menuitemradio", { name: "Highest amount" }));
+  expect(onSort).toHaveBeenCalledWith("amount:desc");
 });
 
 it("loads the exact source record and never presents a failed envelope as transaction data", async () => {
@@ -169,13 +158,178 @@ it("retains a pending source and its original merchant through a failed backgrou
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  expect(await screen.findByText(/Showing the last available update/)).toBeVisible();
+  await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument();
   expect(screen.getByText("Pending")).toBeVisible();
   expect(screen.getByText(/MARKET 123 POS/)).toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: "Categorize" }));
   expect(onCategorize).toHaveBeenCalledWith(record);
-  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  const retryAction = vi.mocked(toast.error).mock.calls.at(-1)?.[1]?.action as Action;
+  retryAction.onClick({} as Parameters<Action["onClick"]>[0]);
   await waitFor(() =>
     expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument(),
   );
 });
+
+it("switches views without clearing filters and groups transaction creation actions", async () => {
+  const user = userEvent.setup();
+  const onImport = vi.fn();
+  const onAddCategory = vi.fn();
+  render(
+    <MemoryRouter initialEntries={["/finances/transactions?categoryId=travel"]}>
+      <FinanceTransactionControls
+        accounts={[]}
+        categories={[]}
+        onImport={onImport}
+        onAddCategory={onAddCategory}
+      />
+      <CurrentLocation />
+    </MemoryRouter>,
+  );
+  await user.click(screen.getByRole("button", { name: "Transaction view: Table" }));
+  await user.click(screen.getByRole("menuitemradio", { name: "Cards" }));
+  expect(screen.getByLabelText("Location")).toHaveTextContent("categoryId=travel&view=cards");
+  await waitFor(() =>
+    expect(api.updateWorkspaceSettings).toHaveBeenCalledWith("finances", {
+      expectedRevision: 1,
+      preferences: { financeTransactionView: "cards" },
+    }),
+  );
+  expect(
+    screen.getByRole("button", { name: "Add in Transactions" }).closest(".floating-action-region"),
+  ).toHaveAttribute("data-align", "end");
+  await user.click(screen.getByRole("button", { name: "Add in Transactions" }));
+  expect(screen.getByRole("menuitem", { name: "Add transaction" })).toHaveAttribute(
+    "href",
+    "/finances/transactions?categoryId=travel&view=cards#finance-add-transaction",
+  );
+  await user.click(screen.getByRole("menuitem", { name: "Add category" }));
+  expect(onAddCategory).toHaveBeenCalledOnce();
+  await user.click(screen.getByRole("button", { name: "Add in Transactions" }));
+  await user.click(screen.getByRole("menuitem", { name: "Import transactions" }));
+  expect(onImport).toHaveBeenCalledOnce();
+});
+
+it("groups transactions without clearing the selected view or filters", async () => {
+  const user = userEvent.setup();
+  render(
+    <MemoryRouter initialEntries={["/finances/transactions?view=cards&categoryId=travel"]}>
+      <FinanceTransactionControls accounts={[]} categories={[]} />
+      <CurrentLocation />
+    </MemoryRouter>,
+  );
+  await user.click(screen.getByRole("button", { name: "Display transactions" }));
+  expect(screen.getByRole("menuitemradio", { name: "None" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await user.click(screen.getByRole("menuitemradio", { name: "Posting state" }));
+  expect(screen.getByLabelText("Location")).toHaveTextContent(
+    "view=cards&categoryId=travel&group=posting",
+  );
+  await waitFor(() =>
+    expect(api.updateWorkspaceSettings).toHaveBeenCalledWith("finances", {
+      expectedRevision: 1,
+      preferences: { financeTransactionGroup: "posting" },
+    }),
+  );
+});
+
+it("restores saved view and grouping and saves an explicit ungrouped choice", async () => {
+  api.getWorkspaceSettings.mockResolvedValue({
+    workspace: "finances",
+    revision: 7,
+    preferences: { financeTransactionView: "cards", financeTransactionGroup: "date" },
+  });
+  render(
+    <MemoryRouter initialEntries={["/finances/transactions"]}>
+      <FinanceTransactionControls accounts={[]} categories={[]} />
+      <CurrentLocation />
+    </MemoryRouter>,
+  );
+  expect(await screen.findByRole("button", { name: "Transaction view: Cards" })).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Display transactions" }));
+  expect(screen.getByRole("menuitemradio", { name: "Date" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await userEvent.click(screen.getByRole("menuitemradio", { name: "None" }));
+  expect(screen.getByLabelText("Location")).toHaveTextContent("group=none");
+  await waitFor(() =>
+    expect(api.updateWorkspaceSettings).toHaveBeenCalledWith("finances", {
+      expectedRevision: 7,
+      preferences: { financeTransactionGroup: "none" },
+    }),
+  );
+});
+
+it.each([
+  null,
+  "GENERAL_MERCHANDISE",
+])("resolves the linked source category ID before legacy text %s without changing its native amount", async (category) => {
+  api.getFinanceTransaction.mockResolvedValue({
+    outcome: "completed",
+    data: {
+      id: "source",
+      merchant: "Canonical source",
+      amount: 24,
+      date: "2026-09-03",
+      categoryId: "food",
+      category,
+      direction: "expense",
+      pending: false,
+    },
+  });
+  render(
+    <MemoryRouter>
+      <FinanceLinkedTransaction
+        id="source"
+        categories={[
+          {
+            id: "food",
+            name: "Meals & groceries",
+            color: null,
+            group: "Spending",
+            isSystem: false,
+            slug: "food",
+          },
+        ]}
+        categoryReadState="ready"
+        onBreakdown={vi.fn()}
+        onCategorize={vi.fn()}
+      />
+    </MemoryRouter>,
+  );
+  expect(await screen.findByText("Meals & groceries")).toBeVisible();
+  expect(screen.queryByText("Shopping")).not.toBeInTheDocument();
+  expect(screen.getByText(/\$24.00/)).toBeVisible();
+});
+it("keeps a linked source with loading taxonomy distinct from uncategorized", async () => {
+  api.getFinanceTransaction.mockResolvedValue({
+    outcome: "completed",
+    data: {
+      id: "source",
+      merchant: "Canonical source",
+      amount: 24,
+      date: "2026-09-03",
+      categoryId: "food",
+      category: null,
+      direction: "expense",
+      pending: false,
+    },
+  });
+  render(
+    <MemoryRouter>
+      <FinanceLinkedTransaction
+        id="source"
+        categoryReadState="loading"
+        onBreakdown={vi.fn()}
+        onCategorize={vi.fn()}
+      />
+    </MemoryRouter>,
+  );
+  expect(await screen.findByText("Loading category…")).toBeVisible();
+  expect(screen.queryByText("Uncategorized")).not.toBeInTheDocument();
+});
+
+vi.spyOn(toast, "error");

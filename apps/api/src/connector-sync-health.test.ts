@@ -1,4 +1,4 @@
-import { ConnectorError } from "@personal-os/connectors";
+import { ConnectorError, classifyICloudError } from "@personal-os/connectors";
 import {
   classifyConnectorSyncFailure,
   connectionHealthForAccount,
@@ -51,6 +51,25 @@ describe("connector sync health policy", () => {
   });
 
   it.each([
+    "google",
+    "plaid",
+  ] as const)("settles %s recovery classification when diagnostic access throws", (provider) => {
+    const error = Object.defineProperty({}, "code", {
+      get() {
+        throw new Error("PRIVATE_CANARY");
+      },
+    });
+    const failure = classifyConnectorSyncFailure(error, provider);
+    expect(failure).toMatchObject({
+      category: "unknown",
+      recovery: "automatic",
+      code: "connector_unknown_failure",
+    });
+    expect(failure.transportCode).toBeUndefined();
+    expect(JSON.stringify(failure)).not.toContain("PRIVATE_CANARY");
+  });
+
+  it.each([
     ["reconnect", "authorization", "reconnect"],
     ["operator", "configuration", "operator"],
     ["retry", "temporary", "automatic"],
@@ -84,6 +103,63 @@ describe("connector sync health policy", () => {
         syncStatus,
       }),
     ).toMatchObject({ state });
+  });
+
+  it("exposes durable Mail continuation as aggregate syncing while preserving recovery and active-lease priority", () => {
+    const pending = {
+      lastAttemptAt: now.toISOString(),
+      lastSyncedAt: null,
+      failureCount: 0,
+      errorCode: null,
+      errorCategory: null,
+      status: null,
+      health: {
+        state: "syncing" as const,
+        recovery: null,
+        message: "Mail synchronization continues in batches.",
+        nextSyncAt: now.toISOString(),
+      },
+    };
+    const account = {
+      syncCapabilities: { mail: pending },
+      nextSyncAt: now,
+      syncError: null,
+      syncRecovery: null,
+      syncStatus: "idle" as const,
+    };
+    expect(connectionHealthForAccount(account)).toEqual(pending.health);
+    expect(connectionHealthForAccount(account, "mail")).toEqual(pending.health);
+    expect(connectionHealthForAccount({ ...account, mailEnabled: false }).state).toBe("ready");
+    const reconnect = {
+      ...pending,
+      health: { ...pending.health, state: "reconnect" as const, recovery: "reconnect" as const },
+    };
+    expect(
+      connectionHealthForAccount({
+        ...account,
+        syncCapabilities: { mail: pending, calendar: reconnect },
+      }).state,
+    ).toBe("reconnect");
+    expect(
+      connectionHealthForAccount({
+        ...account,
+        calendarEnabled: false,
+        syncCapabilities: { mail: pending, calendar: reconnect },
+      }).state,
+    ).toBe("syncing");
+    expect(
+      connectionHealthForAccount({ ...account, syncStatus: "syncing", syncRecovery: "reconnect" })
+        .state,
+    ).toBe("syncing");
+    for (const [syncRecovery, state] of [
+      ["automatic", "retrying"],
+      ["operator", "service_attention"],
+      ["reconnect", "reconnect"],
+    ] as const) {
+      expect(
+        connectionHealthForAccount({ ...account, syncRecovery, syncStatus: "error" }).state,
+      ).toBe(state);
+    }
   });
 
   it("normalizes legacy product names in stored health messages", () => {
@@ -206,4 +282,22 @@ describe("connector sync health policy", () => {
     });
     expect(JSON.stringify([configuration, rateLimited])).not.toContain("raw-plaid");
   });
+});
+
+it("preserves safe transport evidence through sync policy without leaking exception context", () => {
+  const error = new Error("PRIVATE_CANARY", {
+    cause: { code: "ENOTFOUND", hostname: "PRIVATE_CANARY" },
+  });
+  for (const input of [error, classifyICloudError("calendar", error)]) {
+    const failure = classifyConnectorSyncFailure(input, "icloud");
+    expect(failure).toMatchObject({
+      transportCode: "ENOTFOUND",
+      transportPhase: "dns",
+      recovery: "automatic",
+    });
+    expect(JSON.stringify(failure)).not.toContain("PRIVATE_CANARY");
+    expect(JSON.stringify(connectorSyncAppError(failure, accountId, "icloud", null))).not.toContain(
+      "transportCode",
+    );
+  }
 });

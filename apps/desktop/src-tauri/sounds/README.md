@@ -24,3 +24,11 @@ a new checklist presentation animates in, including manual reopening and return 
 snooze. Routine state refreshes and focus changes do not replay it. Dismissing the
 ritual stops playback, and a new intro replaces any previous intro without overlap.
 Playback uses the system's output volume and does not override mute.
+
+## Notification soft click
+
+`notification-soft-click.wav` is Sound CN’s `click-soft` by Kenney (CC0), decoded to
+linear PCM WAV for macOS notifications. Source: [9ae2efbcf989](https://raw.githubusercontent.com/kapishdima/soundcn/9ae2efbcf9892c41606cf9833d3abdfa16cf149b/registry/soundcn/sounds/click-soft/click-soft.ts).
+All notification types, including tests, use it when sounds are enabled. The native
+companion copies the bundled asset into the user’s `Library/Sounds` directory, where
+UserNotifications resolves named sounds. macOS sound settings and Focus still apply.

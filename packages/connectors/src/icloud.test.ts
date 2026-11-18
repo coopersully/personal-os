@@ -655,10 +655,10 @@ describe("iCloud connector", () => {
     await expect(
       connector(client).value.syncCalendar(credentials, calendarId, "opaque-token"),
     ).rejects.toMatchObject({
-      category: "authorization",
-      code: "icloud_calendar_authorization_failed",
-      disposition: "reconnect",
-      message: "iCloud Calendar authorization is no longer valid.",
+      category: "rejected",
+      code: "icloud_calendar_permission_denied",
+      disposition: "operator",
+      message: "iCloud denied access to this Calendar resource.",
     });
 
     const unavailable = davClient({
@@ -788,6 +788,40 @@ describe("iCloud connector", () => {
     });
     expect(result.threads[0]?.messages?.[0]?.mailboxIds).toEqual(["INBOX"]);
     expect(release).toHaveBeenCalledTimes(7);
+    expect(imap.logout).toHaveBeenCalledOnce();
+  });
+
+  it("keeps nested address comments out of synced sender and recipient identities", async () => {
+    const imap = {
+      connect: vi.fn(async () => undefined),
+      fetch: vi.fn(async function* () {
+        yield {
+          source: Buffer.from(
+            "From: Sender (x(y) <wrong@example.net>) <sender@example.com>\r\n" +
+              "To: Recipient (x(y) <wrong@example.net>) <recipient@example.com>\r\n" +
+              "Subject: Nested comment\r\n\r\nMessage",
+          ),
+          uid: 7,
+        };
+      }),
+      mailbox: { exists: 1, path: "INBOX", uidValidity: 100n },
+      getMailboxLock: vi.fn(async () => ({ release: vi.fn() })),
+      list: vi.fn(async () => [
+        {
+          flags: new Set<string>(),
+          name: "Inbox",
+          path: "INBOX",
+          status: { messages: 1, uidValidity: 100n },
+        },
+      ]),
+      logout: vi.fn(async () => undefined),
+    };
+    const mail = await connector(davClient(), imap).value.syncMail(credentials, null);
+    expect(mail.threads[0]?.from?.address).toBe("sender@example.com");
+    expect(mail.threads[0]?.to.map((recipient) => recipient.address)).toEqual([
+      "recipient@example.com",
+    ]);
+    expect(mail.threads[0]?.messages?.[0]?.from?.address).toBe("sender@example.com");
     expect(imap.logout).toHaveBeenCalledOnce();
   });
 
@@ -1294,5 +1328,205 @@ describe("iCloud connector", () => {
     await expect(connectorFailure.listCalendars(credentials)).rejects.toMatchObject({
       status: 503,
     });
+  });
+});
+
+describe("iCloud attachment retrieval", () => {
+  const file = {
+    id: "INBOX:10:7:0",
+    providerPartId: "INBOX:10:7:0",
+    filename: "notes.txt",
+    contentType: "text/plain",
+    size: 5,
+  };
+  const source = Buffer.from(
+    'From: sender@example.com\r\nTo: me@example.com\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="part"\r\n\r\n--part\r\nContent-Type: text/plain\r\n\r\nMessage\r\n--part\r\nContent-Type: text/plain\r\nContent-Disposition: attachment; filename="notes.txt"\r\nContent-Transfer-Encoding: base64\r\n\r\naGVsbG8=\r\n--part--\r\n',
+  );
+  function imap() {
+    return {
+      connect: vi.fn(async () => undefined),
+      on: vi.fn(),
+      close: vi.fn(),
+      mailbox: { path: "INBOX", uidValidity: 10n },
+      getMailboxLock: vi.fn(async () => ({ release: vi.fn() })),
+      fetch: vi.fn(async function* (): AsyncGenerator<{ source?: Buffer; size?: number }> {
+        yield { source, size: source.length };
+      }),
+    };
+  }
+  it.each([
+    "timeout",
+    "abort",
+  ])("settles a stalled socket on %s even when close emits no event", async (mode) => {
+    vi.useFakeTimers();
+    try {
+      const client = imap();
+      client.connect.mockImplementation(() => new Promise<undefined>(() => {}));
+      const controller = new AbortController();
+      const reason = new Error("Cancelled by caller");
+      const pending = connector(davClient(), client).value.downloadMailAttachment?.(
+        credentials,
+        "INBOX:10:7",
+        file,
+        { signal: controller.signal },
+      );
+      const assertion =
+        mode === "abort"
+          ? expect(pending).rejects.toBe(reason)
+          : expect(pending).rejects.toMatchObject({ code: "icloud_mail_attachment_timeout" });
+      if (mode === "abort") controller.abort(reason);
+      else await vi.advanceTimersByTimeAsync(15_000);
+      await assertion;
+      expect(client.close).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("handles socket error events during attachment retrieval", async () => {
+    const client = imap();
+    client.connect.mockImplementation(async () => {
+      const handler = client.on.mock.calls.find((call) => call[0] === "error")?.[1];
+      if (typeof handler !== "function") throw new Error("Missing error listener");
+      handler(new Error("socket failed"));
+    });
+    await expect(
+      connector(davClient(), client).value.downloadMailAttachment?.(
+        credentials,
+        "INBOX:10:7",
+        file,
+      ),
+    ).rejects.toThrow();
+    expect(client.close).toHaveBeenCalled();
+  });
+  it.each([
+    "",
+    " ",
+    "0.0",
+    "+0",
+    "-1",
+    "1e0",
+    "9007199254740992",
+  ])("rejects malformed attachment index %j before opening a socket", async (suffix) => {
+    const client = imap();
+    await expect(
+      connector(davClient(), client).value.downloadMailAttachment?.(credentials, "INBOX:10:7", {
+        ...file,
+        providerPartId: `INBOX:10:7:${suffix}`,
+      }),
+    ).rejects.toMatchObject({ category: "not_found" });
+    expect(client.connect).not.toHaveBeenCalled();
+  });
+  it("retrieves the matching UID attachment and closes the socket", async () => {
+    const client = imap();
+    const result = await connector(davClient(), client).value.downloadMailAttachment?.(
+      credentials,
+      "INBOX:10:7",
+      file,
+    );
+    expect(Buffer.from(result ?? []).toString()).toBe("hello");
+    expect(client.fetch).toHaveBeenCalledWith(
+      "7",
+      { source: { maxLength: MAX_MAIL_SOURCE_BYTES + 1 }, size: true },
+      { uid: true },
+    );
+    expect(client.close).toHaveBeenCalled();
+  });
+  it("uses legacy locators and source lengths when optional metadata is missing", async () => {
+    const client = imap();
+    client.fetch.mockImplementation(async function* () {
+      yield { source };
+    });
+    client.close.mockImplementation(() => {
+      throw new Error("Already closed");
+    });
+    const { providerPartId: _part, ...legacy } = file;
+    const result = await connector(davClient(), client).value.downloadMailAttachment?.(
+      credentials,
+      "INBOX:10:7",
+      legacy,
+    );
+    expect(Buffer.from(result ?? []).toString()).toBe("hello");
+    expect(client.close).toHaveBeenCalledOnce();
+  });
+  it("rejects removed messages and locators for another message", async () => {
+    const client = imap();
+    await expect(
+      connector(davClient(), client).value.downloadMailAttachment?.(credentials, "INBOX:10:7", {
+        ...file,
+        providerPartId: "INBOX:10:8:0",
+      }),
+    ).rejects.toMatchObject({ category: "not_found" });
+    expect(client.connect).not.toHaveBeenCalled();
+    client.fetch.mockImplementation(async function* () {});
+    await expect(
+      connector(davClient(), client).value.downloadMailAttachment?.(
+        credentials,
+        "INBOX:10:7",
+        file,
+      ),
+    ).rejects.toThrow("message is no longer available");
+    expect(client.close).toHaveBeenCalledOnce();
+  });
+  it("classifies provider failures and preserves cancellation reasons", async () => {
+    const client = imap();
+    client.connect.mockRejectedValueOnce({ authenticationFailed: true });
+    await expect(
+      connector(davClient(), client).value.downloadMailAttachment?.(
+        credentials,
+        "INBOX:10:7",
+        file,
+      ),
+    ).rejects.toMatchObject({ category: "authorization", disposition: "reconnect" });
+    expect(client.close).toHaveBeenCalled();
+    const controller = new AbortController();
+    const reason = new Error("Cancelled by caller");
+    client.connect.mockImplementationOnce(async () => {
+      controller.abort(reason);
+      throw new Error("socket closed");
+    });
+    await expect(
+      connector(davClient(), client).value.downloadMailAttachment?.(
+        credentials,
+        "INBOX:10:7",
+        file,
+        { signal: controller.signal },
+      ),
+    ).rejects.toBe(reason);
+  });
+  it("rejects reused mailbox UIDs before reading bytes", async () => {
+    const client = imap();
+    client.mailbox.uidValidity = 11n;
+    await expect(
+      connector(davClient(), client).value.downloadMailAttachment?.(
+        credentials,
+        "INBOX:10:7",
+        file,
+      ),
+    ).rejects.toMatchObject({
+      category: "not_found",
+      status: 404,
+      message: expect.stringContaining("mailbox changed"),
+    });
+    expect(client.fetch).not.toHaveBeenCalled();
+    expect(client.close).toHaveBeenCalled();
+  });
+  it("rejects missing files and oversized source messages", async () => {
+    const client = imap();
+    await expect(
+      connector(davClient(), client).value.downloadMailAttachment?.(credentials, "INBOX:10:7", {
+        ...file,
+        providerPartId: "INBOX:10:7:1",
+      }),
+    ).rejects.toThrow("no longer available");
+    client.fetch.mockImplementation(async function* () {
+      yield { source, size: MAX_MAIL_SOURCE_BYTES + 1 };
+    });
+    await expect(
+      connector(davClient(), client).value.downloadMailAttachment?.(
+        credentials,
+        "INBOX:10:7",
+        file,
+      ),
+    ).rejects.toThrow("download limit");
   });
 });

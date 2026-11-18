@@ -1,6 +1,7 @@
 import type { ForwardRefExoticComponent, RefAttributes } from "react";
 import type { IconProps } from "reicon-react";
 import ActivitySource from "reicon-react/icons/Activity";
+import TravelSource from "reicon-react/icons/Airplane";
 import CircleAlertSource from "reicon-react/icons/AlertCircle";
 import AlertTriangleSource from "reicon-react/icons/AlertTriangle";
 import ArchiveSource from "reicon-react/icons/Archive";
@@ -11,8 +12,16 @@ import ArrowUpSource from "reicon-react/icons/ArrowUp";
 import ExternalLinkSource from "reicon-react/icons/ArrowUpRightSquare";
 import BankSource from "reicon-react/icons/Bank";
 import BanknoteSource from "reicon-react/icons/Banknote";
+import NotificationSource from "reicon-react/icons/Bell";
+import EducationSource from "reicon-react/icons/BookOpen";
+import ProjectSource from "reicon-react/icons/Box";
+import BubblesSource from "reicon-react/icons/Bubble";
 import CalendarSource from "reicon-react/icons/Calendar";
 import CalendarPlusSource from "reicon-react/icons/CalendarAdd";
+import RhythmCalendarSource from "reicon-react/icons/CalendarDays";
+import TransportSource from "reicon-react/icons/Car";
+import GroceryCartSource from "reicon-react/icons/CartShopping";
+import TrendChartSource from "reicon-react/icons/ChartLine";
 import CheckSource from "reicon-react/icons/Check";
 import CircleCheckSource from "reicon-react/icons/CheckCircle";
 import CheckSquareSource from "reicon-react/icons/CheckSquare";
@@ -20,6 +29,7 @@ import ChevronDownSource from "reicon-react/icons/ChevronDown";
 import ChevronLeftSource from "reicon-react/icons/ChevronLeft";
 import ChevronRightSource from "reicon-react/icons/ChevronRight";
 import ChevronUpSource from "reicon-react/icons/ChevronUp";
+import CircleArrowUpSource from "reicon-react/icons/CircleArrowUp";
 import ClipboardSource from "reicon-react/icons/Clipboard";
 import ClockSource from "reicon-react/icons/Clock";
 import CloudSource from "reicon-react/icons/Cloud";
@@ -28,6 +38,7 @@ import CommandSource from "reicon-react/icons/Command";
 import CompassSource from "reicon-react/icons/Compass";
 import CopySource from "reicon-react/icons/Copy";
 import AgentSource from "reicon-react/icons/Cpu";
+import PaymentCardSource from "reicon-react/icons/CreditCard";
 import CopyPlusSource from "reicon-react/icons/DocumentCopy";
 import DollarSource from "reicon-react/icons/Dollar";
 import DownloadSource from "reicon-react/icons/Download";
@@ -36,12 +47,18 @@ import MailSource from "reicon-react/icons/Envelope";
 import EyeSource from "reicon-react/icons/Eye";
 import EyeOffSource from "reicon-react/icons/EyeSlash";
 import FileTextSource from "reicon-react/icons/FileText";
+import FilterSource from "reicon-react/icons/Filter";
+import FireSource from "reicon-react/icons/Fire";
+import DiningSource from "reicon-react/icons/ForkKnife";
 import ForwardSource from "reicon-react/icons/Forward";
+import GiftSource from "reicon-react/icons/Gift";
 import LocationFixedSource from "reicon-react/icons/Gps";
 import GridSource from "reicon-react/icons/Grid";
 import ColumnsSource from "reicon-react/icons/Grid3";
 import ApprovalHandSource from "reicon-react/icons/Hand";
+import HealthSource from "reicon-react/icons/HeartPulse";
 import CircleHelpSource from "reicon-react/icons/HelpCircle";
+import HistorySource from "reicon-react/icons/History";
 import HouseSource from "reicon-react/icons/Home";
 import ImageSource from "reicon-react/icons/Image";
 import InboxSource from "reicon-react/icons/Inbox";
@@ -49,16 +66,19 @@ import InfoSource from "reicon-react/icons/InfoCircle";
 import KeySource from "reicon-react/icons/Key";
 import LayersSource from "reicon-react/icons/Layers";
 import LinkOffSource from "reicon-react/icons/LinkOff";
+import SpendingListSource from "reicon-react/icons/List";
 import ListChecksSource from "reicon-react/icons/ListCheck";
 import LoaderSource from "reicon-react/icons/Loader";
 import MapPinSource from "reicon-react/icons/Location";
 import LockSource from "reicon-react/icons/Lock";
 import LogOutSource from "reicon-react/icons/Logout";
+import ResizeSource from "reicon-react/icons/Maximize";
 import MenuSource from "reicon-react/icons/Menu";
 import MinusSource from "reicon-react/icons/Minus";
 import MonitorSource from "reicon-react/icons/Monitor";
 import MoonSource from "reicon-react/icons/Moon";
 import MoreHorizontalSource from "reicon-react/icons/MoreH";
+import EntertainmentSource from "reicon-react/icons/Music";
 import PaintBrushSource from "reicon-react/icons/Paintbrush";
 import PauseSource from "reicon-react/icons/Pause";
 import PinSource from "reicon-react/icons/PinTack";
@@ -74,6 +94,7 @@ import ScissorsSource from "reicon-react/icons/Scissors";
 import SearchSource from "reicon-react/icons/Search";
 import SettingsSource from "reicon-react/icons/Settings";
 import ShieldCheckSource from "reicon-react/icons/ShieldCheck";
+import MerchantSource from "reicon-react/icons/Shop2";
 import PanelLeftSource from "reicon-react/icons/Sidebar";
 import PanelTopSource from "reicon-react/icons/SidebarTop";
 import SideProfileSource from "reicon-react/icons/SideProfile";
@@ -82,9 +103,11 @@ import SortSource from "reicon-react/icons/SortV";
 import SparklesSource from "reicon-react/icons/Sparkles";
 import StarSource from "reicon-react/icons/Star";
 import SunSource from "reicon-react/icons/Sun";
+import TagsSource from "reicon-react/icons/Tag";
 import TargetSource from "reicon-react/icons/Target";
 import ListTodoSource from "reicon-react/icons/Task";
 import TrashSource from "reicon-react/icons/Trash2";
+import UploadSource from "reicon-react/icons/Upload";
 import UserSource from "reicon-react/icons/User";
 import UserCircleSource from "reicon-react/icons/UserCircle";
 import UsersSource from "reicon-react/icons/Users";
@@ -97,7 +120,7 @@ import ErrorSource from "reicon-react/icons/XCircle";
 /**
  * The single icon vocabulary for the web application.
  *
- * Every glyph in nohmi comes from reicon-react and is reached through this module. Importing an icon
+ * Every glyph in Personal OS comes from reicon-react and is reached through this module. Importing an icon
  * package directly, or importing `reicon-react` anywhere else, fails `scripts/check-icon-contract.mjs`.
  * See `docs/design/system.md` for the icon contract.
  *
@@ -121,6 +144,7 @@ export type Icon = ForwardRefExoticComponent<
     RefAttributes<SVGSVGElement>
 >;
 
+export const FireIcon: Icon = FireSource;
 export const ActivityIcon: Icon = ActivitySource;
 export const CircleAlertIcon: Icon = CircleAlertSource;
 export const AlertTriangleIcon: Icon = AlertTriangleSource;
@@ -128,8 +152,10 @@ export const ArchiveIcon: Icon = ArchiveSource;
 export const ArrowDownIcon: Icon = ArrowDownSource;
 export const ArrowLeftIcon: Icon = ArrowLeftSource;
 export const ArrowRightIcon: Icon = ArrowRightSource;
+export const CircleArrowUpIcon: Icon = CircleArrowUpSource;
 export const ArrowUpIcon: Icon = ArrowUpSource;
 export const ExternalLinkIcon: Icon = ExternalLinkSource;
+export const PaymentCardIcon: Icon = PaymentCardSource;
 export const BankIcon: Icon = BankSource;
 export const BanknoteIcon: Icon = BanknoteSource;
 export const CalendarIcon: Icon = CalendarSource;
@@ -142,6 +168,8 @@ export const ChevronLeftIcon: Icon = ChevronLeftSource;
 export const ChevronRightIcon: Icon = ChevronRightSource;
 export const ChevronUpIcon: Icon = ChevronUpSource;
 export const ClipboardIcon: Icon = ClipboardSource;
+export const TagsIcon: Icon = TagsSource;
+export const HistoryIcon: Icon = HistorySource;
 export const ClockIcon: Icon = ClockSource;
 export const CloudIcon: Icon = CloudSource;
 export const CloudRainIcon: Icon = CloudRainSource;
@@ -149,6 +177,7 @@ export const CommandIcon: Icon = CommandSource;
 export const CompassIcon: Icon = CompassSource;
 export const CopyIcon: Icon = CopySource;
 export const AgentIcon: Icon = AgentSource;
+export const NotificationIcon: Icon = NotificationSource;
 export const CopyPlusIcon: Icon = CopyPlusSource;
 export const DollarIcon: Icon = DollarSource;
 export const DownloadIcon: Icon = DownloadSource;
@@ -182,7 +211,9 @@ export const MoonIcon: Icon = MoonSource;
 export const MoreHorizontalIcon: Icon = MoreHorizontalSource;
 export const PaintBrushIcon: Icon = PaintBrushSource;
 export const PinIcon: Icon = PinSource;
+export const ResizeIcon: Icon = ResizeSource;
 export const PlugIcon: Icon = PlugSource;
+export const FilterIcon: Icon = FilterSource;
 export const PlusIcon: Icon = PlusSource;
 export const PulseIcon: Icon = PulseSource;
 export const ReceiptIcon: Icon = ReceiptSource;
@@ -215,3 +246,23 @@ export const ErrorIcon: Icon = ErrorSource;
 
 export const PauseIcon: Icon = PauseSource;
 export const PlayIcon: Icon = PlaySource;
+
+export const ProjectIcon: Icon = ProjectSource;
+
+export const UploadIcon: Icon = UploadSource;
+
+export const MerchantIcon: Icon = MerchantSource;
+
+export const BubblesIcon: Icon = BubblesSource;
+export const TrendChartIcon: Icon = TrendChartSource;
+export const SpendingListIcon: Icon = SpendingListSource;
+export const RhythmCalendarIcon: Icon = RhythmCalendarSource;
+
+export const GroceryCartIcon: Icon = GroceryCartSource;
+export const DiningIcon: Icon = DiningSource;
+export const TransportIcon: Icon = TransportSource;
+export const TravelIcon: Icon = TravelSource;
+export const EducationIcon: Icon = EducationSource;
+export const GiftIcon: Icon = GiftSource;
+export const HealthIcon: Icon = HealthSource;
+export const EntertainmentIcon: Icon = EntertainmentSource;

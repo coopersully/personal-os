@@ -72,14 +72,18 @@ Follow `plan.json.nextAction` as the single action for this pass:
 | `NOOP` | record a clean pass and stop |
 | `ESCALATE` | report the exact human decision needed |
 
-If a routed skill is stricter, follow it.
+If a routed skill is stricter, follow it. When ship-it uses these collection/planning helpers,
+its outer controller owns repetition, inherited in-scope authority, checkpoints, and final merge
+gates. A standalone shepherd remains non-merging and bounded to one action.
 
 ## Action budget and verification
 
 For unattended passes, allow at most one push, one check retry, one metadata update, or one Linear
 sync—not a combination. The selected tracker action grants only high-confidence PR-scoped repair on
 issues already in the live Nohmi Project; it does not grant cross-Project or GitHub issue writes.
-Run focused verification for a code change and `pnpm verify` before declaring the PR ready. Re-fetch
+Run focused verification for a code change. Complete frozen-candidate verification is required
+before declaring merge readiness; reuse valid local or equivalent hosted evidence under
+`docs/engineering/delivery-verification.md`. Re-fetch
 live GitHub and Linear state after any action.
 
 Append one sanitized JSONL record to `.context/pr-shepherd/ledger.jsonl` containing timestamp, PR and

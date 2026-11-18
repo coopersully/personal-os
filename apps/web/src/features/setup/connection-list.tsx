@@ -1,4 +1,6 @@
+import type { ReactNode } from "react";
 import { BrandMark } from "@/components/brand-marks";
+import { ConnectedAccount, type ConnectedAccountProfile } from "@/components/connected-account";
 import { PlusIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +14,8 @@ import {
 
 export type SetupConnection = {
   description?: string;
+  account?: ConnectedAccountProfile;
+  identity?: ReactNode;
   id: string;
   label: string;
 };
@@ -37,15 +41,27 @@ export function ConnectionList({
         <ItemGroup aria-label="Connected accounts">
           {connections.map((connection) => (
             <Item className="setup-connection-item" key={connection.id}>
-              <ItemMedia variant="icon">
-                <BrandMark brand={mark} />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>{connection.label}</ItemTitle>
-                {connection.description ? (
-                  <ItemDescription>{connection.description}</ItemDescription>
-                ) : null}
-              </ItemContent>
+              {connection.identity ??
+                (connection.account ? (
+                  <ItemContent>
+                    <ConnectedAccount account={connection.account} />
+                    {connection.description ? (
+                      <ItemDescription>{connection.description}</ItemDescription>
+                    ) : null}
+                  </ItemContent>
+                ) : (
+                  <>
+                    <ItemMedia variant="icon">
+                      <BrandMark brand={mark} />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle>{connection.label}</ItemTitle>
+                      {connection.description ? (
+                        <ItemDescription>{connection.description}</ItemDescription>
+                      ) : null}
+                    </ItemContent>
+                  </>
+                ))}
             </Item>
           ))}
         </ItemGroup>

@@ -187,6 +187,7 @@ pub fn snapshot(
             "allDay",
             "conferenceUrl",
             "calendarId",
+            "provider",
             "status",
         ],
     );
@@ -337,7 +338,7 @@ mod tests {
     #[test]
     fn merges_due_earlier_today_and_deduplicates_calendar_groups() {
         let value = snapshot(
-            &json!({"today":[{"id":"a"}],"overdue":[{"id":"a"},{"id":"b"}],"now":[{"id":"event"}],"allDay":[{"id":"event"}],"tasks":[],"timeZone":"UTC","generatedAt":"2026-09-08T00:00:00Z"}),
+            &json!({"today":[{"id":"a"}],"overdue":[{"id":"a"},{"id":"b"}],"now":[{"id":"event","provider":"google"}],"allDay":[{"id":"event"}],"tasks":[],"timeZone":"UTC","generatedAt":"2026-09-08T00:00:00Z"}),
             "user",
             "https://api.test",
             None,
@@ -346,6 +347,7 @@ mod tests {
         );
         assert_eq!(value["reminders"].as_array().unwrap().len(), 2);
         assert_eq!(value["events"].as_array().unwrap().len(), 1);
+        assert_eq!(value["events"][0]["provider"], "google");
         assert!(value.get("sessionToken").is_none());
     }
     #[tokio::test]

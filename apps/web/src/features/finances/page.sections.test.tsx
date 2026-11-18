@@ -1,10 +1,18 @@
+import { resolveWorkspaceSettings } from "@personal-os/domain";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, useLocation } from "react-router-dom";
+import { toast } from "sonner";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  useSaveWorkspacePreferences,
+  useWorkspacePreferences,
+} from "../workspace-settings/preferences";
 import {
   BudgetMetricCard,
   FinanceBudgetAllocationChart,
@@ -15,7 +23,14 @@ import {
   TransactionDetails,
 } from "./page.js";
 
+const workspaceReadiness = vi.hoisted(() => vi.fn());
+vi.mock("./use-finance-workspace-readiness", () => ({
+  useFinanceWorkspaceReadiness: workspaceReadiness,
+}));
+
 const api = vi.hoisted(() => ({
+  getWorkspaceSettings: vi.fn(),
+  updateWorkspaceSettings: vi.fn(),
   createFinanceAccount: vi.fn(),
   createFinanceBudget: vi.fn(),
   createFinanceTransaction: vi.fn(),
@@ -41,6 +56,8 @@ const api = vi.hoisted(() => ({
   listFinanceRecurringObligations: vi.fn(),
   listFinanceReimbursements: vi.fn(),
   listFinanceTransactions: vi.fn(),
+  listFinanceSpendingTransactions: vi.fn(),
+  listFinanceMerchants: vi.fn(),
   resolveFinanceReview: vi.fn(),
   resolveFinanceAlert: vi.fn(),
   refreshFinanceInsights: vi.fn(),
@@ -55,20 +72,69 @@ vi.mock("../../api.js", () => ({
   errorMessage: (error: unknown) => (error instanceof Error ? error.message : "Unknown error"),
 }));
 
-function renderPage(path: string) {
+function NonAccountPreferenceWriter() {
+  const save = useSaveWorkspacePreferences("finances");
+  const preferences = useWorkspacePreferences("finances");
+  return (
+    <>
+      <button
+        type="button"
+        disabled={!preferences.isSuccess}
+        onClick={() => save.mutate({ financeTransactionView: "cards" })}
+      >
+        Change transaction view
+      </button>
+      {save.recovery ? <p>Transaction view still unsaved</p> : null}
+    </>
+  );
+}
+function CurrentRoute() {
+  const location = useLocation();
+  return (
+    <output aria-label="Current route">
+      {location.pathname}
+      {location.search}
+    </output>
+  );
+}
+function renderPage(path: string, nonAccountWriter = false, showRoute = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["me"], { id: "owner" });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[path]}>
-        <FinancesPage />
-      </MemoryRouter>
+      <TooltipProvider>
+        <MemoryRouter initialEntries={[path]}>
+          {nonAccountWriter ? <NonAccountPreferenceWriter /> : null}
+          {showRoute ? <CurrentRoute /> : null}
+          <FinancesPage />
+        </MemoryRouter>
+      </TooltipProvider>
     </QueryClientProvider>,
   );
 }
 
+afterEach(() => vi.restoreAllMocks());
+
 beforeEach(() => {
   vi.resetAllMocks();
-  sessionStorage.clear();
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: true },
+    isPending: false,
+    isError: false,
+    error: null,
+    reload: vi.fn(),
+  });
+  let savedPreferences = resolveWorkspaceSettings("finances");
+  api.getWorkspaceSettings.mockImplementation(async () => savedPreferences);
+  api.updateWorkspaceSettings.mockImplementation(async (_workspace, input) => {
+    savedPreferences = resolveWorkspaceSettings("finances", {
+      ...savedPreferences.preferences,
+      ...input.preferences,
+      revision: savedPreferences.revision + 1,
+    });
+    return savedPreferences;
+  });
   const overview = {
     accounts: [],
     budgets: [],
@@ -78,6 +144,7 @@ beforeEach(() => {
     spendingThisMonth: 0,
     transactions: [],
   };
+  api.listFinanceMerchants.mockResolvedValue([]);
   api.getFinanceOverview.mockResolvedValue(overview);
   api.getFinanceOverviewForMonth.mockResolvedValue(overview);
   api.getFinanceOverviewForAccounts.mockResolvedValue(overview);
@@ -360,14 +427,21 @@ describe("Finance section states", () => {
   });
 
   it("shows health and review work empty states without hiding the controls", async () => {
-    const { unmount } = renderPage("/finances/health");
-    expect(await screen.findByText("Ledger health")).toBeVisible();
+    const { unmount } = renderPage("/finances/transactions?checks=1");
+    await screen.findByRole("button", { name: "Transaction view: Table" });
+    expect(screen.queryByRole("button", { name: "Transaction checks" })).not.toBeInTheDocument();
     unmount();
     renderPage("/finances/review");
     expect(await screen.findByText("Nothing needs review")).toBeVisible();
   });
 
-  it("renders populated insights, recurring work, budgets, and transaction evidence", async () => {
+  it.each([
+    "overview",
+    "cashflow",
+    "subscriptions",
+    "budgets",
+    "transactions",
+  ])("renders populated Finance evidence in %s", async (section) => {
     const currentMonth = new Date().toISOString().slice(0, 7);
     const transactions = [
       {
@@ -601,95 +675,137 @@ describe("Finance section states", () => {
       },
     ]);
 
-    const overviewView = renderPage("/finances");
-    expect(await screen.findByText("Refresh sources before relying on totals")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Open review" })).toBeVisible();
-    expect(screen.getByText("2 need attention")).toBeVisible();
-    overviewView.unmount();
+    if (section === "overview") {
+      renderPage("/finances");
+      expect(await screen.findByText("Refresh sources before relying on totals")).toBeVisible();
+      expect(screen.getByRole("link", { name: "Open review" })).toBeVisible();
+      expect(screen.getByText("2 need attention")).toBeVisible();
 
-    const cashflowView = renderPage("/finances/cashflow");
-    expect(await screen.findByText("Salary")).toBeVisible();
-    expect(screen.getByText("Contract work")).toBeVisible();
-    expect(screen.getByText("Spending changed")).toBeVisible();
-    cashflowView.unmount();
+      return;
+    }
+    if (section === "cashflow") {
+      renderPage("/finances/cashflow");
+      expect(await screen.findByText("Salary")).toBeVisible();
+      expect(screen.getByText("Contract work")).toBeVisible();
+      expect(screen.getByText("Spending changed")).toBeVisible();
 
-    const subscriptionsView = renderPage("/finances/subscriptions");
-    expect(await screen.findByText("Music")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Pause" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Confirm" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Resume" })).toBeVisible();
-    subscriptionsView.unmount();
+      return;
+    }
+    if (section === "subscriptions") {
+      renderPage("/finances/subscriptions");
+      expect(await screen.findByText("Music")).toBeVisible();
+      expect(screen.getByRole("button", { name: "Pause" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Confirm" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Resume" })).toBeVisible();
 
-    const budgetView = renderPage("/finances/budgets");
-    expect(await screen.findByRole("button", { name: "Edit budget" })).toBeVisible();
-    expect(screen.getByText("Travel")).toBeVisible();
-    expect(screen.getByText("Misc")).toBeVisible();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Planned: view contributing transactions" }),
-    );
-    expect(await screen.findByRole("dialog", { name: "Planned allocation" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    fireEvent.click(screen.getByRole("button", { name: "Spent: view contributing transactions" }));
-    expect(await screen.findByRole("dialog", { name: "Spending this month" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    fireEvent.click(
-      screen.getByRole("button", { name: "Over plan: view contributing transactions" }),
-    );
-    expect(await screen.findByRole("dialog", { name: "Over-plan activity" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    fireEvent.click(screen.getByRole("button", { name: "Dining" }));
-    expect(await screen.findByRole("dialog", { name: "Dining activity" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    budgetView.unmount();
+      return;
+    }
+    if (section === "budgets") {
+      renderPage("/finances/budgets");
+      expect(await screen.findByRole("button", { name: "Edit budget" })).toBeVisible();
+      expect(screen.getByText("Travel")).toBeVisible();
+      expect(screen.getByText("Misc")).toBeVisible();
+      fireEvent.click(
+        screen.getByRole("button", { name: "Planned: view contributing transactions" }),
+      );
+      expect(await screen.findByRole("dialog", { name: "Planned allocation" })).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Spent: view contributing transactions" }),
+      );
+      expect(await screen.findByRole("dialog", { name: "Spending this month" })).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Over plan: view contributing transactions" }),
+      );
+      expect(await screen.findByRole("dialog", { name: "Over-plan activity" })).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      fireEvent.click(screen.getByRole("button", { name: "Dining" }));
+      expect(await screen.findByRole("dialog", { name: "Dining activity" })).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
-    renderPage("/finances/transactions");
-    expect(await screen.findByText("Corner Bistro")).toBeVisible();
-    expect(screen.getByLabelText("Merchant entity needs review")).toBeVisible();
-    const [detailsButton] = screen.getAllByRole("button", { name: "Details" });
-    if (!detailsButton) throw new Error("Transaction details button was not rendered.");
-    fireEvent.click(detailsButton);
-    expect(await screen.findByText("Team dinner")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Categorize" }));
-    const categorySelect = screen.getAllByLabelText("Category").at(-1);
-    if (!categorySelect) throw new Error("Category selector was not rendered.");
-    fireEvent.change(categorySelect, {
-      target: { value: "Dining" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save category" }));
-    await waitFor(() =>
-      expect(api.updateFinanceTransaction).toHaveBeenCalledWith("expense", {
-        category: "Dining",
-      }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
-    fireEvent.click(screen.getByRole("button", { name: "Sort by amount" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Sort by amount" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Next" }));
-    await waitFor(() =>
-      expect(api.listFinanceTransactions).toHaveBeenCalledWith(
-        expect.objectContaining({ cursor: "next-page" }),
-      ),
-    );
-    fireEvent.click(await screen.findByRole("button", { name: "Previous" }));
+      return;
+    }
+    if (section === "transactions") {
+      renderPage("/finances/transactions");
+      expect(await screen.findByText("Corner Bistro")).toBeVisible();
+      expect(screen.getByLabelText("Merchant entity needs review")).toBeVisible();
+      const selectBistro = await screen.findByRole("checkbox", {
+        name: "Select Corner Bistro, 2026-08-20",
+      });
+      await waitFor(() => expect(selectBistro).toBeEnabled());
+      fireEvent.click(selectBistro);
+      expect(selectBistro).toBeChecked();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByText("1 selected on this page")).toBeVisible();
+      const [detailsButton] = screen.getAllByRole("row", { name: /Open .* transaction/ });
+      if (!detailsButton) throw new Error("Transaction details button was not rendered.");
+      fireEvent.click(detailsButton);
+      expect(await screen.findByText("Team dinner")).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Recategorize" }));
+      const categorySelect = screen.getAllByLabelText("Category").at(-1);
+      if (!categorySelect) throw new Error("Category selector was not rendered.");
+      fireEvent.change(categorySelect, {
+        target: { value: "Dining" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save category" }));
+      await waitFor(() =>
+        expect(api.updateFinanceTransaction).toHaveBeenCalledWith("expense", {
+          category: "Dining",
+        }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Sort by amount" }));
+      await waitFor(() =>
+        expect(screen.queryByText(/selected on this page/)).not.toBeInTheDocument(),
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Sort by amount" }));
+      await waitFor(() =>
+        expect(screen.getByRole("checkbox", { name: "Select this page" })).toBeEnabled(),
+      );
+      fireEvent.click(screen.getByRole("checkbox", { name: "Select this page" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Next page" }));
+      await waitFor(() =>
+        expect(screen.queryByText(/selected on this page/)).not.toBeInTheDocument(),
+      );
+      await waitFor(() =>
+        expect(api.listFinanceTransactions).toHaveBeenCalledWith(
+          expect.objectContaining({ cursor: "next-page" }),
+        ),
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Previous page" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Next page" }));
+      await waitFor(() =>
+        expect(screen.getByRole("checkbox", { name: "Select this page" })).toBeEnabled(),
+      );
+      fireEvent.click(screen.getByRole("checkbox", { name: "Select this page" }));
+      fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+      const filters = screen.getByRole("dialog", { name: "Filter transactions" });
+      fireEvent.change(within(filters).getByLabelText("Search"), {
+        target: { value: "Bistro" },
+      });
+      api.listFinanceTransactions.mockClear();
+      fireEvent.click(within(filters).getByRole("button", { name: "Apply filters" }));
+      await waitFor(() =>
+        expect(api.listFinanceTransactions).toHaveBeenCalledWith(
+          expect.objectContaining({ search: "Bistro", cursor: undefined }),
+        ),
+      );
+      expect(api.listFinanceTransactions.mock.calls.every(([query]) => !query.cursor)).toBe(true);
+      expect(await screen.findByRole("button", { name: "Previous page" })).toBeDisabled();
+      await waitFor(() =>
+        expect(screen.queryByText(/selected on this page/)).not.toBeInTheDocument(),
+      );
+      return;
+    }
   }, 10_000);
 
-  it("recovers browser account scopes and navigates unplanned budget months", async () => {
-    sessionStorage.setItem("finance-account-scope:spend", "not-json");
-    const malformed = renderPage("/finances");
-    expect(await screen.findByText("Financial position")).toBeVisible();
-    malformed.unmount();
-
-    sessionStorage.setItem("finance-account-scope:spend", JSON.stringify("not-an-array"));
-    const wrongShape = renderPage("/finances");
-    expect(await screen.findByText("Financial position")).toBeVisible();
-    wrongShape.unmount();
-
+  it("persists account scopes across page loads and navigates unplanned budget months", async () => {
     const overview = {
       accounts: [
         {
           balance: 2500,
           createdAt: "2026-08-01T12:00:00.000Z",
-          id: "investment",
+          id: "00000000-0000-4000-8000-000000000123",
           institution: "Broker",
           kind: "investment",
           lastSyncedAt: null,
@@ -706,7 +822,16 @@ describe("Finance section states", () => {
       spendingThisMonth: 100,
       transactions: [],
     };
-    sessionStorage.setItem("finance-account-scope:spend", JSON.stringify([]));
+    let selection = resolveWorkspaceSettings("finances", { spendAccountIds: [], revision: 1 });
+    api.getWorkspaceSettings.mockImplementation(async () => selection);
+    api.updateWorkspaceSettings.mockImplementation(async (_workspace, input) => {
+      selection = resolveWorkspaceSettings("finances", {
+        ...selection.preferences,
+        ...input.preferences,
+        revision: selection.revision + 1,
+      });
+      return selection;
+    });
     api.getFinanceOverview.mockResolvedValue(overview);
     api.getFinanceOverviewForMonth.mockResolvedValue(overview);
     api.getFinanceOverviewForAccounts.mockResolvedValue({ ...overview, spendingThisMonth: 0 });
@@ -746,11 +871,31 @@ describe("Finance section states", () => {
       await screen.findByRole("dialog", { name: "Accounts included in spending" }),
     ).toBeVisible();
     fireEvent.click(screen.getByLabelText(/Brokerage/));
-    expect(sessionStorage.getItem("finance-account-scope:spend")).toBe(
-      JSON.stringify(["investment"]),
+    await waitFor(() =>
+      expect(api.updateWorkspaceSettings).toHaveBeenCalledWith("finances", {
+        expectedRevision: 1,
+        preferences: { spendAccountIds: ["00000000-0000-4000-8000-000000000123"] },
+      }),
     );
+    await waitFor(() => expect(screen.getByLabelText(/Brokerage/)).toBeChecked());
     scoped.unmount();
 
+    const restored = renderPage("/finances");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Spent this month: configure included accounts" }),
+    );
+    await waitFor(() => expect(screen.getByLabelText(/Brokerage/)).toBeChecked());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Use all eligible accounts" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Use all eligible accounts" }));
+    await waitFor(() =>
+      expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith("finances", {
+        expectedRevision: 2,
+        preferences: { spendAccountIds: null },
+      }),
+    );
+    restored.unmount();
     const budgets = renderPage("/finances/budgets");
     expect(await screen.findByRole("button", { name: "Next month" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Next month" }));
@@ -770,8 +915,8 @@ describe("Finance section states", () => {
     pending.unmount();
 
     api.getFinanceLedgerHealth.mockRejectedValue(new Error("Ledger unavailable"));
-    const failed = renderPage("/finances/health");
-    expect(await screen.findByText("Couldn’t load account health.")).toBeVisible();
+    const failed = renderPage("/finances/transactions?checks=1");
+    expect(await screen.findByText(/Transaction checks could not load/)).toBeVisible();
     failed.unmount();
 
     api.getFinanceCategories.mockResolvedValue([
@@ -928,7 +1073,7 @@ describe("Finance section states", () => {
     expect(await screen.findByRole("button", { name: "Review queue" })).toBeVisible();
   });
 
-  it("sorts, expands, categorizes, splits, pages, and exports the transaction ledger", async () => {
+  it.each(["display", "actions", "exports"])("supports transaction ledger %s", async (scenario) => {
     const browser = userEvent.setup();
     const transaction = {
       accountId: "checking",
@@ -973,38 +1118,152 @@ describe("Finance section states", () => {
 
     renderPage("/finances/transactions");
     await screen.findByRole("table", { name: "Transactions" });
-    for (const label of ["date", "merchant", "amount", "date"]) {
-      fireEvent.click(await screen.findByRole("button", { name: `Sort by ${label}` }));
-      await screen.findByRole("table", { name: "Transactions" });
+    if (scenario === "display") {
+      await browser.click(screen.getByRole("button", { name: "Transaction view: Table" }));
+      await browser.click(screen.getByRole("menuitemradio", { name: "Cards" }));
+      expect(screen.queryByRole("table", { name: "Transactions" })).not.toBeInTheDocument();
+      expect(screen.getByRole("listitem")).toHaveTextContent("Cafe");
+      await browser.click(screen.getByRole("button", { name: "Display transactions" }));
+      await browser.click(screen.getByRole("menuitemradio", { name: "Merchant" }));
+      expect(screen.getByRole("heading", { name: "Cafe (1)" })).toBeVisible();
+      await browser.click(screen.getByRole("button", { name: "Open Cafe transaction" }));
+      expect(screen.getByText("SQ CAFE")).toBeVisible();
+      await browser.click(screen.getByRole("button", { name: "Close" }));
+      await browser.click(screen.getByRole("button", { name: "Transaction view: Cards" }));
+      await browser.click(screen.getByRole("menuitemradio", { name: "Table" }));
+      expect(screen.queryByRole("rowheader", { name: "Cafe (1)" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Display transactions" }),
+      ).not.toBeInTheDocument();
+      return;
     }
-    fireEvent.click(screen.getByRole("button", { name: "Details" }));
-    expect(screen.getByText("SQ CAFE")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Categorize" }));
-    expect(await screen.findByRole("dialog", { name: /Categorize Cafe/ })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Split purchase" }));
-    expect(await screen.findByRole("dialog", { name: /Split Cafe/ })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    if (scenario === "actions") {
+      for (const label of ["date", "merchant", "amount", "date"]) {
+        fireEvent.click(await screen.findByRole("button", { name: `Sort by ${label}` }));
+        await screen.findByRole("table", { name: "Transactions" });
+      }
+      expect(screen.getByRole("columnheader", { name: /^Status/ })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Posted" })).toBeVisible();
+      fireEvent.keyDown(screen.getByRole("row", { name: "Open Cafe transaction" }), {
+        key: "Enter",
+      });
+      expect(screen.getByText("SQ CAFE")).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Categorize" }));
+      expect(await screen.findByRole("dialog", { name: /Categorize Cafe/ })).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      fireEvent.contextMenu(screen.getByRole("row", { name: "Open Cafe transaction" }));
+      await browser.click(screen.getByRole("menuitem", { name: "Split purchase" }));
+      expect(await screen.findByRole("dialog", { name: /Split Cafe/ })).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    await waitFor(() =>
-      expect(api.listFinanceTransactions).toHaveBeenCalledWith(
-        expect.objectContaining({ cursor: "next-ledger-page" }),
-      ),
-    );
+      fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+      await waitFor(() =>
+        expect(api.listFinanceTransactions).toHaveBeenCalledWith(
+          expect.objectContaining({ cursor: "next-ledger-page" }),
+        ),
+      );
+      return;
+    }
     for (const item of ["Transactions", "Accounts", "Budget plan", "Categories"]) {
-      await browser.click(screen.getByRole("button", { name: "Export data" }));
+      await browser.click(
+        screen.getByRole("button", {
+          name: "Table actions",
+        }),
+      );
       await browser.click(await screen.findByRole("menuitem", { name: item }));
     }
     await waitFor(() => expect(api.exportFinanceData).toHaveBeenCalledTimes(4));
     expect(createObjectUrl).toHaveBeenCalledTimes(4);
     expect(revokeObjectUrl).toHaveBeenCalledTimes(4);
     expect(linkClick).toHaveBeenCalledTimes(4);
+    expect(linkClick.mock.contexts.map((link) => (link as HTMLAnchorElement).download)).toEqual(
+      ["transactions", "accounts", "budgets", "categories"].map((kind) =>
+        expect.stringMatching(new RegExp(`^nohmi-finances-${kind}-\\d{4}-\\d{2}-\\d{2}\\.csv$`)),
+      ),
+    );
+  });
+
+  it.each([
+    ["spend", "spendAccountIds", "Spent this month"],
+    ["cash", "cashAccountIds", "Cash tracked"],
+  ] as const)("preserves rapid %s account toggles before the pending render", async (_scope, key, trigger) => {
+    const ids = ["00000000-0000-4000-8000-000000000131", "00000000-0000-4000-8000-000000000132"];
+    const accounts = ids.map((id, index) => ({
+      id,
+      name: `Selected account ${index + 1}`,
+      kind: "cash",
+      balance: 100,
+      institution: "Fixture bank",
+      provider: "manual",
+      status: "manual",
+      lastSyncedAt: null,
+      createdAt: "2026-08-01T12:00:00.000Z",
+      updatedAt: "2026-08-01T12:00:00.000Z",
+    }));
+    const overview = {
+      accounts,
+      budgets: [],
+      pendingSpendThisMonth: 0,
+      refundCreditsThisMonth: 0,
+      reviewCount: 0,
+      spendingThisMonth: 0,
+      transactions: [],
+    };
+    api.getFinanceOverview.mockResolvedValue(overview);
+    api.getFinanceOverviewForMonth.mockResolvedValue(overview);
+    api.getFinanceOverviewForAccounts.mockResolvedValue(overview);
+    renderPage("/finances");
+    fireEvent.click(
+      await screen.findByRole("button", { name: `${trigger}: configure included accounts` }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    const first = within(dialog).getByRole("checkbox", { name: /Selected account 1/ });
+    const second = within(dialog).getByRole("checkbox", { name: /Selected account 2/ });
+    await waitFor(() => expect(first).toBeEnabled());
+    expect(first).toBeChecked();
+    expect(second).toBeChecked();
+    // Both DOM events use one observed render, before pending disables the controls.
+    act(() => {
+      fireEvent.click(first);
+      fireEvent.click(second);
+    });
+    await waitFor(() => expect(api.updateWorkspaceSettings).toHaveBeenCalledTimes(2));
+    expect(api.updateWorkspaceSettings).toHaveBeenNthCalledWith(1, "finances", {
+      expectedRevision: 0,
+      preferences: { [key]: [ids[1]] },
+    });
+    expect(api.updateWorkspaceSettings).toHaveBeenNthCalledWith(2, "finances", {
+      expectedRevision: 1,
+      preferences: { [key]: [] },
+    });
+    await waitFor(() => {
+      expect(first).not.toBeChecked();
+      expect(second).not.toBeChecked();
+    });
+    await waitFor(() => expect(first).toBeEnabled());
+    act(() => {
+      fireEvent.click(first);
+      fireEvent.click(second);
+    });
+    await waitFor(() => expect(api.updateWorkspaceSettings).toHaveBeenCalledTimes(4));
+    expect(api.updateWorkspaceSettings).toHaveBeenNthCalledWith(3, "finances", {
+      expectedRevision: 2,
+      preferences: { [key]: [ids[0]] },
+    });
+    expect(api.updateWorkspaceSettings).toHaveBeenNthCalledWith(4, "finances", {
+      expectedRevision: 3,
+      preferences: { [key]: ids },
+    });
+    await waitFor(() => {
+      expect(first).toBeChecked();
+      expect(second).toBeChecked();
+    });
   });
 
   it("renders null evidence, cash scoping, and empty budget drill-downs conservatively", async () => {
     const currentMonth = new Date().toISOString().slice(0, 7);
     const uncategorized = {
-      accountId: "cash-null",
+      accountId: "00000000-0000-4000-8000-000000000121",
       amount: 120,
       category: null,
       categoryConfidence: null,
@@ -1026,7 +1285,7 @@ describe("Finance section states", () => {
         {
           balance: null,
           createdAt: "2026-08-01T12:00:00.000Z",
-          id: "cash-null",
+          id: "00000000-0000-4000-8000-000000000121",
           institution: "Cash Bank",
           kind: "cash",
           lastSyncedAt: null,
@@ -1100,10 +1359,41 @@ describe("Finance section states", () => {
     expect(await screen.findByRole("dialog", { name: "Accounts included in cash" })).toBeVisible();
     expect(screen.getByLabelText(/Unreported cash/)).toBeVisible();
     expect(screen.queryByLabelText(/Brokerage/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText(/Unreported cash/));
-    fireEvent.click(screen.getByLabelText(/Unreported cash/));
+    // Persist both choices before creating a new client; disabled controls cannot save.
+    const cashChoice = screen.getByLabelText(/Unreported cash/);
+    await waitFor(() => expect(cashChoice).toBeEnabled());
+    fireEvent.click(cashChoice);
+    await waitFor(() => expect(cashChoice).not.toBeChecked());
+    await waitFor(() => expect(cashChoice).toBeEnabled());
+    expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith("finances", {
+      expectedRevision: 0,
+      preferences: { cashAccountIds: [] },
+    });
+    fireEvent.click(cashChoice);
+    await waitFor(() => expect(cashChoice).toBeChecked());
+    await waitFor(() => expect(cashChoice).toBeEnabled());
+    expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith("finances", {
+      expectedRevision: 1,
+      preferences: { cashAccountIds: ["00000000-0000-4000-8000-000000000121"] },
+    });
     overviewView.unmount();
 
+    const restored = renderPage("/finances");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Spent this month: configure included accounts" }),
+    );
+    await waitFor(() => expect(screen.getByLabelText(/Brokerage/)).toBeChecked());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Use all eligible accounts" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Use all eligible accounts" }));
+    await waitFor(() =>
+      expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith("finances", {
+        expectedRevision: 2,
+        preferences: { spendAccountIds: null },
+      }),
+    );
+    restored.unmount();
     const budgets = renderPage("/finances/budgets");
     expect(await screen.findByText("Dining")).toBeVisible();
     fireEvent.click(
@@ -1250,17 +1540,19 @@ describe("Finance section states", () => {
     });
     accounts.unmount();
 
-    const transactions = renderPage("/finances/transactions");
-    fireEvent.click(await screen.findByRole("button", { name: "New transaction" }));
+    const transactions = renderPage("/finances/transactions#finance-add-transaction");
+    await screen.findByRole("dialog", { name: "Add a transaction" });
     const transactionAccount = document.getElementById("finance-account-select");
     if (!(transactionAccount instanceof HTMLSelectElement))
       throw new Error("Expected the transaction account select.");
     fireEvent.change(transactionAccount, { target: { value: "checking" } });
     fireEvent.change(screen.getByLabelText("Merchant"), { target: { value: "Cafe" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Add “Cafe”" }));
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "8.5" } });
     fireEvent.change(screen.getByLabelText("Category (optional)"), {
       target: { value: "Dining" },
     });
+    fireEvent.click(await screen.findByRole("option", { name: /Dining/ }));
     fireEvent.click(screen.getByRole("button", { name: "Add transaction" }));
     await waitFor(() =>
       expect(api.createFinanceTransaction).toHaveBeenCalledWith(
@@ -1356,7 +1648,7 @@ it.each([
   save.mockRejectedValueOnce(new Error("private database details")).mockResolvedValue({});
   renderPage(`/finances/${section}`);
   if (section === "transactions")
-    fireEvent.click(await screen.findByRole("button", { name: "Details" }));
+    fireEvent.click(await screen.findByRole("row", { name: "Open Cafe transaction" }));
   fireEvent.click(
     await screen.findByRole("button", {
       name: section === "transactions" ? "Categorize" : "Change",
@@ -1369,7 +1661,8 @@ it.each([
     section === "transactions"
       ? "Couldn’t save this category. Your changes are still unsaved. Try again."
       : "Couldn’t save this transaction review. Your changes are still unsaved. Try again.";
-  expect(await within(dialog).findByText(message)).toBeVisible();
+  expect(await screen.findByText(message)).toBeVisible();
+  expect(within(dialog).queryByText(message)).not.toBeInTheDocument();
   expect(within(dialog).getByLabelText("Category")).toHaveValue("Dining");
   expect(screen.queryByText("private database details")).not.toBeInTheDocument();
   expect(screen.getAllByText(message)).toHaveLength(1);
@@ -1379,4 +1672,684 @@ it.each([
   );
   expect(save).toHaveBeenCalledTimes(2);
   expect(save.mock.calls[1]).toEqual(save.mock.calls[0]);
+});
+
+it.each([
+  "cards",
+  "table",
+])("opens context actions from the %s transaction and supports dismissing edits", async (view) => {
+  api.listFinanceTransactions.mockResolvedValue({
+    items: [
+      {
+        accountId: "checking",
+        amount: 18.5,
+        category: null,
+        categoryConfidence: null,
+        categoryId: null,
+        categorySource: null,
+        createdAt: "2026-08-23T12:00:00Z",
+        date: "2026-08-23",
+        direction: "expense",
+        id: "meal",
+        merchant: "Cafe",
+        merchantId: null,
+        needsReview: true,
+        notes: null,
+        pending: true,
+        rawMerchant: "SQ CAFE",
+        updatedAt: "2026-08-23T12:00:00Z",
+      },
+    ],
+    nextCursor: null,
+  });
+  renderPage(`/finances/transactions?view=${view}`);
+  const user = userEvent.setup();
+  const trigger = await screen.findByRole(view === "cards" ? "button" : "row", {
+    name: "Open Cafe transaction",
+  });
+  const checkbox = await screen.findByRole("checkbox", { name: "Select Cafe, 2026-08-23" });
+  await waitFor(() => expect(checkbox).toBeEnabled());
+  checkbox.focus();
+  await user.keyboard(" ");
+  expect(checkbox).toBeChecked();
+  expect(checkbox).toHaveFocus();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  fireEvent.contextMenu(trigger);
+  await user.click(screen.getByRole("menuitem", { name: "Add context" }));
+  expect(await screen.findByRole("dialog", { name: "Add context" })).toBeVisible();
+  await user.keyboard("{Escape}");
+  fireEvent.contextMenu(trigger);
+  await user.click(screen.getByRole("menuitem", { name: "Categorize" }));
+  expect(await screen.findByRole("dialog", { name: "Categorize Cafe" })).toBeVisible();
+  await user.keyboard("{Escape}");
+  fireEvent.contextMenu(trigger);
+  await user.click(screen.getByRole("menuitem", { name: "Split purchase" }));
+  expect(await screen.findByRole("dialog", { name: "Split Cafe" })).toBeVisible();
+  await user.keyboard("{Escape}");
+  await user.click(trigger);
+  await user.click(screen.getByRole("button", { name: "Split purchase" }));
+  expect(await screen.findByRole("dialog", { name: "Split Cafe" })).toBeVisible();
+});
+it("opens transaction import and category creation from the header and changes sorting", async () => {
+  renderPage("/finances/transactions");
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Sort transactions" }));
+  await user.click(screen.getByRole("menuitemradio", { name: "Highest amount" }));
+  await waitFor(() =>
+    expect(api.listFinanceTransactions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sortBy: "amount", sortDirection: "desc" }),
+    ),
+  );
+  for (const name of ["Import transactions", "Add category"]) {
+    await user.click(screen.getByRole("button", { name: "Add in Transactions" }));
+    await user.click(screen.getByRole("menuitem", { name }));
+    expect(await screen.findByRole("dialog")).toBeVisible();
+    await user.keyboard("{Escape}");
+  }
+});
+
+it.each([
+  "spent",
+  "category",
+] as const)("shows purchases and refund credits in the %s budget detail", (kind) => {
+  const base = {
+    accountId: "checking",
+    amount: 50,
+    category: "Dining",
+    categoryConfidence: 1,
+    categorySource: "user",
+    createdAt: "2026-09-01T12:00:00Z",
+    date: "2026-09-01",
+    id: "meal",
+    merchant: "Dinner",
+    merchantId: null,
+    needsReview: false,
+    notes: null,
+    pending: false,
+    rawMerchant: null,
+    updatedAt: "2026-09-01T12:00:00Z",
+    direction: "expense",
+  };
+  render(
+    <FinanceBudgetDetailDialog
+      budgets={[{ category: "Dining", limit: 100, month: "2026-09" }]}
+      detail={kind === "category" ? { kind, category: "Dining" } : { kind }}
+      month="2026-09"
+      onOpenChange={vi.fn()}
+      transactions={
+        [
+          base,
+          { ...base, id: "refund", merchant: "Dinner refund", amount: 15, direction: "income" },
+        ] as never
+      }
+    />,
+  );
+  expect(screen.getByText("+$15.00")).toBeVisible();
+  expect(screen.getByText("−$50.00")).toBeVisible();
+  if (kind === "category") expect(screen.getByText("$35.00", { exact: false })).toBeVisible();
+});
+
+it("opens an interactive budget metric with its accessible label", () => {
+  const onClick = vi.fn();
+  render(<BudgetMetricCard label="Remaining" tone="success" value="$25.00" onClick={onClick} />);
+  fireEvent.click(screen.getByRole("button"));
+  expect(onClick).toHaveBeenCalledOnce();
+});
+
+it("keeps readable Finance account-selection recovery reachable after closing its dialog", async () => {
+  const accountId = "00000000-0000-4000-8000-000000000123";
+  api.getFinanceOverview.mockResolvedValue({
+    accounts: [
+      {
+        id: accountId,
+        name: "Recovery checking",
+        kind: "cash",
+        balance: 100,
+        institution: "Manual",
+        status: "manual",
+        provider: "manual",
+        createdAt: "2026-10-08T00:00:00Z",
+        updatedAt: "2026-10-08T00:00:00Z",
+        lastSyncedAt: null,
+      },
+    ],
+    budgets: [],
+    transactions: [],
+    spendingThisMonth: 0,
+    pendingSpendThisMonth: 0,
+    refundCreditsThisMonth: 0,
+    reviewCount: 0,
+  });
+  api.updateWorkspaceSettings.mockRejectedValue(new Error("Offline"));
+  const user = userEvent.setup();
+  renderPage("/finances");
+  await user.click(
+    await screen.findByRole("button", { name: "Spent this month: configure included accounts" }),
+  );
+  const choice = await screen.findByLabelText(/Recovery checking/);
+  await waitFor(() => expect(choice).toBeEnabled());
+  await user.click(choice);
+  expect(await screen.findByText("Your change: None selected")).toBeVisible();
+  api.getWorkspaceSettings.mockResolvedValue(
+    resolveWorkspaceSettings("finances", { spendAccountIds: [accountId], revision: 3 }),
+  );
+  await user.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  expect(await screen.findByText("Latest: Recovery checking")).toBeVisible();
+  // Recovery requires an explicit decision; Escape cannot abandon the retained selection.
+  await user.keyboard("{Escape}");
+  expect(await screen.findByText("Your change: None selected")).toBeVisible();
+  expect(api.updateWorkspaceSettings).toHaveBeenCalledTimes(1);
+});
+
+it("does not label another hook's transaction-view failure as an unsaved account selection", async () => {
+  api.updateWorkspaceSettings.mockRejectedValue(new Error("Offline"));
+  renderPage("/finances", true);
+  const change = await screen.findByRole("button", { name: "Change transaction view" });
+  await waitFor(() => expect(change).toBeEnabled());
+  fireEvent.click(change);
+  await waitFor(() => expect(api.updateWorkspaceSettings).toHaveBeenCalledTimes(1));
+  expect(api.updateWorkspaceSettings).toHaveBeenCalledWith(
+    "finances",
+    expect.objectContaining({ preferences: { financeTransactionView: "cards" } }),
+  );
+  expect(await screen.findByText("Transaction view still unsaved")).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "Review unsaved account selections" }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it.each([
+  false,
+  undefined,
+])("blocks direct transaction creation and import entries when manual visibility is %s", async (manualCreationVisible) => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible,
+    readiness: { workspaceAccessible: true },
+    isPending: false,
+    isError: false,
+    reload: vi.fn(),
+  });
+  renderPage("/finances/transactions?import=1#finance-add-transaction");
+  await screen.findByRole("button", { name: "Filters" });
+  expect(screen.queryByRole("dialog", { name: "Add a transaction" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Import transactions" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Add in Transactions" })).not.toBeInTheDocument();
+});
+it("limits the import setup task to the permitted import form", async () => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: false },
+    isPending: false,
+    isError: false,
+    reload: vi.fn(),
+  });
+  renderPage(
+    `/finances/transactions?financeTask=import&import=1&spending=${encodeURIComponent(JSON.stringify(exactSpendingFilter))}#finance-add-transaction`,
+  );
+  expect(await screen.findByRole("dialog", { name: "Import transactions" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Filters" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Add a transaction" })).not.toBeInTheDocument();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+  expect(api.listFinanceSpendingTransactions).not.toHaveBeenCalled();
+});
+it.each([
+  {
+    manualCreationVisible: undefined,
+    isPending: true,
+    isError: false,
+    copy: "Loading manual import availability…",
+  },
+  {
+    manualCreationVisible: undefined,
+    isPending: false,
+    isError: true,
+    copy: "Couldn’t check manual import availability.",
+  },
+  {
+    manualCreationVisible: false,
+    isPending: false,
+    isError: false,
+    copy: "Manual import is hidden.",
+  },
+])("keeps import task availability honest: $copy", async (state) => {
+  workspaceReadiness.mockReturnValue({
+    ...state,
+    error: new Error("Unavailable"),
+    readiness: undefined,
+    reload: vi.fn(),
+  });
+  renderPage("/finances/transactions?financeTask=import&import=1");
+  expect(await screen.findByText(state.copy, { exact: false })).toBeVisible();
+  expect(screen.queryByRole("dialog", { name: "Import transactions" })).not.toBeInTheDocument();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+});
+it("retains correction records and categorization while hiding unrelated creation in correction tasks", async () => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: false },
+    isPending: false,
+    isError: false,
+    reload: vi.fn(),
+  });
+  api.listFinanceTransactions.mockResolvedValue({
+    items: [
+      {
+        id: "meal",
+        accountId: "checking",
+        amount: 18.5,
+        category: null,
+        categoryId: null,
+        categoryConfidence: null,
+        categorySource: null,
+        merchant: "Correction cafe",
+        merchantId: null,
+        createdAt: "2026-08-23T12:00:00Z",
+        updatedAt: "2026-08-23T12:00:00Z",
+        date: "2026-08-23",
+        direction: "expense",
+        needsReview: true,
+        pending: false,
+        notes: null,
+        rawMerchant: null,
+      },
+    ],
+    nextCursor: null,
+  });
+  renderPage("/finances/transactions?financeTask=correct&import=1#finance-add-transaction");
+  expect(await screen.findByText("Correction cafe")).toBeVisible();
+  fireEvent.click(screen.getByRole("row", { name: "Open Correction cafe transaction" }));
+  expect(await screen.findByRole("button", { name: "Categorize" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Add in Transactions" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Add a transaction" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Import transactions" })).not.toBeInTheDocument();
+});
+
+it("does not treat an import marker on another route as permission to open source setup", async () => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: false },
+    isPending: false,
+    isError: false,
+    reload: vi.fn(),
+  });
+  renderPage("/finances/review/legacy?financeTask=import&import=1");
+  expect(await screen.findByText("Everything is categorized")).toBeVisible();
+  expect(screen.queryByRole("dialog", { name: "Import transactions" })).not.toBeInTheDocument();
+});
+
+it.each([
+  "pending_review",
+  "needs_input",
+])("keeps a legacy budget %s truthful and opens the exact review destination", async (status) => {
+  const notice = vi.spyOn(toast, "message").mockImplementation(() => "budget-notice");
+  const success = vi.spyOn(toast, "success").mockImplementation(() => "budget-notice");
+  const loading = vi.spyOn(toast, "loading").mockImplementation(() => "budget-notice");
+  api.createFinanceBudget.mockResolvedValue({
+    status,
+    review: { id: "approval/123" },
+    question: { id: "question/123" },
+  });
+  renderPage("/finances/budgets", false, true);
+  fireEvent.click(await screen.findByRole("button", { name: "Set a budget" }));
+  fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Dining" } });
+  fireEvent.change(screen.getByLabelText("Monthly limit"), { target: { value: "125" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save budget" }));
+  await waitFor(() => expect(notice).toHaveBeenCalled());
+  expect(loading).toHaveBeenCalledOnce();
+  expect(success).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Category")).toHaveValue("Dining");
+  expect(screen.getByLabelText("Monthly limit")).toHaveValue("125.00");
+  expect(screen.queryByText("Budget change needs approval")).not.toBeInTheDocument();
+  expect(screen.queryByText("Budget change needs more information")).not.toBeInTheDocument();
+  expect(notice.mock.lastCall?.[1]).toMatchObject({ id: "budget-notice" });
+  const options = notice.mock.lastCall?.[1];
+  if (!options?.action || typeof options.action !== "object" || !("onClick" in options.action))
+    throw new Error("Missing review action");
+  const action = options.action;
+  act(() => action.onClick?.({} as never));
+  expect(screen.getByLabelText("Current route")).toHaveTextContent(
+    status === "pending_review"
+      ? "/finances/review?approval=approval%2F123"
+      : "/finances/review?question=question%2F123",
+  );
+  notice.mockRestore();
+  success.mockRestore();
+  loading.mockRestore();
+});
+it.each([
+  "applied",
+  "legacy",
+])("closes the legacy budget form only for a confirmed %s result", async (status) => {
+  const success = vi.spyOn(toast, "success").mockImplementation(() => "budget-notice");
+  api.createFinanceBudget.mockResolvedValue(status === "applied" ? { status, result: {} } : {});
+  renderPage("/finances/budgets");
+  fireEvent.click(await screen.findByRole("button", { name: "Set a budget" }));
+  fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Dining" } });
+  fireEvent.change(screen.getByLabelText("Monthly limit"), { target: { value: "125" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save budget" }));
+  await waitFor(() => expect(success).toHaveBeenCalledWith("Budget saved", expect.anything()));
+  expect(screen.queryByRole("button", { name: "Save budget" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Budget saved")).not.toBeInTheDocument();
+  success.mockRestore();
+});
+
+it("preserves the budget draft and announces a rejected save through Sonner", async () => {
+  const error = vi.spyOn(toast, "error").mockImplementation(() => "budget-error");
+  const success = vi.spyOn(toast, "success").mockImplementation(() => "budget-error");
+  api.createFinanceBudget.mockRejectedValue(new Error("private server details"));
+  renderPage("/finances/budgets");
+  fireEvent.click(await screen.findByRole("button", { name: "Set a budget" }));
+  fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Dining" } });
+  fireEvent.change(screen.getByLabelText("Monthly limit"), { target: { value: "125" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save budget" }));
+  await waitFor(() => expect(error).toHaveBeenCalled());
+  const message = error.mock.lastCall?.[0];
+  expect(typeof message).toBe("string");
+  if (typeof message !== "string") throw new Error("Missing error feedback");
+  expect(screen.queryByText(message)).not.toBeInTheDocument();
+  expect(screen.queryByText("private server details")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Category")).toHaveValue("Dining");
+  expect(success).not.toHaveBeenCalled();
+});
+
+const exactSpendingFilter = {
+  query: {
+    scope: {
+      from: "2026-08-01",
+      through: "2026-08-31",
+      timezone: "America/New_York",
+      accountIds: ["checking"],
+      categoryIds: null,
+      basis: "personal_cost",
+      includePending: false,
+      subtractRefunds: true,
+    },
+    grouping: "categories",
+    includeUncategorized: true,
+  },
+  referenceRevision: "a".repeat(64),
+  groupId: "category:dining",
+  from: "2026-08-23",
+  through: "2026-08-23",
+};
+const exactSpendingPath = `/finances/transactions?${new URLSearchParams({ spending: JSON.stringify(exactSpendingFilter) })}`;
+
+it("fails closed for invalid Spending links and provides explicit ledger recovery", async () => {
+  renderPage("/finances/transactions?spending=bad");
+  expect(await screen.findByText(/This Spending link is invalid/)).toBeVisible();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+  expect(api.listFinanceSpendingTransactions).not.toHaveBeenCalled();
+  expect(screen.queryByText("No transactions yet")).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open Spending" })).toHaveAttribute(
+    "href",
+    "/finances/spending",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "View ledger" }));
+  await waitFor(() => expect(api.listFinanceTransactions).toHaveBeenCalled());
+});
+
+it("loads exact Spending references and keeps contribution totals separate from native amounts", async () => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: false,
+    readiness: { workspaceAccessible: true },
+    isPending: false,
+    isError: false,
+    reload: vi.fn(),
+  });
+  const transaction = {
+    id: "meal",
+    accountId: "checking",
+    amount: 18.5,
+    category: "Dining",
+    categoryId: "dining",
+    categoryConfidence: null,
+    categorySource: null,
+    merchant: "Source cafe",
+    merchantId: null,
+    createdAt: "2026-08-23T12:00:00.000Z",
+    updatedAt: "2026-08-23T12:00:00.000Z",
+    date: "2026-08-23",
+    direction: "expense",
+    needsReview: false,
+    notes: null,
+    pending: false,
+    rawMerchant: null,
+  };
+  api.listFinanceSpendingTransactions.mockResolvedValue({
+    items: [transaction],
+    nextCursor: "exact-next",
+    referenceRevision: exactSpendingFilter.referenceRevision,
+    totalTransactions: 2,
+    netCents: 1000,
+    scope: exactSpendingFilter.query.scope,
+    contributions: [],
+  });
+  renderPage(`${exactSpendingPath}&search=ignored`);
+  await screen.findByText("Source cafe");
+  expect(api.listFinanceSpendingTransactions).toHaveBeenCalledWith(
+    exactSpendingFilter,
+    undefined,
+    50,
+  );
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+  expect(screen.getByText(/\$10.00 Spending contribution · 2 source transactions/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: /^Filters/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Sort by date/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+  await waitFor(() =>
+    expect(api.listFinanceSpendingTransactions).toHaveBeenCalledWith(
+      exactSpendingFilter,
+      "exact-next",
+      50,
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "View ledger" }));
+  await waitFor(() =>
+    expect(api.listFinanceTransactions).toHaveBeenCalledWith(
+      expect.objectContaining({ cursor: undefined, search: "ignored" }),
+    ),
+  );
+});
+
+it("keeps changed Spending revisions closed instead of showing unrelated transactions", async () => {
+  api.listFinanceSpendingTransactions.mockRejectedValue(
+    Object.assign(new Error("Spending changed"), { status: 409 }),
+  );
+  renderPage(exactSpendingPath);
+  await screen.findByText(/This Spending view could not be confirmed/);
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+  expect(screen.queryByText("No transactions yet")).not.toBeInTheDocument();
+  const href = screen.getByRole("link", { name: "Open Spending" }).getAttribute("href");
+  const recovery = new URL(href ?? "", "https://nohmi.example");
+  expect(recovery.pathname).toBe("/finances/spending");
+  expect(JSON.parse(recovery.searchParams.get("recoverSpending") ?? "{}")).toEqual(
+    exactSpendingFilter,
+  );
+  expect(recovery.searchParams.has("spending")).toBe(false);
+  expect(api.listFinanceSpendingTransactions).toHaveBeenCalledTimes(1);
+  expect(api.listFinanceSpendingTransactions).toHaveBeenCalledWith(
+    exactSpendingFilter,
+    undefined,
+    50,
+  );
+});
+
+it("shows an exact empty Spending view without suggesting the ledger is empty", async () => {
+  api.listFinanceSpendingTransactions.mockResolvedValue({
+    items: [],
+    nextCursor: null,
+    referenceRevision: exactSpendingFilter.referenceRevision,
+    totalTransactions: 0,
+    netCents: 0,
+    scope: exactSpendingFilter.query.scope,
+    contributions: [],
+  });
+  renderPage(exactSpendingPath);
+  expect(await screen.findByText("No source transactions in this Spending view")).toBeVisible();
+  expect(screen.queryByText("No transactions yet")).not.toBeInTheDocument();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+});
+
+it("preserves the complete original historical scope and selected group/bin on stale recovery", async () => {
+  const filter = {
+    ...exactSpendingFilter,
+    query: {
+      scope: {
+        ...exactSpendingFilter.query.scope,
+        timezone: "America/Chicago",
+        accountIds: [],
+        categoryIds: [null, "food"],
+        basis: "full_outflow",
+        includePending: true,
+        subtractRefunds: false,
+      },
+      grouping: "buckets",
+      includeUncategorized: false,
+    },
+    groupId: "bucket:food",
+    from: "2026-08-08",
+    through: "2026-08-09",
+  };
+  api.listFinanceSpendingTransactions.mockRejectedValue(
+    Object.assign(new Error("Spending changed"), { status: 409 }),
+  );
+  renderPage(`/finances/transactions?${new URLSearchParams({ spending: JSON.stringify(filter) })}`);
+  await screen.findByText(/This Spending view could not be confirmed/);
+  const href = screen.getByRole("link", { name: "Open Spending" }).getAttribute("href");
+  const destination = new URL(href ?? "", "https://nohmi.example");
+  expect(destination.pathname).toBe("/finances/spending");
+  expect(JSON.parse(destination.searchParams.get("recoverSpending") ?? "{}")).toEqual(filter);
+  expect(destination.searchParams.has("spending")).toBe(false);
+  expect(api.listFinanceSpendingTransactions).toHaveBeenCalledOnce();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+});
+
+it("does not replace an unrepresentable valid recovery selection with default Spending", async () => {
+  const descriptor = {
+    ...exactSpendingFilter,
+    query: { scope: { ...exactSpendingFilter.query.scope, accountIds: [""] } },
+  };
+  descriptor.query.scope.accountIds = ["a".repeat(16000 - JSON.stringify(descriptor).length)];
+  const serialized = JSON.stringify(descriptor);
+  expect(serialized).toHaveLength(16000);
+  api.listFinanceSpendingTransactions.mockRejectedValue(new Error("Spending changed"));
+  renderPage(`/finances/transactions?${new URLSearchParams({ spending: serialized })}`);
+  expect(await screen.findByText(/This selection cannot safely return to Spending/)).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Open Spending" })).not.toBeInTheDocument();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+});
+
+const canonicalCategories = [
+  {
+    id: "food",
+    name: "Meals & groceries",
+    color: null,
+    group: "Spending",
+    isSystem: false,
+    slug: "food",
+  },
+];
+const canonicalTransaction = {
+  id: "canonical-meal",
+  accountId: "checking",
+  amount: 18.5,
+  category: null,
+  categoryId: "food",
+  categoryConfidence: 1,
+  categorySource: "user",
+  merchant: "Canonical cafe",
+  merchantId: null,
+  createdAt: "2026-08-23T12:00:00.000Z",
+  updatedAt: "2026-08-23T12:00:00.000Z",
+  date: "2026-08-23",
+  direction: "expense",
+  needsReview: false,
+  notes: null,
+  pending: false,
+  rawMerchant: null,
+};
+it.each([
+  ["ordinary", "table"],
+  ["ordinary", "cards"],
+  ["exact", "table"],
+  ["exact", "cards"],
+])("resolves canonical taxonomy in %s %s rows, grouping and details without changing native amounts", async (source, view) => {
+  api.getFinanceCategories.mockResolvedValue(canonicalCategories);
+  const transaction = {
+    ...canonicalTransaction,
+    category: source === "exact" ? "GENERAL_MERCHANDISE" : null,
+  };
+  api.listFinanceTransactions.mockResolvedValue({ items: [transaction], nextCursor: null });
+  api.listFinanceSpendingTransactions.mockResolvedValue({
+    items: [transaction],
+    nextCursor: null,
+    referenceRevision: exactSpendingFilter.referenceRevision,
+    totalTransactions: 1,
+    netCents: 1000,
+    scope: exactSpendingFilter.query.scope,
+    contributions: [{ transactionId: transaction.id, netCents: 1000 }],
+  });
+  const params = new URLSearchParams({ view: view ?? "table", group: "category" });
+  if (source === "exact") params.set("spending", JSON.stringify(exactSpendingFilter));
+  renderPage(`/finances/transactions?${params}`);
+  expect((await screen.findAllByText("Meals & groceries")).length).toBeGreaterThan(0);
+  expect(screen.queryByText("Shopping")).not.toBeInTheDocument();
+  if (view === "cards") expect(screen.getByText("Meals & groceries (1)")).toBeVisible();
+  if (source === "exact") {
+    expect(screen.getByText(/\$10.00 Spending contribution/)).toBeVisible();
+    expect(api.listFinanceSpendingTransactions).toHaveBeenCalledWith(
+      exactSpendingFilter,
+      undefined,
+      50,
+    );
+    expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+    const href = screen.getByRole("link", { name: "Open Spending" }).getAttribute("href");
+    expect(
+      JSON.parse(
+        new URL(href ?? "", "https://nohmi.example").searchParams.get("recoverSpending") ?? "{}",
+      ),
+    ).toEqual(exactSpendingFilter);
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Open Canonical cafe transaction" }));
+  const detail = await screen.findByRole("dialog", { name: "Canonical cafe" });
+  expect(within(detail).getByText(/Meals & groceries/)).toBeVisible();
+  expect(within(detail).getByText("−$18.50")).toBeVisible();
+  expect(transaction.amount).toBe(18.5);
+  expect(transaction.category).toBe(source === "exact" ? "GENERAL_MERCHANDISE" : null);
+});
+it.each([
+  "loading",
+  "missing",
+  "failed",
+] as const)("keeps %s canonical taxonomy distinct from an uncategorized transaction", async (state) => {
+  let resolveTaxonomy: ((value: typeof canonicalCategories) => void) | undefined;
+  if (state === "loading")
+    api.getFinanceCategories.mockReturnValue(
+      new Promise((resolve) => {
+        resolveTaxonomy = resolve;
+      }),
+    );
+  else if (state === "failed")
+    api.getFinanceCategories.mockRejectedValue(new Error("Taxonomy unavailable"));
+  else api.getFinanceCategories.mockResolvedValue([]);
+  api.listFinanceTransactions.mockResolvedValue({
+    items: [{ ...canonicalTransaction, category: "GENERAL_MERCHANDISE" }],
+    nextCursor: null,
+  });
+  renderPage("/finances/transactions");
+  expect(
+    await screen.findByText(state === "loading" ? "Loading category…" : "Category unavailable"),
+  ).toBeVisible();
+  expect(screen.queryByText("Shopping")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Open Canonical cafe transaction" }));
+  const detail = await screen.findByRole("dialog", { name: "Canonical cafe" });
+  expect(
+    within(detail).getByText(state === "loading" ? /Loading category…/ : /Category unavailable/),
+  ).toBeVisible();
+  if (state === "loading") {
+    await act(async () => resolveTaxonomy?.(canonicalCategories));
+    expect(await within(detail).findByText(/Meals & groceries/)).toBeVisible();
+    expect(within(detail).queryByText(/Loading category…/)).not.toBeInTheDocument();
+  }
 });

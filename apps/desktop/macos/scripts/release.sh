@@ -7,10 +7,10 @@ set -euo pipefail
 : "${APPLE_ID:?Apple notarization account required}"
 : "${APPLE_PASSWORD:?App-specific notarization password required}"
 : "${APPLE_TEAM_ID:?Apple team required}"
-: "${ILO_HOST_PROFILE_BASE64:?Provisioned host profile required}"
-: "${ILO_WIDGET_PROFILE_BASE64:?Provisioned widget profile required}"
-: "${ILO_KEYCHAIN_ACCESS_GROUP:?Provisioned shared Keychain group required}"
-: "${NOHMI_UPDATER_PUBLIC_KEY:?Updater public key required}"
+: "${PERSONAL_OS_HOST_PROFILE_BASE64:?Provisioned host profile required}"
+: "${PERSONAL_OS_WIDGET_PROFILE_BASE64:?Provisioned widget profile required}"
+: "${PERSONAL_OS_KEYCHAIN_ACCESS_GROUP:?Provisioned shared Keychain group required}"
+: "${PERSONAL_OS_UPDATER_PUBLIC_KEY:?Updater public key required}"
 : "${VITE_API_BASE_URL:?Production API required}"
 [[ "$VITE_API_BASE_URL" == "https://nohmi-api.coopersully.me" ]] || { echo "Official installers require the production nohmi API" >&2; exit 1; }
 # The separate publication runner alone receives the updater key.
@@ -35,7 +35,7 @@ trap cleanup EXIT
 python3 - "$workspace" <<'PY'
 import os, base64, pathlib, sys
 root = pathlib.Path(sys.argv[1])
-for source, name in [('APPLE_CERTIFICATE','certificate.p12'), ('ILO_HOST_PROFILE_BASE64','host.provisionprofile'), ('ILO_WIDGET_PROFILE_BASE64','widget.provisionprofile')]:
+for source, name in [('APPLE_CERTIFICATE','certificate.p12'), ('PERSONAL_OS_HOST_PROFILE_BASE64','host.provisionprofile'), ('PERSONAL_OS_WIDGET_PROFILE_BASE64','widget.provisionprofile')]:
     target=root/name
     target.write_bytes(base64.b64decode(os.environ[source], validate=True))
     target.chmod(0o600)
@@ -62,10 +62,10 @@ cd "$desktop"
 # The initial bundle is ad-hoc; embedding signs the complete bundle exactly once with Developer ID.
 env -u APPLE_CERTIFICATE -u APPLE_CERTIFICATE_PASSWORD -u APPLE_SIGNING_IDENTITY -u APPLE_ID -u APPLE_PASSWORD -u APPLE_TEAM_ID pnpm exec tauri build --bundles app --ci
 app="$desktop/src-tauri/target/release/bundle/macos/nohmi.app"
-export ILO_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" ILO_SIGNING_KEYCHAIN="$keychain"
-export ILO_HOST_ENTITLEMENTS="$root/Widgets/Host.entitlements"
-export ILO_HOST_PROVISIONING_PROFILE="$workspace/host.provisionprofile"
-export ILO_WIDGET_PROVISIONING_PROFILE="$workspace/widget.provisionprofile"
+export PERSONAL_OS_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" PERSONAL_OS_SIGNING_KEYCHAIN="$keychain"
+export PERSONAL_OS_HOST_ENTITLEMENTS="$root/Widgets/Host.entitlements"
+export PERSONAL_OS_HOST_PROVISIONING_PROFILE="$workspace/host.provisionprofile"
+export PERSONAL_OS_WIDGET_PROVISIONING_PROFILE="$workspace/widget.provisionprofile"
 "$root/scripts/embed-widgets.sh" "$app"
 ditto -c -k --keepParent "$app" "$workspace/nohmi.zip"
 xcrun notarytool submit "$workspace/nohmi.zip" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait

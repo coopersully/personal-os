@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   accessTokens,
   accountActionTokens,
@@ -20,6 +21,7 @@ import type {
   User,
 } from "@personal-os/domain";
 import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { ensureAgentAccount } from "./agent-account-service.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
 import {
@@ -74,6 +76,7 @@ export type SessionSummary = {
   createdAt: string;
   expiresAt: string;
   id: string;
+  isCurrent: boolean;
   ipAddress: string | null;
   lastSeenAt: string;
   userAgent: string | null;
@@ -196,7 +199,11 @@ export function createAuthService(options: AuthServiceOptions) {
   }
 
   return {
-    async authenticateAccessToken(token: string, audience?: string): Promise<Principal> {
+    async authenticateAccessToken(
+      token: string,
+      audience?: string,
+      requestId: string = randomUUID(),
+    ): Promise<Principal> {
       const currentTime = now();
       const [record] = await db
         .select()
@@ -219,12 +226,23 @@ export function createAuthService(options: AuthServiceOptions) {
         .update(accessTokens)
         .set({ lastUsedAt: currentTime })
         .where(eq(accessTokens.id, record.id));
-      return {
+      const principal: Principal = {
         actorId: record.id,
+        authorizationConnectionId: record.authorizationConnectionId,
         actorType: "agent",
         scopes: new Set(record.scopes),
         userId: record.userId,
       };
+      await db.transaction((tx) =>
+        ensureAgentAccount(
+          tx,
+          { principal, requestId },
+          record.authorizationConnectionId,
+          "unknown",
+          currentTime,
+        ),
+      );
+      return principal;
     },
 
     async authenticateSession(token: string): Promise<Principal> {
@@ -245,6 +263,7 @@ export function createAuthService(options: AuthServiceOptions) {
       return {
         actorId: record.user.id,
         actorType: "user",
+        sessionId: record.session.id,
         scopes: allScopes,
         userId: record.user.id,
       };
@@ -465,7 +484,8 @@ export function createAuthService(options: AuthServiceOptions) {
       return records.map(serializeAccessToken);
     },
 
-    async listSessions(userId: string): Promise<SessionSummary[]> {
+    async listSessions(userId: string, currentSessionToken?: string): Promise<SessionSummary[]> {
+      const currentTokenHash = currentSessionToken ? hashToken(currentSessionToken) : undefined;
       const records = await db
         .select()
         .from(sessions)
@@ -475,6 +495,7 @@ export function createAuthService(options: AuthServiceOptions) {
         createdAt: record.createdAt.toISOString(),
         expiresAt: record.expiresAt.toISOString(),
         id: record.id,
+        isCurrent: currentTokenHash !== undefined && record.tokenHash === currentTokenHash,
         ipAddress: record.ipAddress,
         lastSeenAt: record.lastSeenAt.toISOString(),
         userAgent: record.userAgent,
@@ -611,6 +632,9 @@ export function createAuthService(options: AuthServiceOptions) {
       };
     },
 
+    // Old-token-only revocation intentionally remains one UPDATE. Its row write
+    // serializes with canonical OAuth refresh's retained old-access SHARE; it
+    // never takes a later owner/grant lock or revokes an already-issued successor.
     async revokeAccessToken(userId: string, tokenId: string): Promise<void> {
       const [record] = await db
         .update(accessTokens)

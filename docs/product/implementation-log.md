@@ -1,5 +1,469 @@
 # nohmi — Implementation Log
 
+## 2026-11-13 — Finished projects on the iPhone Projects tab (local implementation)
+
+- COO-217 — The native Projects tab has Active, Completed, Cancelled and All status chips with
+  counts. Completed and cancelled projects that are not archived are reachable there and open with
+  all of their tasks, including finished ones; their rows and pinned cards name the status, also
+  to assistive technology. Finished and archived projects, and projects in an archived list, offer no Add. Counts appear only once
+  lists and projects have loaded. Previously Projects
+  listed only open projects and Archive only archived ones, so these had no entry point.
+- Lists, Projects and Archive search also matches list descriptions and project why and notes.
+  Directory filtering, search and ordering live in a pure module with unit tests.
+- Focused Tasks tests, mobile type checking and changed-file lint passed; the chips were observed
+  in the iPhone simulator against the demo fixture. This is not a production or TestFlight release.
+
+## 2026-11-13 — Finance playbook 1.1.0 and profile facts (source change)
+
+- The Finance playbook is version 1.1.0: it adds a scored stewardship rubric, ledger rules, alert
+  tiers and dated reference limits with primary sources. The assessment returns one result per
+  check with its arithmetic; checks without facts are `not_assessed`. Retirement saving rate and
+  employer match are not assessable because those facts have no storage yet.
+- `update_financial_profile` over MCP now accepts debts, insurance policies and planning
+  preferences in addition to the six scalar facts. Storage and the HTTP route already accepted them.
+- Scheduled-run instructions (version 3) load the profile, goals and playbook before financial
+  work and record durable stated facts.
+- A payment the provider labels as a credit card payment no longer counts toward spending,
+  refunds or budget pace when a connected, planning-included credit card received that amount
+  within five days; a payment to a card nohmi cannot see still counts. It is not linked
+  or resolved by this rule.
+- Focused unit tests and typechecks pass. This is not yet merged, deployed or observed in
+  production; the provider's detailed label on existing production rows is unverified because no
+  read exposes it. User Knowledge (Memory) remains unimplemented.
+
+## 2026-11-06 — Native Tasks source acceptance
+
+- [Native Tasks iPhone workflows](https://github.com/coopersully/personal-os/pull/367) merged with
+  To-do, Projects, Lists and Browse. To-do defaults to today and overdue; History contains completed
+  and cancelled items, while Archive and Trash remain separate. The web History empty state now
+  describes that same distinction.
+- Added meaningful mobile authentication, notification, editor, navigation and lifecycle coverage:
+  227 mobile tests pass with unchanged coverage floors. The complete repository source gate passed
+  673 test files, production builds, all eight browser shards and both native desktop builds.
+- Local fixture simulator checks verified creation/cancel, completion/Undo, Trash details,
+  Restore/Undo and successful Trash dismissal. Release review fixed closing-editor refetch errors,
+  stale reopened drafts and notification ownership across asynchronous preference persistence.
+- These are source and simulator observations, not physical-iPhone or OS notification-delivery
+  acceptance. The broader native milestone retains its device, encrypted-cache, Universal Links
+  and reminder-create-idempotency work.
+
+## 2026-11-06 — iOS local due alerts
+
+- Added opt-in task/reminder due alerts using Apple User Notifications via Expo, with generic
+  lock-screen content, explicit permission handling, owner-scoped routing and schedule reconciliation.
+  Settings include OS settings access, refresh and a test action with Sonner outcomes.
+- Verified a test alert in simulator Notification Center after backgrounding Expo Go; focused tests
+  and native/web bundles pass. Physical nohmi/TestFlight delivery remains unverified.
+- This is local scheduling, capped at the next 50 alerts. Cross-device edits while the app is closed
+  require server push delivery, which is not implemented. See
+  [mobile notification boundary](../engineering/mobile-due-notifications.md).
+
+## 2026-11-05 — Expo Tasks workspace (local implementation)
+
+- Mobile refinement: task rows show one urgency-focused metadata line (due date, high priority,
+  reminder identity and read-only state). Detailed notes, tags and estimates stay in the editor;
+  mobile no longer exposes row-detail toggles, while existing web preferences remain preserved.
+  Explicit view overrides/search have removable indicators and Clear all. Container selection uses
+  a shared searchable, virtualized sheet with cancellation and empty states. Row rendering,
+  filter indicators, menu configuration and presentation helpers are separate from API orchestration.
+
+- COO-29 — Deliver native Tasks and Reminders workflows: audited web Tasks navigation,
+  workspace projections, dialogs, moves, archive conflicts, pins and preferences against the shared API.
+- Added API-backed Today, Views (Inbox, All, Upcoming, Scheduled, Reminders, Lists, Projects),
+  Pinned and History, with Trash and archived containers. Native stack editors provide task/reminder
+  creation, editing and lifecycle actions; lists/projects support organization, move previews and
+  open-content resolution. Search, filters, grouping, pagination, bulk actions and shared preferences
+  use the existing domain contracts. Existing native tabs and workspace picker remain intact.
+- Tasks use virtualized rows and native date controls. Writes require API confirmation, revision guards
+  and Sonner feedback; no offline write queue. Queries are session-scoped and late responses are
+  rejected after logout. Task create retries retain their idempotency key and payload. Reminder
+  create has no server idempotency contract, so an uncertain result requires reviewing the list
+  before another create attempt.
+- Local evidence: focused session/task boundary tests, mobile type checking, and authenticated
+  simulator read/editor/date-control smoke checks. Personal records were not modified for acceptance.
+- This is not a TestFlight release or complete CRUD acceptance. Dedicated test-account mutation
+  acceptance, device accessibility checks, large-container picker usability, and reminder-create
+  idempotency remain release work. Workspace agent/setup/import settings and global archived search
+  remain outside this first mobile workspace pass. Container icon/color metadata is editable but
+  the mobile directory currently uses semantic list/project icons.
+
+## 2026-10-22 — Native settings and populated source rows
+
+- Shipping review added audited profile-zone reconciliation, serialized first/last-name edits,
+  keyboard Home clearing, optional-time unsetting, dialog focus restoration, retained failed goal
+  progress drafts, and explicit retry/discard recovery for unsaved ritual answers. Regression tests
+  include a real second-owner attempt against completion with optional reminder creation.
+- Desktop Notifications keeps general guidance in its shared subsection header. Its first row
+  summarizes macOS permissions and opens a guided setup dialog containing permission instructions,
+  presentation checks, recheck/native settings actions, and the authorized-only test action.
+  Checks refresh on opening and return; editable preferences remain flat divided rows.
+- Calendar Sources groups flat switch rows under account identities. Mail account and rule summaries
+  use compact rows instead of nested record cards, preserving navigation, health, and rule actions.
+- Native server configuration exposes flat hosted/custom choices with the existing explicit tested
+  Connect flow. Pet color rests as a swatch/value and opens a shared picker popover; pet workspace
+  switches use their own standard row section. Narrow settings no longer force simple controls below
+  their labels solely at a viewport breakpoint.
+- Checked populated Calendar/Mail in desktop and mobile browser views, and Notifications, server
+  chooser, and color popover in the current-source isolated macOS QA app. Focused native/settings
+  and Calendar tests plus web type checking pass. This does not certify OS notification delivery,
+  signed widget installation, or production server connectivity.
+
+## 2026-10-20 — Real browser ritual presentation
+
+- Enabled rituals now present the shared checklist over the signed-in browser app with a blurred
+  backdrop, preserving the current page and restoring focus on dismissal through ritual actions.
+  Sign-in, standalone setup, and native desktop presentation keep their existing ownership.
+- Browser answers, completion, optional reminders, snoozes, and skips use the real owner-scoped
+  API and revisions. Polling and focus/reconnection refresh cross-client settlements; monotonic
+  elapsed time anchored to the server handles snooze/expiry independently of device clock skew.
+- Mutations cancel stale polls before adopting accepted state. Owner-scoped ephemeral query caches
+  and existing session-denial handling prevent late responses from restoring private state after
+  an account change. Read failures use deduplicated Sonner feedback and retry.
+- Browser delivery applies only to an open nohmi tab; writes require connectivity and API
+  acceptance. This is a source checkpoint, not deployment or a verified native macOS smoke test.
+
+## 2026-10-20 — Ritual streaks, weekly progress, and deliberate skipping
+
+- Main rituals show separate morning/evening streaks from retained completion history, including
+  history older than seven days. Optional steps and unscheduled days do not break continuity.
+- Added a dated seven-day completion strip alongside the streak, scoped to the current ritual.
+  Completed days stay visible across misses or skips; pending, unscheduled, and absent-record days
+  remain distinct. Queued completion/skip updates the local strip and discloses synchronization.
+  Preview excludes personal progress; native offline advancement clears the previous strip.
+
+- Skip confirmation shows applied skips in the last 72 hours and the streak at risk. A visible
+  30-second countdown and progress fill require an uninterrupted pointer or keyboard hold before
+  the shared checklist submits a skip. Release, blur, visibility changes, and cancellation reset it.
+- Offline cached streaks are labeled and cleared at the next occurrence; unavailable skip history
+  is disclosed. The existing durable native action queue still owns skip synchronization.
+- Source checkpoint only; no deployment or installed-desktop verification is implied.
+
+## 2026-10-17 — Configurable ritual steps and optional follow-ups
+
+- Added optional step participation and everyday, weekday, weekend, or custom weekday inclusion.
+  Daily checklists resolve in the ritual time zone and retain their original snapshots. Empty
+  days settle without opening; only required steps gate explicit completion on other days.
+- Added separate morning/evening reminder defaults and an unchecked follow-up checkbox with an
+  editable time during the ritual. The interface labels next-day times explicitly. Completion
+  creates native Reminders only for unfinished optional steps when requested, atomically with
+  the ritual and its retry receipt. History records optional not done or follow-up scheduling.
+- Desktop offline completion preserves follow-up intent in its existing encrypted queue. Pending
+  intent is not a confirmed reminder; conflicts retain existing recovery. Valid delayed requests
+  become due at least one minute after acceptance. Preview never writes reminders.
+- Focused domain, PostgreSQL integration, UI, and Rust checks cover scheduling, required/optional
+  completion, retry deduplication, invalid-request rollback, delayed acceptance, snapshots, and
+  offline follow-ups. Desktop/mobile browser coverage exercises settings and preview.
+- This is a source implementation checkpoint, not a deployed release or a verified OS notification.
+  Existing notification preferences and OS permissions still govern delivery; the native changes
+  require a rebuilt desktop app.
+
+## 2026-10-21 — Personal harness exterior (branch implementation)
+
+- The design branch positions nohmi as **a personal harness**: context, tools, and controls
+  built around a person. Canonical planning and design guidance use that lens. This is product
+  direction, not a claim that the entire target is available.
+- The public landing page, about page, getting-started guide, and authentication brand panel
+  adopt lowercase copy, restrained proportions, and external light blue. The shared public
+  navigation/footer and authentication labels follow the same voice. Product theme tokens and
+  policy/consent bodies retain their existing behavior and commitments.
+- Public documents and the landing page still use the existing static rendering path and work
+  without JavaScript or a session. The public-site page contract records layout and color scope.
+- This entry records local branch implementation only; no merge or production publication is
+  asserted. The application-wide neutral-theme migration remains a separate implementation task.
+
+## 2026-10-19 — Integrated Finance experience merged
+
+- [PR #270 — Complete the Finance workspace and guarded agent workflows](https://github.com/coopersully/personal-os/pull/270)
+  merged at `498f08d4` with resumable setup, Spending, Chat, Automations and Activity, and manual
+  workflow surfaces. Setup receipts preserve existing access and separate completion from messaging
+  readiness; the conversation and activity trail connect decisions to their supporting records.
+- Spending defaults to personal cost while retaining full-outflow inspection, exact transaction
+  drill-down, and applicable monthly budget evidence. These distinctions keep expected reimbursements
+  and unsupported budget percentages from appearing as confirmed money. See the
+  [Finance specification](../design/pages/finances.md) and its owning contracts.
+- Every active budget activation or revision requires exact authenticated human approval. Agent
+  execution scopes, bypass, prior context and conversation replies do not substitute for that approval;
+  historical approval provenance remains evidence, not present authority. See [MCP policy](../mcp.md).
+- [PR #274 — Document confirmed Finance costs and goal progress](https://github.com/coopersully/personal-os/pull/274)
+  records the current cost and goal-progress distinctions, including current evidence versus expected
+  recovery. It does not add a second runtime delivery claim.
+- These are merged-source checkpoints. Production revision/controller proof, production-specific
+  shutdown evidence, and external-host/provider certification remain unobserved in this maintenance
+  run. The narrowed integration acceptance does not complete the broader Finance MVP SMS and host
+  acceptance requirements.
+
+## 2026-10-12 — Finance text results and desktop pet refinements merged
+
+- [PR #242 — Fix Finance MCP text responses](https://github.com/coopersully/personal-os/pull/242)
+  merged at `2a84761d635792ba6c14273ec53a16713997315e`. Finance text responses now serialize
+  the complete versioned result instead of only its headline/question. Text-only hosts can read
+  records, pagination, disclosures and recovery information while structured payloads and
+  API-owned authorization remain unchanged. See the [MCP result contract](../mcp.md).
+- [PR #244 — Refine desktop pet interactions and quick-access cards](https://github.com/coopersully/personal-os/pull/244)
+  merged at `c6847a9e3bbbb7bd9687488b8f30a8cf2ed94e18`. Clicks tolerate pointer jitter before
+  becoming drags; unpinned quick access consumes outside dismissal clicks, while pinned cards
+  preserve multitasking. Shared Calendar, Task and Reminder components, account-scoped calendar
+  colors, local-day all-day visibility and section navigation refine the card without changing
+  domain ownership. See [desktop behavior](../design/pages/desktop-background.md).
+- These are merged-source checkpoints. Source tests do not establish provider journeys, installed
+  desktop behavior on every display configuration, or deployment of a particular release.
+
+## 2026-10-11 — Public product, policy, and authentication pages merged
+
+- [PR #237 — Add public product and policy pages](https://github.com/coopersully/personal-os/pull/237)
+  merged at `933e5b8cf52abc908711e5910f8c3b161b975f52`. The public landing page and seven
+  product/policy documents render without an account or JavaScript. Dedicated authentication
+  routes preserve safe return destinations; SMS enrollment retains the consent version accepted
+  on its verification challenge.
+- Final source head `b4511c839de50a8baadfa79602a865947ed357c7` passed repository contracts,
+  lint, Node quality, browser acceptance, both selected desktop jobs, infrastructure checks,
+  and required CI. This supersedes the incomplete branch verification state recorded below;
+  those earlier failures remain historical evidence, not the final release gate.
+- Public-page reachability, deployed enrollment screenshots, actual HELP/STOP/START behavior,
+  sender registration, and provider approval require their own evidence. Merge and source
+  checks do not satisfy the [messaging submission gates](../engineering/public-documentation.md).
+
+## 2026-10-11 — Explicit workspace agent execution
+
+- Added typed MCP paths for shipped Mail, Tasks/Reminders, Calendar, Finance and shared settings,
+  source and host-recovery operations. The [tool dictionary](../engineering/workspace-agent-tools.md)
+  is generated from actual discovery; the [execution matrix](../engineering/workspace-agent-execution.md)
+  records local MCP-to-API-to-PostgreSQL evidence rather than registration-only claims.
+- Explicit opt-in execution scopes plus owner-enabled bypass permit registered Mail send/reconciliation,
+  rule activation, Finance execution and settings operations. Existing grants are unchanged; agents
+  cannot change bypass, their own permissions, provider login/MFA or owner security settings.
+- Agent approvals retain their actor and approval source. Migrations `0110` and `0111`
+  add approval provenance and encrypted hosted-bank handoff state after the published history.
+- Hosted bank start persists its attempt and receipt before provider work; failures stay inspectable
+  and replay never repeats an uncertain provider request. Explicit source sync preserves agent
+  initiation in audit and revalidates consent atomically with its claim.
+- Hosted bank completion preserves exchange state and commits account attachment with its terminal
+  receipt. Provider login/provisioning and live external effects remain unverified by local tests.
+- This supersedes historical MCP no-send and actor-only restrictions for the explicitly registered
+  operations. Autonomous Mail maintenance still does not compose/send; response briefs remain
+  non-transmittable. See [capability boundaries](../engineering/workspace-agent-capabilities.md).
+- Implementation evidence does not establish production deployment or exhaustive input-variant coverage.
+
+## 2026-10-12 — Connector capability recovery and monitoring merged
+
+- [PR #241 — Keep connector capabilities recovering and add production monitoring](https://github.com/coopersully/personal-os/pull/241)
+  merged at `72ad1841c109b9a40efcfea95a49c0e4083030d8`. This supersedes the branch-only
+  delivery label; the earlier candidate's validation counts below remain historical evidence.
+- Calendar and Mail now retain independent health, freshness and retry state. Healthy siblings
+  continue while failed capabilities wait for recovery; prolonged retries become visible service
+  attention. Google quota/permission errors are distinguished, refreshed sync credentials persist
+  before subsequent requests, and notification listeners defer account health to the fenced sync.
+- Connections display per-service health and last success. Domain source health, reconnect review
+  tasks and Calendar stewardship use the relevant capability's state.
+- Added read-only Mac production diagnostics and an optional Grafana Cloud Free collector/dashboard
+  for container resources, sanitized API/connector events and health probes. A Cloud Free stack was
+  created on October 12; production collector installation, live ingestion and alert delivery remain
+  operator acceptance, not shipped production claims. See the
+  [monitoring runbook](../../deploy/observability/README.md).
+- Local validation: 3,779 tests across 359 files pass; coverage is 96.77% statements/lines,
+  95.54% functions and 94.01% branches with unchanged thresholds. Type checks and production builds
+  pass. Browser acceptance passes 80 tests with two intentional mobile skips; all 42 Mac production
+  tests pass. The pinned Alloy configuration and actual log-pipeline privacy checks pass. An unrelated
+  UI test's screen-loading waits now match adjacent tests after exposing contention-sensitive failures.
+- The branch was updated to current main and its additive migration moved after published history
+  as `0112_connector_capability_health`. The validation counts above describe the October 11
+  candidate; current-candidate shipping verification is recorded separately.
+- On October 12, the operator console confirmed Google OAuth publishing status **In production**
+  after completing nohmi branding with the live homepage, privacy and terms links. This removes
+  Testing status; it does not establish Google verification, restore expired grants, or prove
+  deployment of these application changes. Existing expired grants need one reconnect.
+
+## 2026-10-10 — Finance history, continuations, and settings recovery merged
+
+- [PR #229 — Expose Finance review history and exact evidence](https://github.com/coopersully/personal-os/pull/229)
+  merged at `2b45e83f`; [PR #235 — Complete Finance answers and host continuations](https://github.com/coopersully/personal-os/pull/235)
+  merged at `11e57410`; [PR #233 — Recover settings saves and modularize review and Finance services](https://github.com/coopersully/personal-os/pull/233)
+  merged at `2d957702`. This checkpoint supersedes branch-only delivery status in the October 8
+  history and October 9 continuation entries. Their original validation notes remain historical.
+- Finance history exposes bounded, owner-scoped case summaries and exact evidence without changing
+  active work. Transaction/account deletion retains immutable review evidence; user deletion removes
+  the archive. Published migration `0105` remains unchanged and `0109` upgrades deletion snapshots
+  additively. See the [Finance page contract](../design/pages/finances.md).
+- Canonical questions, exact app/SMS answers, notification discovery, signed prospective context,
+  bounded categorization approvals and durable acknowledgments now compose with host setup and
+  accepted-answer continuations. Durable receipts distinguish an accepted answer from completed
+  maintenance, and uncertain provider or host submissions are not blindly repeated. See
+  [Texting](texting-operations.md) and [automation hosts](automation-hosts.md).
+- Finance notification links open its scoped Reviews flow. Assistant, Texting recovery and some
+  MCP generated links still need migration; the accepted cross-workspace destination remains
+  unimplemented. See the [current navigation boundary](../design/pages/reviews.md).
+- [Settings recovery](workspace-settings.md) retains attempted changes after conflict or uncertain
+  delivery, lets a person inspect current values and explicitly reapply against that exact revision,
+  and fences account/session changes. Domain-owned review providers preserve aggregation and scope;
+  Finance merchant extraction retains domain and transaction boundaries.
+- Merge and source checks do not prove production rollout. Finance SMS remains disabled by default;
+  separate real Codex/Claude post-session journeys, latency/usage and authorized SMS delivery remain
+  launch acceptance requirements. Detailed verification belongs to each PR's final evidence record.
+
+## 2026-10-08 — Finance review history read (branch implementation)
+
+- Added owner-scoped, bounded keyset history reads for open, deferred, and resolved Finance Inbox
+  cases, plus an exact evidence read. A foreign or invalid cursor fails without exposing another
+  user's case; missing and foreign exact IDs share the same unavailable result. A new
+  owner/time/ID index supports ordered pages; review-case records and answer semantics are unchanged.
+- The shared Finance Reviews dialog discloses older case status and exact recorded evidence on demand, with
+  bounded continuation and local retry states. Focused PostgreSQL and UI tests cover status,
+  timestamp ordering, ownership, pagination, and exact evidence. Source transaction and account
+  deletion retain immutable owner-scoped review evidence; the first published archive migration is
+  upgraded additively. Full verification on the current base remains pending; this branch does not
+  activate SMS, matching, or reusable User Knowledge.
+
+
+## 2026-10-07 — Workspace layout, Finance configuration, and Mail recovery merge
+
+- [PR #223 — Standardize workspace layouts and Finance configuration](https://github.com/coopersully/personal-os/pull/223)
+  merged into `main` at `99ecac3d`. This is the merged-source checkpoint for the October 3–6
+  branch entries below. Their original verification notes describe those earlier checkpoints,
+  not the final merged verification result.
+- Shared workspace navigation, header slots, bounded search, and saved display preferences keep
+  controls consistent while domains retain record ownership. The
+  [workspace layout contract](../design/workspace-layout-architecture.md) explains intrinsic chrome,
+  pane versus page scrolling, and preserving a single control instance across responsive layouts.
+- Reviews now opens in a workspace-scoped dialog or mobile drawer from the workspace attention
+  alert, workspace Settings header, or workspace search. The underlying page stays in place; domain actions retain
+  their authority and revision checks. This supersedes the October 1 Today-owned `/reviews`
+  placement: `/reviews` falls back to Account, and the old queue component is retained but not
+  routed. Some notification and agent producers still emit legacy links that land on Account;
+  generated-link migration remains incomplete. See the
+  [Reviews contract](../design/pages/reviews.md) for exact links, this limitation, and recovery.
+- [Finance](../design/pages/finances.md) includes editable configuration, partial-read recovery,
+  scalar saves on blur or selection, complete collection-row saves on leaving the row, compact
+  transaction cards, responsive details, category/context editing,
+  and saved display/group preferences. Configuration remains separate from explicit budget
+  preparation and record-checking operations; incomplete evidence is not silently filled in.
+- [Mail](../design/pages/mail.md) includes authenticated attachment preview/download with bounded
+  provider reads and cancellation, maintenance recovery within Reviews, and preservation of
+  unresolved questions across scoped runs.
+- The PR records a full local verification pass at `7c362cf5` (3,371 unit/integration tests and
+  64 desktop/mobile acceptance tests, with two intentional skips) and successful subsequent
+  hosted CI. These establish source verification, not production deployment, installed desktop
+  acceptance, or live provider attachment access.
+
+## 2026-10-07 — Public landing and authentication routes (branch implementation)
+
+- The browser root is now a public nohmi product landing page with workspace introductions,
+  user-control explanations, sign-up/login links, and all seven public documents in its footer.
+- Login, sign-up, and password recovery have dedicated `/login`, `/signup`, and `/forgot-password`
+  URLs. Protected deep links preserve safe local return paths; normal login opens `/today`.
+  Existing email verification/reset URLs remain supported, including when already signed in.
+- The installed PWA starts at `/today`; native desktop keeps its application entry point.
+- Landing, guide, and policy pages share a shadcn navigation/header and subtle-tone footer.
+  Shared gutters and section spacing align the workspace cards and document reading layout.
+  The header dissolves at the top and becomes a translucent sticky pill on scroll, with Guide
+  and Login links. The footer shows current-year Cooper Sullivan copyright and a decorative
+  nohmi wordmark; operator/contact details stay in policy and support content, not the footer.
+  Reviewed document content is pre-rendered through the same components to retain no-JavaScript access.
+- All 24 desktop/mobile public-documentation and authentication-route browser checks passed,
+  including direct sign-up, refresh/back navigation, and protected-page return after login.
+- Shared-layout verification also passed 24 focused unit/UI tests, web type checking, and the web
+  production build. Final full verification passed lint/infrastructure and workspace type checks,
+  then encountered unrelated UI and migration timeouts. UI reruns passed (two used the existing
+  CI timeout); the broad run was stopped after migration timeouts and is not a passing gate.
+
+## 2026-10-07 — Public documentation and SMS disclosures (branch implementation)
+
+- Added static, unauthenticated About/mission, product guide, Privacy policy, Terms of use,
+  data/agent access, SMS enrollment/terms, and Support pages. Public operator/contact details were
+  confirmed by the user. Sign-in and SMS enrollment link to those same documents.
+- Public documents render without JavaScript; Vite directory handling and the PWA navigation
+  fallback preserve document access. Desktop and mobile public-page browser checks passed.
+- SMS consent now discloses message types, frequency, rates, STOP/HELP, optional enrollment,
+  and policy links. Number changes reset the checkbox. Verification completion preserves the
+  version accepted when the code was requested, including across deployments.
+- All 25 focused texting UI/domain/database tests and 18 desktop/mobile public-page checks passed;
+  sign-in checks also passed on rerun with visual inspection. Web build and type checks passed.
+  `pnpm verify` completed lint/type checks but stopped at coverage tests: 3,370 tests passed and
+  the existing Tasks lifecycle/Trash/restore test failed at its cancelled-task lookup. That test
+  passed in isolation; the full verification gate is not green.
+- Production publication, deployed enrollment
+  screenshots, live HELP/STOP/START evidence, and Twilio approval are separate outstanding gates
+  in the [submission guide](../engineering/public-documentation.md). No deployment or provider
+  configuration was changed by this branch implementation.
+
+## 2026-10-06 — Finance configuration and prerequisites (branch implementation)
+
+- Financial setup loads a read-only, owner-scoped aggregate and shares autosaving fields with
+  Finance Settings. Profile, Accounts and records, and Budget can be visited independently.
+- Scalar/profile collection edits retain unknown versus explicit zero/None, serialize shared
+  revisions, preserve newer drafts, and expose retry/reload beside failed fields. Payroll updates
+  support optimistic conflict checks without a storage migration.
+- Preparing the first budget and checking records remain explicit operations. Preparation can
+  use partial information but retains incomplete/evidence and approval safeguards. Reopening a
+  page does not execute the setup protocol.
+- The Finance sidebar groups Money, Planning, and Manage. Budget links to a prerequisite screen
+  when absent; records and useful cash-flow/wealth surfaces remain available. Settings search
+  targets the shared fields directly.
+- Focused API/database/UI checks and desktop/mobile setup persistence acceptance passed.
+  The full verification command was stopped after 60 seconds in the deployment-drain scenario
+  stage; full coverage/build verification is not claimed. This is branch work, not deployment.
+
+## 2026-10-11 — Desktop background setup and pet quick access (merged source)
+
+- [PR #218 — Improve desktop background setup and pet quick access](https://github.com/coopersully/personal-os/pull/218)
+  merged at `6c6c4ab936ecc19e43956f6cbf6518f3235a683a`. It includes the shared readiness
+  guidance described below and a single-window pet/card scene with cursor-selected anchors,
+  pinning/resizing, configurable idle sleep, and optional closed-card shoo. Shoo defaults to
+  disabled with Medium sensitivity and does not move an open card.
+- Quick access has independent task/reminder windows and optional ritual cards. Finance's
+  Next 30 days remains unavailable without scheduled-outflow evidence.
+- This supersedes the earlier source/draft status checkpoints, preserving their design history.
+  Source implementation and automated tests do not prove signed-installation startup, actual
+  OS notification delivery, smooth pointer behavior, cross-application click-through, or every
+  Dock/display/Spaces configuration. See [desktop background setup](../design/pages/desktop-background.md)
+  for the remaining native acceptance gaps.
+
+## 2026-10-05 — Desktop background setup (historical source checkpoint)
+
+- Tracked by [COO-77 — Guide desktop background setup and macOS permissions](https://linear.app/coopersully/issue/COO-77/guide-desktop-background-setup-and-macos-permissions)
+  and [PR #218 — Improve desktop background setup and pet quick access](https://github.com/coopersully/personal-os/pull/218).
+- UI refinement removes the application-wide ritual setup offer, promotes Desktop pet to a
+  primary Settings destination, groups desktop preferences by decision, and hides login server
+  configuration behind a dialog. Ritual background navigation uses a compact, bounded action.
+- Desktop and Pet settings now guide login startup, OS notification alerts, pet enablement,
+  and morning routine readiness through the shared readiness dialog. Routine settings link
+  back to setup. Pending login approval opens macOS Login Items directly.
+- Settings refresh OS evidence while visible and on return from System Settings, preserving
+  unsaved edits. Setup saves launch-at-login independently of those drafts.
+- Local desktop verification after the main catch-up exposed a signed-out startup loop.
+  Native updater status now survives API session expiry, keeping login reachable while
+  authenticated query data is still cleared. Regression coverage exercises both paths.
+- The existing resident runtime remains responsible for close-window operation and wake
+  recovery. Explicit Quit still exits; there is no new persistent helper. Already scheduled
+  OS notifications may outlive Quit.
+- Signed-installation approval, login relaunch, and actual OS delivery still require native
+  smoke verification; source checks do not establish those runtime capabilities. See
+  [desktop background setup](../design/pages/desktop-background.md).
+
+## 2026-10-05 — Calendar opening and Follow preferences (branch implementation)
+
+- Calendar remembers an explicitly selected view in account-owned Calendar settings. Normal entry
+  opens today in that view, following the current time by default; disabling automatic Follow
+  opens the day at midnight. Explicit date/view/Follow links retain their navigation intent.
+- Snap back to Follow can be disabled independently, with Precise, Balanced, and Generous capture
+  ranges. Capture waits for scrolling to settle and uses a wider release range to prevent jitter.
+- Migration 0095 adds the Follow preferences. Partial preference updates preserve omitted values;
+  read defaults are not applied to PATCH payloads. This is branch implementation, not deployment evidence.
+
+## 2026-10-03 — Workspace discovery (branch implementation)
+
+- Added a shared Calendar, Tasks, Mail, and Finances header finder for domain records, settings
+  fields, navigation, creation forms, and the existing review flow. Calendar accepts dates and
+  weekdays. Mobile renders inline results inside the shared drawer.
+- Server search scopes every source to its owner, searches beyond the current view, excludes
+  deleted/trash records, and returns bounded previews with pagination. Mail includes older replies;
+  hidden calendars and completed tasks remain discoverable. Review-source outages are disclosed.
+- Added four revisioned workspace preference tables with an additive migration. Existing account
+  timezone/day hours and domain-owned settings remain authoritative. No provider search or new
+  external permissions are introduced.
+- Search currently matches owner-scoped PostgreSQL projections using literal terms and full-text
+  relevance ranking; it does not create a separate persistent search index. Production-scale
+  latency has not been benchmarked. This is branch implementation, not deployment evidence.
+
 ## 2026-10-01 — Settings information architecture (branch implementation)
 
 - Regrouped Settings into Account, Personal, Workspaces, and App. Security & access owns password
@@ -290,13 +754,15 @@ This log records delivered vertical slices against the master plan. It does not 
   application route/navigation composition, deterministic QA states, and redacted Mail
   question/blocker projection into Today-owned Reviews. Shared Reviews never owns Mail mutation.
 - At the time of this slice, Mail transmission was unavailable. This boundary was superseded by
-  the 2026-08-29 human-confirmed compose slice; autonomous and MCP transmission remain unavailable.
+  the 2026-08-29 human-confirmed compose slice; autonomous maintenance transmission remains unavailable. The later explicit MCP execution
+  contract is recorded in the 2026-10-11 entry.
 
 ## 2026-08-25 — Mail no-send boundary
 
 - Removed Gmail send authority, iCloud SMTP delivery, application TCP 587 egress, and every typed
   client, MCP, and web compose/send affordance. This historical contraction was superseded for the
-  signed-in human Mail surface on 2026-08-29; the MCP boundary remains in force.
+  signed-in human Mail surface on 2026-08-29 and for explicitly authorized MCP execution on
+  2026-10-11. Autonomous maintenance retains its no-send boundary.
 - Retained an authenticated compatibility window for historical Ilo drafts: owners can list,
   export locally, or permanently delete them, while former mutation endpoints return a permanent
   `410 feature_unavailable` response.
@@ -686,3 +1152,415 @@ outstanding. Duplicate navigation entries are removed and legacy review links
 redirect into the flow. The earlier review grid remains in source but is not routed.
 Source repairs that require their original editor keep an explicit source link.
 See [review interaction standards](../design/pages/reviews.md).
+
+## 2026-10-07 — Workspace settings consolidation
+
+- Isolated typed settings contracts and API/web modules from workspace search; resolved defaults
+  consistently without read-time writes and unified preference mutation/cache behavior.
+- Added Calendar week-start and event-duration defaults, Task capture-list and completed visibility,
+  and durable Finance display-account selections with owner validation.
+- Exposed existing Mail and Calendar profile controls without duplicating domain records or
+  bypassing rule approval; added Finance notification inheritance and audited override reset.
+- Preserved account-wide policy, versioned Finance facts/budgets, source semantics, and transient
+  URL/device state boundaries. Validation evidence is recorded with the change, not implied by this
+  entry as a production deployment claim.
+
+
+## Finance answers and host continuation — source implementation (2026-10-09)
+
+The consolidated completion branch adds immutable case-owned maintenance question issuance,
+shared app/SMS answer consumption, exact question and answer retention, and a durable accepted-answer
+continuation outbox. Automatic Finance notification discovery uses bounded owner-scoped pages,
+current-work checks, existing consent/disclosure/quiet-hour policy, and at most three reply bindings.
+Rediscovery repairs publication failures without reissuing consumed question authority.
+
+Finance settings prepares tenant-bound Codex or Claude setup and shows waiting answers, observed
+host health, revoked connections, and unconfirmed delivery. Hosts use the original live maintenance
+grant to read accepted evidence and resume one case-scoped canonical run. Claude routine session
+creation is recorded separately from maintenance completion; uncertain fires are not repeated.
+Migration `0106` owns issuance and answer invariants; `0107` preserves OAuth connection identity and
+adds isolated encrypted host credentials and continuation bindings. Source deletion retains exact
+questions and answers; account deletion is distinct from the user purge that erases their archive.
+
+This entry records the completion implementation and its limits. The pull request records exact
+integrated verification and merge evidence. Production SMS activation and separate real
+Codex/Claude unattended latency, usage, and completion trials are not certified by this source.
+
+
+The same completion branch adds explicit signed `Finance:` prospective context capture,
+receipt-confirmed durable SMS acknowledgments and a narrow reversible categorization approval
+port. Migration `0108` preserves the immutable inbound claim and adds a separate completion ledger
+with owner-scoped message/context provenance. The real existing categorization writer, Finance
+mutation receipt and Texting binding consumption share one transaction. Stronger decisions remain
+in the authenticated app. Source tests cover no inferred financial fields, restart/uncertain-send
+deduplication, exact approve/reject replay and stale or stronger proposal refusal; integrated release
+verification is recorded in the pull request. Host delivery serializes case answers and checks the original
+schedule-bound grant on resumed runs and challenge submission.
+
+
+Independent edge review repaired terminal continuation projection after resume, dispatch
+revalidation during concurrent polling, stale submitting delivery visibility, per-routine credential
+failure isolation, and cursor pagination. Explicit audited human recovery can release an uncertain
+pending delivery or move a nonexecuting waiting run to a live polling Codex host; execution leases and
+original binding/timestamp fences prevent silent adoption. Focused host regression tests exercise
+these transitions. Receipt-confirmed acknowledgments also distinguish accepted replies from stale
+approvals for which no decision was applied.
+
+
+The completion branch also recovers a host-accepted session that never invokes nohmi: after the
+routine's declared maximum latency (at least two minutes), a person who checked the host can
+release each still-pending answer without a maintenance run. Coalesced sibling answers retain
+independent fences; an observed run or unreleased pending sibling prevents a replacement fire.
+Original session identity remains in the audit. Handoff diagnostics record only correlation ID,
+claim count, duration and a safe outcome code; logging failure cannot undo a committed handoff.
+The migration journal contract includes the separate SMS completion ledger, and disabled
+notification publication has an explicit typed unavailable result.
+
+A saved contextual answer's exact app link can reopen its owner-scoped read-only result after it
+leaves outstanding work. Browser acceptance creates a real manual transaction and context question,
+checks answer replay and unchanged ledger values, and checks another owner's access is refused.
+Full integrated verification remains required before release.
+
+
+Final integration repairs isolate the ordered context, acknowledgment, host and notification phases:
+a failed phase does not starve the others, and the pass still reports failure. SMS context scanning
+excludes revoked/old-epoch admissions and processes healthy owners despite transient lock failures;
+invalid admission never produces an acknowledgment. Ending a host schedule erases its encrypted
+trigger credential. Routine fires claim one exact case answer, leave sibling cases pending, and
+allow a new answer to wake only the same original idle waiting case. Moving an existing waiting
+run is limited to a polling Codex schedule; event-only Claude routines need a fresh answer event
+and are not offered as silent recovery targets. Source links preserve the exact case identity.
+
+The consolidated Finance completion branch also gates pending question reply admission with the default-off Finance SMS switch. Verified disabled-rollout app composition leaves contextual and canonical replies pending without receipts, answers or continuations. Terminal admission results preserve policy/authority/delivery reasons, and ordered reconciliation reports fixed stage identifiers and validated failure counts without provider text. Focused regression evidence covers these behaviors; the pull request records the exact-main full verifier.
+
+Final host binding validates the Claude API trigger identity before activation. Successive replyable Finance notifications preserve the existing live reply namespace and direct additional work to app review, preventing duplicate item numbers without retargeting delayed replies. Focused regression verification covers both repairs; integrated full verification is recorded in the pull request.
+
+### Ritual history filtering and outcomes
+
+History now offers inactive dashed filter triggers, active chips first, and distinct
+filter/sort icons. Entry summaries separate required/optional completion, show applied
+snoozes and written answers, and put interaction telemetry behind disclosure.
+`GET /v1/rituals/history` accepts optional `status`, `search` (literal, up to 200
+characters), and `sort=newest|oldest`, returning `total` alongside stable cursor pages.
+Ownership/scopes are unchanged; search and sort occur before pagination, including
+for All Time. No new persistence schema or external service is involved.
+
+### Configurable history data view and shared filter treatment
+
+Ritual History now composes a shared TanStack/shadcn table with optional answer,
+outcome, scheduling, and timezone columns; required/optional counts and confirmed
+snoozes remain independently readable. Users can configure visibility, order, width,
+density, and wrapping on this device, inspect details, select the current page, and
+export the page or selected rows as CSV. Mobile renders labelled records. Server
+search/filter/sort remains ahead of bounded cursor pagination with selectable page
+sizes. Shared filter/sort triggers now cover Tasks, Finances, Reviews, Today, workspace
+search, and Calendar/Mail account sources, retaining their domain query behavior.
+These are source implementation claims, not a production deployment claim.
+
+### Settings acceptance repairs
+
+Inline planning-time validation now associates errors with the visible editor and retains a
+rejected choice through popup closure, blur, and refocus. Ritual settings search opens an
+existing step editor and falls back to its visible controlling setting without creating steps.
+Wallpaper compound choices adapt to their actual column width beside the sticky preview;
+ritual cloud canvases remain viewport-sized while scrolling their repeated texture internally.
+Acceptance scenarios use the visible shadcn controls and verify persisted optional/day rules,
+recovery, internal option containment, and card/footer bounds after the entrance animation.
+These are source changes; production acceptance remains part of delivery verification.
+
+Ritual progress-load failures now use Sonner with an explicit retry and show an unavailable
+value rather than a false zero. A recovered ritual-settings conflict dispatches autosave
+with the latest authoritative revision, including when refreshed fields are unchanged;
+server compare-and-swap and local draft rebasing remain in force. Added regression cases
+cover failed refresh recovery, reduced-motion clouds, data-view controls and form editors.
+
+## 2026-10-29 — Public campaign integration candidate
+
+- Reconciled the figure-led company landing page, independent workspace guide routes, screenshot walkthroughs and static product UI examples with current app/session routing. Existing account controls, auth forms and signed-in workspace behavior remain owned by their current implementations.
+- Retained the adapted cursor and vivid solid workspace identity treatment. Campaign nature scenes, figure silhouettes and device screenshots are locally hosted.
+- Excluded the historical optional premiere capture fixture: current Finance demo enrichment invalidates its fixed category assumptions. The original source remains in `b397f08f`; campaign captures do not certify live actions or provider behavior.
+- This is a review candidate, not a claim of merge or production deployment. Current-candidate independent review, verification and release evidence remain required.
+
+## 2026-11-07 — Native Finance implementation candidate
+
+COO-210 — Mobile Finance adds the approved five native destinations: Overview,
+Spending, Plan, Accounts, and Assistant. The Expo client now reads Finance through
+the shared typed API: monthly spending, expected occurrences, account balances and
+details, scoped/paginated transactions, budget allocations/resources, wealth/goals,
+existing review cases, conversation history, and recorded activity. Category and
+notes edits retain the original transaction revision and distinguish applied,
+review-required, and needs-input responses. The floating Save primitive is shared
+with Tasks, and entity selection uses a searchable native sheet.
+
+This is a local implementation candidate, not a production or TestFlight release.
+Account/manual transaction/goal creation, budget proposal/approval interactions,
+conversation sending, automation/profile setup editing, imports and correction
+workflows, alternate spending visualizations, and preference parity remain tracked
+under the same issue. No live financial records were modified for acceptance.
+
+## 2026-11-09 — Native Today briefing (local implementation)
+
+- Today now reads authenticated Tasks and Finance APIs instead of the sample briefing. It shows
+  up to three attention items, chronologically ordered upcoming work/payments, and confirmed applied
+  Finance agent actions. Task Auto ranking, owner-scoped queries, user-local dates, bounded previews,
+  refresh feedback, partial coverage and canonical detail links are preserved.
+- Shared record rows place descriptions below the entire heading/value line; Finance Activity,
+  What changed and other Finance rows reuse that structure. Task container descriptions likewise
+  use the width below their trailing actions. Settings rows retain centered label/value alignment.
+- Focused tests and mobile types passed; the iPhone simulator verified live local demo reads,
+  reminder and transaction navigation, refresh feedback, and Finance description wrapping. This
+  does not establish production/TestFlight acceptance or live Mail/Calendar/monitoring coverage.
+
+
+## 2026-11-09 — Native Finance fixture refinements (local implementation)
+
+- Local Finance fixtures include realistic named institutions and full-color institution artwork,
+  plus illustrative user/agent conversation history linked to an actual seeded transaction.
+  Provider-shaped branding projections contain no usable credentials and schedule no provider sync.
+- These fixtures demonstrate account recognition and conversation/attachment rendering. They do
+  not establish a live provider connection, dispatch agent work, or change personal financial data.
+  Production and TestFlight acceptance remain release-owner checks.
+
+## 2026-11-09 — Native Today atmospheric sky candidate
+
+COO-32 — Deliver the native Today workspace and connection health now includes the selected
+Atmospheric wash hero. Desktop and mobile share solar/weather interpretation; mobile uses smooth
+pastel gradients and haze above the opaque rounded briefing drawer. Foreground location is opt-in,
+coarsened for weather requests, and never tracked in the background. Saved-location weather and an
+honest time-only sky cover denied permissions, unavailable fixes, stale observations and outages.
+See `docs/engineering/mobile-today-sky.md` for lifecycle, privacy and verification boundaries.
+This is a local candidate, not a production or TestFlight release.
+
+## 2026-11-13 — Native Finance account management (local implementation)
+
+COO-221 — Manage Finance accounts on iPhone. Accounts opens a manual account form; account details
+offer Edit account, Sync account, Review duplicate and Stop tracking account, and duplicate review
+runs in the app instead of handing off to the browser. Every action uses existing Finance
+endpoints, one toast from loading to the confirmed result, and a native confirmation before
+tracking stops. Unknown outcomes never claim success: edits, stop tracking and duplicate
+resolution retry under the same idempotency key, and an unconfirmed add looks for the earlier
+attempt before writing again. Connecting a bank is not part of this change.
+
+Focused Finance tests, mobile types and lint passed. This is a local candidate: it was not run on
+a simulator or device, and it does not establish production or TestFlight acceptance.
+
+## 2026-11-13 — Native Mail reading candidate
+
+COO-230 — Read and search Mail threads on iPhone replaces the title-only Inbox and Mailboxes
+screens with a unified inbox, a per-account mailbox list, an in-memory conversation reader and
+server search.
+
+- `GET /v1/mail/thread-summaries` returns thread rows without body text, recipient lists or the
+  provider thread identifier, is `no-store`, requires `mail:read`, and pages after the last row's
+  `(receivedAt, id)`. `GET /v1/mail/threads` and the web client are unchanged.
+- The native lists cache summaries only. Message bodies are detail reads held while the reader is
+  open and dropped when it closes.
+- Search is typed in the shared workspace header, which writes the `mailSearch` route parameter
+  on Mail and shows no sample results there; the list reads that parameter and searches the server.
+- Further pages load as the list reaches its end. "Load more messages" appears only after a page
+  fails to load.
+- Triage, compose, reply, attachments downloads and rules are not included. This is a local
+  candidate covered by focused tests; it is not a production or TestFlight release.
+
+## 2026-11-15 — Native Mail read state and archive (local candidate)
+
+COO-236 — Mark read or unread and archive Mail on iPhone adds those actions to each conversation
+row and to the open conversation, through the existing `PATCH /v1/mail/threads/:id`. No route or
+server code changed.
+
+- Archive sends the conversation's mailboxes without its inboxes, as web does, and is offered only
+  for a conversation in an inbox. Each write sends the displayed `updatedAt` as
+  `expectedUpdatedAt`, which web does not.
+- The change shows at once as an overlay and reaches cached summaries only after the API confirms
+  it. A rejection or an unconfirmed outcome drops the overlay, raises one Sonner error and re-reads
+  Mail. A response carrying `partialEffect`, a timeout, a lost connection and a 5xx are all
+  unconfirmed.
+- A confirmed Archive of a Gmail conversation offers a ten-second Undo that restores the previous
+  mailboxes. iCloud offers none: the thread update moves the message to Archive but keeps the
+  thread's provider identifier pointing at the inbox, so a restore returns success without moving
+  anything. Restoring an archived iCloud conversation needs an API change and is not in this work.
+- A confirmed Undo puts the conversation back in the loaded inbox without waiting for the read
+  that follows, and an outcome is dropped if the session changes while pending reads are cancelled.
+- After an unconfirmed outcome Mail is read at once and again five seconds later.
+- Snooze, bulk triage, deletion, drafts and sending are not included. This is a local candidate
+  covered by focused tests; it was not run on a simulator or device or against a live Gmail or
+  iCloud mailbox, and it is not a production or TestFlight release.
+
+
+## 2026-11-16 — Native Mail drafts, reply and send (local candidate)
+
+- COO-237 — On iPhone, Mailboxes lists unsent nohmi drafts, including agent-prepared ones. A person
+  can write a new message, reply to or forward a conversation opened from Mail, edit and save a
+  draft, discard it, and send it. Only existing API routes are used; no server change.
+- Sending needs an explicit review of the saved draft (sender, recipients, subject, message) and a
+  second tap on Send message. It is reported as sent only when the API confirms it. After a failed
+  or interrupted send the draft is read again; an unconfirmed message locks and is never re-sent
+  automatically, and a draft the API marks for review can be recorded as sent or not sent.
+- An interrupted draft create is not repeated blindly: the next save looks for the draft first.
+- Not included: attachments. The draft API has no attachment field, so a file cannot be attached
+  or forwarded from iPhone until the API supports it. Reply all and rich text are also not included.
+- Focused Mail tests, mobile type checking and lint passed. Not observed in the iPhone simulator,
+  and no message was sent through a real provider. This is not a production or TestFlight release.
+
+## 2026-11-14 — Native task filters by List, Project and due shortcuts (local candidate)
+
+COO-218 — The iPhone task filter sheet narrows global views (To-do, All, Upcoming, History,
+Trash and search) by List and by Project, and adds Today, Tomorrow and Next 7 days due shortcuts
+above the date pickers. Active choices show as removable chips with the list or project name; a
+shortcut range is one chip.
+
+- The query matches the web filters: a list or project sends `listId`/`projectId` with
+  `kind: "task"`, choosing a list drops a project, and a shortcut sends whole-day `dueAfter` and
+  `dueBefore` bounds in the planning timezone in place of a `due` state. A due date picked by
+  hand also replaces the `due` state.
+- A list or project browser and the Reminders view do not offer List or Project.
+- No API, schema or shared-component change. The shortcut bounds are a mobile copy of the web
+  preset maths; moving both to the shared domain package is a follow-up.
+- A failed lists or projects read shows both rows as Unavailable with a retry, and a selected
+  list or project that is no longer offered stays in its row, named as its chip names it, so it
+  can be cleared.
+- This is a local candidate covered by focused tests. The simulator check on To-do and All is
+  outstanding, so the List and Project pickers opening over the filter sheet have not been seen
+  on a device or simulator. It is not a production or TestFlight release.
+
+## 2026-11-15 — Native header search across workspaces (local candidate)
+
+COO-232 — The iPhone header search no longer shows sample results. Outside the pages that filter
+their own list (Tasks, Mail, Finances Accounts), it lists real matches from the workspace search
+route: Today searches Tasks, Mail, Finances and Calendar, grouped by workspace; Calendar and
+Finances pages search their own workspace.
+
+- No API, schema or client change. The mobile app calls `GET /v1/workspaces/:workspace/search`
+  with `kind: "content"`, one workspace after another because the API admits one search per
+  account and replaces a queued one.
+- Failed workspaces are named in one Sonner error per search and the other groups stay; the list
+  offers a retry and carries no failure copy. Empty results name the workspaces that answered.
+- Include archive starts from each workspace's search preference and can be overridden per search.
+- Results open existing screens. Mail has no conversation route, so a conversation opens Mail
+  searched for its subject (cut to 200 characters), an archived conversation opens the mailbox
+  list, and a snoozed conversation or one only in Sent or Drafts is not reachable from its
+  result; a mailbox opens the mailbox list, not that mailbox. COO-259 tracks the conversation
+  route.
+- The sample detail route (`/detail/[id]`), the sample briefing and sample workspace screens and
+  their fixtures are removed. The unlinked preview settings and monitoring screens remain.
+- This is a local candidate covered by focused tests. It has not been run on a simulator or
+  device against a live API, and it is not a production or TestFlight release.
+
+## 2026-11-15 — Native task row details and archived search (local candidate)
+
+COO-219 — iPhone task rows show reserved time and the owning List / Project, and honor the saved
+row-detail preference for estimate, notes and tags. A task search honors "Include archived in
+search".
+
+- Row lines: title, urgency scan line (unchanged), a context line (reserved time,
+  estimate), the List / Project on its own line, up to two lines of notes, then tag chips (five, then a count). Absent values render
+  nothing. A row does not repeat a container its screen is scoped or filtered to.
+- Search: with the preference on, a search without a fixed or chosen status sends `status: "all"`
+  and, outside a list or project, a second read with `status: "archived"` whose matches are
+  listed last under their own heading. A failed search raises one Sonner error; a failed
+  archived read beside other matches offers its own retry. Cancelled tasks say Cancelled. To-do (fixed open status), History and Trash are unchanged.
+- The preference notes no longer say the row-detail toggles configure only the web app.
+- No API, schema or shared-component change.
+- Verified by presentation and screen tests only. Not checked on a simulator or device.
+
+## 2026-11-15 — Native task select-all, navigation counts and project header (local candidate)
+
+COO-220 — iPhone bulk selection can select every loaded item that can change; Browse, Lists,
+Projects and Archive show item counts; a project page shows the project's why and target date.
+
+- Select all sits in the selection bar, takes the loaded changeable items up to the existing
+  limit of 100 and drops a read-only pick. The selected count and the actions cover only
+  selected items still listed. Bulk feedback stays one Sonner toast.
+- Counts are the `total` of the query each destination opens, read with `limit: 1` through the
+  existing task workspace route: seven reads for Browse, and one per list or project row or
+  pinned card that the directory has drawn. Browse's Archive row counts containers from the
+  loaded directories. An unread or failed total shows no count; failed totals raise one Sonner
+  error. Counts re-read after a Tasks action, without holding it open, and on returning to a
+  directory.
+- The project header sits under the title, above filters and tasks.
+- No API, schema or shared-component change. The Browse rows use a Tasks-owned row because the
+  shared navigation row has no trailing value.
+- Verified by presentation and screen tests only. The simulator check of bulk complete and trash
+  after Select all is outstanding, and row virtualization bounding the count reads is a property
+  of the device list that jsdom does not exercise. Not a production or TestFlight release.
+
+## 2026-11-15 — Native Today includes Calendar and Mail (local candidate)
+
+COO-240 — The iPhone Today briefing adds Today’s events and Mail beside Needs you, Coming up
+and Handled for you.
+
+- Today’s events reads the account’s local day from `GET /v1/events` and shows up to three
+  events that are still running or ahead, then all-day events. A row opens the event detail.
+- Mail reads open Mail attention items from `GET /v1/assistant/attention` and shows the three
+  most important. A row tied to a conversation opens it in the Mail reader; other rows open Mail.
+  Unread inbox mail is not listed; its count is a chip that opens Mail.
+- Calendar and Mail join the existing refresh, focus and foreground reads and the one Today
+  refresh toast. Each section states its own loading, empty, not-set-up and unavailable state, so
+  one failed source leaves the rest of the briefing in place.
+- No API, schema or shared-component change. Coming up still combines tasks, reminders and
+  expected Finance occurrences only; events on later days are not in it.
+- This is a local candidate covered by focused tests. It is not a production or TestFlight release.
+
+## 2026-11-15 — Native Calendar event create, edit and delete (local candidate)
+
+COO-239 — On iPhone a person can create an event from the agenda, edit it and delete it from its
+details, and restore a deleted event from the delete toast's Undo.
+
+- The app calls the existing event routes (`POST /v1/events`, `PATCH /v1/events/:id`,
+  `POST /v1/events/:id/trash`, `POST /v1/events/:id/restore`). No API, schema or shared-component
+  change; the root stack registers the new `calendar-event-edit` route inside the signed-in guard.
+- Edit and Delete appear only for an event on a writable calendar that is not a mirrored busy
+  block. Edits and deletes carry the event and busy-block revisions the person reviewed.
+- Times are entered and saved in the account planning timezone. All-day events are sent as whole
+  calendar days in the form each provider reads back.
+- A write is reported as done only after the API confirms it. An unconfirmed result re-reads the
+  calendar and is never shown as saved; an unconfirmed create is not retried without the person's
+  confirmation because event creation is not yet idempotent on the server (COO-27).
+- Undo after delete is offered only when restoring returns the same event; provider events with
+  guests, a repeat rule or a meeting link are deleted without Undo and the confirmation says so.
+- Guests, reminders, repeat rules, meeting links, blocking time and conflict review (COO-242) are
+  not included. This is a local candidate covered by focused tests; the simulator check and a
+  write against a real Google or iCloud calendar are outstanding. It is not a production or
+  TestFlight release.
+
+## 2026-11-17 — nohmi web links open in the iPhone app (local candidate)
+
+COO-233 — The iPhone app can claim nohmi web links to a task, reminder, transaction, calendar
+event or mail conversation and open the matching screen (Universal Links).
+
+- The app validates a handed-over link against the configured web origin and a fixed list of
+  record links, queues it, and opens it once signed in; a conversation opens in the shared Mail
+  reader. Unknown links are rejected with one Sonner error. No API or schema change.
+- Production configuration: the web app now ships
+  `/.well-known/apple-app-site-association`, nginx serves it as JSON, and signed builds carry the
+  `applinks:` associated-domains entitlement for their HTTPS web origin.
+- `/plaid/return` is reserved in the association file as the bank sign-in return link for
+  COO-234. The app drops it without reading its parameters; nothing uses it yet.
+- Not in effect until three things happen outside the repository: the web change is deployed, a
+  new signed build is installed, and the Apple App ID has the Associated Domains capability. See
+  "iPhone Universal Links" in `docs/engineering/external-boundary-reliability.md`.
+- This is a local candidate covered by parsing, opener, nginx and build-output tests. No link has
+  been opened on a device or simulator; Apple's fetch of the file and the signed entitlement are
+  unverified. It is not a production or TestFlight release.
+
+## 2026-11-16 — Native Calendar blocks, conflicts and free-time check (local candidate)
+
+COO-242 — On iPhone a person can block an event's time on their other calendars as Busy or
+Details, change that or remove the block, see which events conflict with an event, and see
+whether a proposed time is free while creating or editing.
+
+- The app calls the existing block routes (`POST /v1/events/:id/blocks`,
+  `PATCH /v1/events/:id/blocks/:blockId`, `POST /v1/events/:id/blocks/:blockId/trash`) and
+  `GET /v1/events`. No API, schema or shared-component change; the root stack registers the new
+  `calendar-event-blocks` route inside the signed-in guard.
+- A new block starts from the saved busy-block privacy. Each change is reported as done only
+  after the API confirms it, with the event and block revisions the person saw.
+- After an unconfirmed block attempt the next one reads the event and the destination calendar
+  first, and sends nothing when the block is already there, an unlinked copy would be
+  duplicated, the calendar is hidden, or a read fails.
+- Conflicts and the free-time check are computed on the phone from shown calendars with the
+  Calendar review's overlap rule. The API has no free/busy read, so hidden calendars are not
+  counted and repeating series are not compared. The Calendar review stays read-only and is not
+  shown on iPhone.
+- This is a local candidate covered by focused tests. The simulator check and a block written to
+  a real Google or iCloud calendar are outstanding. It is not a production or TestFlight release.

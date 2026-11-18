@@ -1,7 +1,24 @@
-import type { TaskList, TaskProject } from "@personal-os/domain";
+import type { TaskList, TaskProject, TasksWorkspacePreferences } from "@personal-os/domain";
 import { type FormEvent, useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronRightIcon, XIcon } from "@/components/icons";
+import { ActionButton as Button } from "@/components/action-button";
+import {
+  FilterChip,
+  FilterTrigger,
+  SortOptionIcon,
+  SortTrigger,
+} from "@/components/data-view-controls";
+import {
+  CalendarIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  EyeIcon,
+  FileTextIcon,
+  LayersIcon,
+  ListTodoIcon,
+  ProjectIcon,
+  TagsIcon,
+} from "@/components/icons";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -11,7 +28,6 @@ import {
   ResponsiveDialogTitle,
   ResponsiveDialogTrigger,
 } from "@/components/responsive-dialog";
-import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
@@ -29,6 +45,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { formatMaterialDateTime } from "../../lib/date-format";
 import { dateTimeLocalToIso, toDateTimeLocal } from "./page";
+import { useSaveTaskPresentation } from "./presentation-preferences";
 import { type DatePreset, datePresets, identifyPreset, presetBounds } from "./task-filter-presets";
 import { withWorkspaceOption, workspaceFilterKeys, workspacePath } from "./workspace-query";
 
@@ -54,28 +71,43 @@ export const detailOptions = [
   ["notes", "Notes"],
 ] as const;
 
-export function WorkspaceSort({ params }: { params: URLSearchParams }) {
+export function WorkspaceSort({
+  params,
+  routeParams = params,
+}: {
+  params: URLSearchParams;
+  routeParams?: URLSearchParams;
+}) {
+  const save = useSaveTaskPresentation();
   const navigate = useNavigate();
   const value = params.get("sort") ?? "default";
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="ghost">
-          Sort
-          {value !== "default"
-            ? `: ${sortOptions.find(([key]) => key === value)?.[1] ?? "Recommended"}`
-            : ""}
-        </Button>
+        <SortTrigger
+          compact
+          label={sortOptions.find(([key]) => key === value)?.[1] ?? "Recommended"}
+          aria-label={
+            value !== "default"
+              ? `Sort: ${sortOptions.find(([key]) => key === value)?.[1] ?? "Recommended"}`
+              : "Sort"
+          }
+          title="Sort tasks"
+        />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuGroup>
           <DropdownMenuLabel>Sort by</DropdownMenuLabel>
           <DropdownMenuRadioGroup
             value={value}
-            onValueChange={(next) => navigate(withWorkspaceOption(params, "sort", next, "default"))}
+            onValueChange={(next) => {
+              navigate(withWorkspaceOption(routeParams, "sort", next));
+              save.mutate({ taskSort: next as TasksWorkspacePreferences["taskSort"] });
+            }}
           >
             {sortOptions.map(([key, label]) => (
               <DropdownMenuRadioItem key={key} value={key}>
+                <SortOptionIcon value={key} />
                 {label}
               </DropdownMenuRadioItem>
             ))}
@@ -86,14 +118,21 @@ export function WorkspaceSort({ params }: { params: URLSearchParams }) {
   );
 }
 
-export function WorkspaceDisplay({ params }: { params: URLSearchParams }) {
+export function WorkspaceDisplay({
+  params,
+  routeParams = params,
+}: {
+  params: URLSearchParams;
+  routeParams?: URLSearchParams;
+}) {
+  const save = useSaveTaskPresentation();
   const navigate = useNavigate();
   const details = (params.get("details") ?? "estimate").split(",");
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="ghost">
-          Display
+        <Button size="icon" variant="ghost" aria-label="Display" title="Display options">
+          <EyeIcon aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -101,10 +140,22 @@ export function WorkspaceDisplay({ params }: { params: URLSearchParams }) {
           <DropdownMenuLabel>Group by</DropdownMenuLabel>
           <DropdownMenuRadioGroup
             value={params.get("group") ?? "none"}
-            onValueChange={(next) => navigate(withWorkspaceOption(params, "group", next, "none"))}
+            onValueChange={(next) => {
+              navigate(withWorkspaceOption(routeParams, "group", next));
+              save.mutate({ taskGroup: next as TasksWorkspacePreferences["taskGroup"] });
+            }}
           >
             {groupOptions.map(([key, label]) => (
               <DropdownMenuRadioItem key={key} value={key}>
+                {key === "project" ? (
+                  <ProjectIcon />
+                ) : key === "list" ? (
+                  <ListTodoIcon />
+                ) : key === "date" ? (
+                  <CalendarIcon />
+                ) : (
+                  <LayersIcon />
+                )}
                 {label}
               </DropdownMenuRadioItem>
             ))}
@@ -120,18 +171,29 @@ export function WorkspaceDisplay({ params }: { params: URLSearchParams }) {
               onSelect={(event) => event.preventDefault()}
               onCheckedChange={(checked) => {
                 const next = checked
-                  ? [...details.filter(Boolean), key]
+                  ? [...details.filter((value) => value && value !== "none"), key]
                   : details.filter((value) => value !== key);
+                save.mutate({
+                  taskRowDetails: next.filter((value) => value !== "none") as NonNullable<
+                    TasksWorkspacePreferences["taskRowDetails"]
+                  >,
+                });
                 navigate(
                   withWorkspaceOption(
-                    params,
+                    routeParams,
                     "details",
                     next.length ? next.join(",") : "none",
-                    "estimate",
                   ),
                 );
               }}
             >
+              {key === "estimate" ? (
+                <ClockIcon />
+              ) : key === "tags" ? (
+                <TagsIcon />
+              ) : (
+                <FileTextIcon />
+              )}
               {label}
             </DropdownMenuCheckboxItem>
           ))}
@@ -176,11 +238,13 @@ function FilterSelect({
 
 export function WorkspaceFilters({
   params,
+  routeParams = params,
   timeZone,
   lists,
   projects,
 }: {
   params: URLSearchParams;
+  routeParams?: URLSearchParams;
   timeZone: string;
   lists: TaskList[];
   projects: TaskProject[];
@@ -191,7 +255,7 @@ export function WorkspaceFilters({
   const [custom, setCustom] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-  const count = workspaceFilterKeys.filter((key) => params.has(key)).length;
+  const count = workspaceFilterKeys.filter((key) => routeParams.has(key)).length;
   const global = Boolean(params.get("view"));
   const history = params.get("view") === "history";
   const set = (key: string, value: string) =>
@@ -227,9 +291,10 @@ export function WorkspaceFilters({
         return;
       }
     }
-    const next = new URLSearchParams(params);
+    const next = new URLSearchParams(routeParams);
     for (const key of [...workspaceFilterKeys, ...(global ? ["list", "project"] : [])]) {
       const value = draft.get(key);
+      if (key === "status" && !routeParams.has(key) && value === params.get(key)) continue;
       if (value) next.set(key, value);
       else next.delete(key);
     }
@@ -252,9 +317,13 @@ export function WorkspaceFilters({
       }}
     >
       <ResponsiveDialogTrigger asChild>
-        <Button size="sm" variant="ghost">
-          {count ? `Filters (${count})` : "Filters"}
-        </Button>
+        <FilterTrigger
+          compact
+          label="Filters"
+          active={count > 0}
+          count={count}
+          aria-label={count ? `Filters (${count})` : "Filters"}
+        />
       </ResponsiveDialogTrigger>
       <ResponsiveDialogContent>
         <ResponsiveDialogHeader>
@@ -305,6 +374,7 @@ export function WorkspaceFilters({
                         ]
                       : [
                           ["open", "Open"],
+                          ["open_and_completed", "Open & completed"],
                           ["all", "All statuses"],
                           ["completed", "Completed"],
                           ["cancelled", "Cancelled tasks"],
@@ -468,7 +538,7 @@ export function WorkspaceFilters({
             variant="outline"
             size="sm"
             onClick={() => {
-              const next = new URLSearchParams(params);
+              const next = new URLSearchParams(routeParams);
               for (const key of workspaceFilterKeys) next.delete(key);
               if (global) {
                 next.delete("list");
@@ -490,11 +560,13 @@ export function WorkspaceFilters({
 
 export function WorkspaceFilterChips({
   params,
+  routeParams = params,
   timeZone,
   lists,
   projects,
 }: {
   params: URLSearchParams;
+  routeParams?: URLSearchParams;
   timeZone: string;
   lists: TaskList[];
   projects: TaskProject[];
@@ -515,12 +587,13 @@ export function WorkspaceFilterChips({
     overdue: "Overdue",
     dated: "Has date",
     scheduled: "Has time",
+    open_and_completed: "Open & completed",
   };
   const chips: { key: string; keys: string[]; label: string }[] = [];
   for (const key of workspaceFilterKeys.filter(
     (key) => !key.endsWith("After") && !key.endsWith("Before"),
   )) {
-    const value = params.get(key);
+    const value = (key === "status" ? routeParams : params).get(key);
     if (value) chips.push({ key, keys: [key], label: `${labels[key]}: ${values[value] ?? value}` });
   }
   for (const [prefix, label] of [
@@ -567,20 +640,16 @@ export function WorkspaceFilterChips({
   return (
     <fieldset aria-label="Active task filters" className="flex flex-wrap gap-1">
       {chips.map((chip) => (
-        <Button
+        <FilterChip
           key={chip.key}
-          size="xs"
-          variant="secondary"
+          label={chip.label}
           aria-label={`Remove ${chip.label}`}
-          onClick={() => {
-            const next = new URLSearchParams(params);
+          onRemove={() => {
+            const next = new URLSearchParams(routeParams);
             for (const key of chip.keys) next.delete(key);
             navigate(workspacePath(next));
           }}
-        >
-          <span className="max-w-64 truncate">{chip.label}</span>
-          <XIcon aria-hidden="true" data-icon="inline-end" />
-        </Button>
+        />
       ))}
     </fieldset>
   );

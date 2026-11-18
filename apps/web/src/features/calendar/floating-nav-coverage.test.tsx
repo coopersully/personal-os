@@ -1,8 +1,9 @@
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { Calendar, User } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { toast } from "sonner";
@@ -10,6 +11,8 @@ import { CalendarFloatingNav } from "./floating-nav.js";
 
 const mocks = vi.hoisted(() => ({
   createEvent: vi.fn(),
+  getWorkspaceSettings: vi.fn(),
+  getDomainProfile: vi.fn(),
   listEvents: vi.fn(),
   searchWeatherLocations: vi.fn(),
 }));
@@ -42,14 +45,12 @@ const googleCalendar = {
 } as Calendar;
 
 function renderCalendar(calendars: Calendar[] = [localCalendar, googleCalendar]) {
+  const client = new QueryClient({
+    defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+  });
+  client.setQueryData(["me"], user);
   return render(
-    <QueryClientProvider
-      client={
-        new QueryClient({
-          defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
-        })
-      }
-    >
+    <QueryClientProvider client={client}>
       <MemoryRouter>
         <CalendarFloatingNav
           anchor={{ day: 23, month: 8, year: 2026 }}
@@ -74,11 +75,16 @@ describe("Calendar floating navigation edge states", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mocks.createEvent.mockReset();
+    mocks.getWorkspaceSettings.mockResolvedValue({
+      revision: 1,
+      preferences: { defaultEventDurationMinutes: 60 },
+    });
+    mocks.getDomainProfile.mockResolvedValue(null);
     mocks.listEvents.mockReset();
     mocks.searchWeatherLocations.mockReset();
   });
 
-  it("validates the title on submission and recovers a failed calendar search", async () => {
+  it("validates the title on submission and launches shared workspace search", async () => {
     const browser = userEvent.setup();
     mocks.listEvents.mockRejectedValueOnce(new Error("Unavailable")).mockResolvedValue([]);
     renderCalendar();
@@ -88,29 +94,8 @@ describe("Calendar floating navigation edge states", () => {
     expect(screen.getByPlaceholderText("Event title")).toHaveFocus();
     expect(mocks.createEvent).not.toHaveBeenCalled();
     await browser.click(screen.getByRole("button", { name: "Close" }));
-    await browser.click(await screen.findByRole("button", { name: "Search calendar" }));
-    expect(await screen.findByText("Couldn’t search the full calendar.")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Try again" }));
-    await waitFor(() =>
-      expect(screen.queryByText("Couldn’t search the full calendar.")).not.toBeInTheDocument(),
-    );
-  });
-
-  it("shows honest pending and empty search states", async () => {
-    const browser = userEvent.setup();
-    let resolveEvents: (events: never[]) => void = () => undefined;
-    mocks.listEvents.mockReturnValue(
-      new Promise<never[]>((resolve) => {
-        resolveEvents = resolve;
-      }),
-    );
-    renderCalendar();
-
-    await browser.click(screen.getByRole("button", { name: "Search calendar" }));
-    await browser.type(screen.getByRole("textbox", { name: "Search events and dates" }), "zzz");
-    expect(await screen.findByText("Searching…")).toBeInTheDocument();
-    resolveEvents([]);
-    expect(await screen.findByText("No matching events or dates.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Search calendar" })).not.toBeInTheDocument();
+    expect(mocks.listEvents).not.toHaveBeenCalled();
   });
 
   it("submits optional links and keeps provider failures visible", async () => {
@@ -171,6 +156,7 @@ describe("Calendar floating navigation edge states", () => {
     const queryClient = new QueryClient({
       defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
     });
+    queryClient.setQueryData(["me"], user);
     const renderNav = (calendars: Calendar[]) => (
       <QueryClientProvider client={queryClient}>
         <MemoryRouter>
@@ -369,7 +355,7 @@ describe("Calendar floating navigation edge states", () => {
       );
       expect(reselectedStart).not.toBeNull();
       expect(reselectedStart).toHaveAttribute("data-selected-single", "true");
-      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(screen.getAllByRole("dialog")).toHaveLength(2);
     } finally {
       vi.useRealTimers();
     }
@@ -389,4 +375,26 @@ describe("Calendar floating navigation edge states", () => {
       background: "#777ce3",
     });
   });
+});
+
+it("uses the saved duration and approved destination for new events", async () => {
+  mocks.getWorkspaceSettings.mockResolvedValue({
+    revision: 1,
+    preferences: { defaultEventDurationMinutes: 90 },
+  });
+  mocks.getDomainProfile.mockResolvedValue({
+    status: "active",
+    preferences: { defaultCalendarId: googleCalendar.id },
+  });
+  mocks.createEvent.mockResolvedValue({ conferenceStatus: null });
+  const browser = userEvent.setup();
+  renderCalendar();
+  await browser.click(screen.getByRole("button", { name: "Create event" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: /Google/ })).toBeInTheDocument());
+  await browser.type(screen.getByRole("textbox", { name: "Title" }), "Preference event");
+  await browser.click(screen.getByRole("button", { name: "Create event" }));
+  await waitFor(() => expect(mocks.createEvent).toHaveBeenCalled());
+  const event = mocks.createEvent.mock.lastCall?.[0];
+  expect(event.calendarId).toBe(googleCalendar.id);
+  expect(Date.parse(event.endsAt) - Date.parse(event.startsAt)).toBe(90 * 60_000);
 });

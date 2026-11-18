@@ -3,16 +3,12 @@ import {
   localDateToIso,
   type RitualDefinition,
   type RitualState,
+  ritualDefinitionForDate,
   ritualIsAnswered,
 } from "@personal-os/domain";
 import { useEffect, useRef, useState } from "react";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { api } from "../../api.js";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "../../components/ui/dialog.js";
 import { isDesktop } from "../desktop/bridge.js";
 import { showRitualPreview } from "../desktop/ritual-bridge.js";
 import { RitualChecklist } from "./ritual-overlay.js";
@@ -42,7 +38,7 @@ export async function makeRitualPreview(definition: RitualDefinition): Promise<R
       timeZone: definition.timeZone,
       dueAt: now,
       expiresAt: new Date(Date.now() + 86400000).toISOString(),
-      definition,
+      definition: ritualDefinitionForDate(definition, date),
       revision: 1,
       status: "pending",
       snoozedUntil: null,
@@ -63,7 +59,7 @@ export function RitualPreviewChecklist({
   const ref = useRef(state);
   useEffect(() => {
     const dismiss = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
         onClose();
       }
@@ -79,6 +75,22 @@ export function RitualPreviewChecklist({
   return (
     <RitualChecklist
       state={state}
+      onPreviewDateChange={(date) => {
+        const current = ref.current.current;
+        if (!current || date === current.scheduledLocalDate) return;
+        const definition = ref.current.definitions.find((item) => item.id === current.ritualId);
+        if (!definition) return;
+        store({
+          ...ref.current,
+          current: {
+            ...current,
+            scheduledLocalDate: date,
+            definition: ritualDefinitionForDate(definition, date),
+            responses: [],
+            revision: current.revision + 1,
+          },
+        });
+      }}
       preview
       saveResponse={async (stepId, input) => {
         const current = ref.current.current!;
@@ -133,7 +145,9 @@ export function RitualPreview({ state, onClose }: { state: RitualState; onClose:
       }}
     >
       <DialogContent
-        className="ritual-browser-preview inset-0 left-0 top-0 h-dvh w-screen max-w-none translate-x-0 translate-y-0 rounded-none sm:max-w-none"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+        showCloseButton={false}
+        className="ritual-fullscreen ritual-surface ritual-browser-preview translate-x-0 translate-y-0"
         data-ritual-kind={state.current?.definition.kind}
       >
         <DialogTitle className="sr-only">Ritual preview</DialogTitle>

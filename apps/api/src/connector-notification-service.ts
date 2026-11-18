@@ -59,6 +59,17 @@ const reasonRank = (value: ReturnType<typeof sql.raw>) => sql`CASE ${value}
   ELSE 1
 END`;
 
+function needsReconnect(
+  account: Pick<typeof calendarAccounts.$inferSelect, "syncCapabilities" | "syncRecovery">,
+  capability: "calendar" | "mail",
+): boolean {
+  return (
+    (account.syncCapabilities?.[capability]
+      ? account.syncCapabilities[capability].health.recovery
+      : account.syncRecovery) === "reconnect"
+  );
+}
+
 export function createConnectorNotificationService({
   calendarWebhookUrl,
   db,
@@ -154,20 +165,21 @@ export function createConnectorNotificationService({
     async ensureGoogleSubscriptions(accountId: string): Promise<void> {
       const [account] = await db
         .select({
-          calendarEnabled: calendarAccounts.calendarEnabled,
-          mailEnabled: calendarAccounts.mailEnabled,
           provider: calendarAccounts.provider,
           syncRecovery: calendarAccounts.syncRecovery,
+          syncCapabilities: calendarAccounts.syncCapabilities,
+          calendarEnabled: calendarAccounts.calendarEnabled,
+          mailEnabled: calendarAccounts.mailEnabled,
         })
         .from(calendarAccounts)
         .where(eq(calendarAccounts.id, accountId))
         .limit(1);
-      if (account?.provider !== "google" || account.syncRecovery === "reconnect") return;
+      if (account?.provider !== "google") return;
       const values: Array<typeof connectorSubscriptions.$inferInsert> = [];
-      if (gmailTopicName && account.mailEnabled) {
+      if (gmailTopicName && account.mailEnabled && !needsReconnect(account, "mail")) {
         values.push({ accountId, kind: "gmail_mailbox", provider: "google", nextAttemptAt: now() });
       }
-      if (calendarWebhookUrl && account.calendarEnabled) {
+      if (calendarWebhookUrl && account.calendarEnabled && !needsReconnect(account, "calendar")) {
         values.push({
           accountId,
           kind: "google_calendar_list",
@@ -221,18 +233,16 @@ export function createConnectorNotificationService({
       if (!icloudMailIdleEnabled) return;
       const [account] = await db
         .select({
-          mailEnabled: calendarAccounts.mailEnabled,
           provider: calendarAccounts.provider,
           syncRecovery: calendarAccounts.syncRecovery,
+          syncCapabilities: calendarAccounts.syncCapabilities,
+          calendarEnabled: calendarAccounts.calendarEnabled,
+          mailEnabled: calendarAccounts.mailEnabled,
         })
         .from(calendarAccounts)
         .where(eq(calendarAccounts.id, accountId))
         .limit(1);
-      if (
-        account?.provider !== "icloud" ||
-        !account.mailEnabled ||
-        account.syncRecovery === "reconnect"
-      )
+      if (account?.provider !== "icloud" || !account.mailEnabled || needsReconnect(account, "mail"))
         return;
       await db
         .insert(connectorSubscriptions)
@@ -324,7 +334,7 @@ export function createConnectorNotificationService({
             .from(calendarAccounts)
             .where(eq(calendarAccounts.id, subscription.accountId))
             .limit(1);
-          if (!account?.encryptedCredentials || account.syncRecovery === "reconnect") {
+          if (!account?.encryptedCredentials || needsReconnect(account, "mail")) {
             await db
               .update(connectorSubscriptions)
               .set({
@@ -374,19 +384,8 @@ export function createConnectorNotificationService({
           } catch (error) {
             const failureCount = subscription.failureCount + 1;
             if (error instanceof ConnectorError && error.disposition === "reconnect") {
-              await db
-                .update(calendarAccounts)
-                .set({
-                  nextSyncAt: null,
-                  syncError: "Reconnect this iCloud account to resume syncing.",
-                  syncErrorCategory: "authorization",
-                  syncErrorCode: error.code,
-                  syncFailureCount: sql`${calendarAccounts.syncFailureCount} + 1`,
-                  syncRecovery: "reconnect",
-                  syncStatus: "error",
-                  updatedAt: now(),
-                })
-                .where(eq(calendarAccounts.id, account.id));
+              // IDLE is only a wake-up signal. The fenced sync owns account health.
+              await this.enqueue(account.id, "notification");
             }
             await db
               .update(connectorSubscriptions)
@@ -508,7 +507,10 @@ export function createConnectorNotificationService({
             .from(calendarAccounts)
             .where(eq(calendarAccounts.id, subscription.accountId))
             .limit(1);
-          if (!account?.encryptedCredentials || account.syncRecovery === "reconnect") {
+          if (
+            !account?.encryptedCredentials ||
+            needsReconnect(account, subscription.kind === "gmail_mailbox" ? "mail" : "calendar")
+          ) {
             await db
               .update(connectorSubscriptions)
               .set({
@@ -918,12 +920,19 @@ export function createConnectorNotificationService({
             .select({
               provider: calendarAccounts.provider,
               syncRecovery: calendarAccounts.syncRecovery,
+              syncCapabilities: calendarAccounts.syncCapabilities,
+              calendarEnabled: calendarAccounts.calendarEnabled,
+              mailEnabled: calendarAccounts.mailEnabled,
               userId: calendarAccounts.userId,
             })
             .from(calendarAccounts)
             .where(eq(calendarAccounts.id, claim.accountId))
             .limit(1);
-          if (!account || account.syncRecovery === "reconnect") {
+          if (
+            !account ||
+            (!(account.calendarEnabled && !needsReconnect(account, "calendar")) &&
+              !(account.mailEnabled && !needsReconnect(account, "mail")))
+          ) {
             await this.completeTrigger(claim);
             continue;
           }
@@ -939,7 +948,21 @@ export function createConnectorNotificationService({
             await this.completeTrigger(claim);
             result.succeeded += 1;
           } catch {
-            await this.releaseTrigger(claim, new Date(now().getTime() + 60_000));
+            const [latest] = await db
+              .select({
+                nextSyncAt: calendarAccounts.nextSyncAt,
+                syncRecovery: calendarAccounts.syncRecovery,
+              })
+              .from(calendarAccounts)
+              .where(eq(calendarAccounts.id, claim.accountId))
+              .limit(1);
+            if (latest?.syncRecovery === "reconnect" && latest.nextSyncAt === null)
+              await this.completeTrigger(claim);
+            else
+              await this.releaseTrigger(
+                claim,
+                new Date(Math.max(latest?.nextSyncAt?.getTime() ?? 0, now().getTime() + 60_000)),
+              );
             result.failed += 1;
           }
         }

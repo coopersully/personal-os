@@ -1,34 +1,63 @@
-import type { DomainProfile } from "@personal-os/domain";
+import {
+  calendarProfilePreferencesSchema,
+  type DomainProfile,
+  mailProfilePreferencesSchema,
+} from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { QueryFeedback } from "@/components/async-state";
+import { DataViewLoading, DataViewRecovery } from "@/components/data-view-state";
 import { FeedbackForm } from "@/components/feedback-form";
 import { MutationFeedback } from "@/components/mutation-feedback";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+} from "@/components/responsive-dialog";
+import { Field, FieldDescription, FieldLabel } from "@/components/settings-field";
 import { Button } from "@/components/ui/button";
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
 import { api } from "../../api.js";
+import { CalendarProfilePreferenceFields } from "../calendar/profile-preference-fields";
+import { MailProfilePreferenceFields } from "../mail/profile-preference-fields";
+import { ProfileRow } from "./profile-rows";
 import { SettingsSection } from "./settings-layout";
 
-export function WorkspaceGuidance({ domain }: { domain: "mail" | "tasks" }) {
+export function WorkspaceGuidance({ domain }: { domain: "calendar" | "mail" | "tasks" }) {
+  const [editing, setEditing] = useState(false);
   const query = useQuery({
     queryKey: ["domain-profile", domain],
     queryFn: () => api.getDomainProfile(domain),
   });
   return (
     <SettingsSection
+      layout="rows"
       title="Preferences & guidance"
       description="Describe how this workspace should support you."
     >
-      <QueryFeedback query={query} title="Couldn’t load workspace guidance." />
+      <DataViewRecovery
+        query={query}
+        title="Couldn’t load workspace guidance."
+        unavailableLabel="Workspace guidance unavailable"
+      />
       {query.isPending ? (
-        <p>Loading guidance…</p>
+        <DataViewLoading label="Loading workspace guidance" />
       ) : query.data ? (
-        <GuidanceForm key={domain} profile={query.data} />
+        <>
+          <ProfileRow label="Guidance" value="Configure" onClick={() => setEditing(true)} />
+          <Dialog open={editing} onOpenChange={setEditing}>
+            <DialogContent className="max-h-[85dvh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Workspace guidance</DialogTitle>
+              </DialogHeader>
+              <GuidanceForm key={domain} profile={query.data} />
+            </DialogContent>
+          </Dialog>
+        </>
       ) : query.isSuccess ? (
-        <p className="text-sm text-muted-foreground">
+        <p className="px-4 py-3 text-sm text-muted-foreground">
           No guidance has been configured yet. Use the setup section below to establish your
           preferences.
         </p>
@@ -41,6 +70,7 @@ function GuidanceForm({ profile }: { profile: DomainProfile }) {
   const cache = useQueryClient();
   // Retain the edited snapshot and its version through refreshes; server conflicts preserve the draft.
   const [baseline, setBaseline] = useState(profile);
+  const [preferences, setPreferences] = useState(profile.preferences);
   const [objective, setObjective] = useState(profile.objective);
   const [instructions, setInstructions] = useState(profile.instructions.join("\n"));
   const save = useFeedbackMutation({
@@ -55,18 +85,26 @@ function GuidanceForm({ profile }: { profile: DomainProfile }) {
           .map((line) => line.trim())
           .filter(Boolean),
         categories: baseline.categories,
-        preferences: baseline.preferences,
+        preferences:
+          baseline.domain === "mail"
+            ? mailProfilePreferencesSchema.parse(preferences)
+            : baseline.domain === "calendar"
+              ? validateCalendarPreferences(preferences, baseline.status)
+              : preferences,
         sourceContexts: baseline.sourceContexts,
         status: baseline.status,
         summary: baseline.summary,
       }),
     onSuccess: async (next) => {
       setBaseline(next);
+      setPreferences(next.preferences);
       setObjective(next.objective);
       setInstructions(next.instructions.join("\n"));
       cache.setQueryData(["domain-profile", next.domain], next);
       await cache.invalidateQueries({ queryKey: ["assistant-setup-status"] });
-      await cache.invalidateQueries({ queryKey: ["ilo-setup-plan", next.domain] });
+      if (next.domain === "calendar")
+        await cache.invalidateQueries({ queryKey: ["calendar-status"] });
+      await cache.invalidateQueries({ queryKey: ["personal-os-setup-plan", next.domain] });
     },
   });
   const reload = useFeedbackMutation({
@@ -75,6 +113,7 @@ function GuidanceForm({ profile }: { profile: DomainProfile }) {
     onSuccess: (latest) => {
       if (!latest) return;
       setBaseline(latest);
+      setPreferences(latest.preferences);
       setObjective(latest.objective);
       setInstructions(latest.instructions.join("\n"));
       cache.setQueryData(["domain-profile", profile.domain], latest);
@@ -82,7 +121,9 @@ function GuidanceForm({ profile }: { profile: DomainProfile }) {
     },
   });
   const dirty =
-    objective !== baseline.objective || instructions !== baseline.instructions.join("\n");
+    objective !== baseline.objective ||
+    instructions !== baseline.instructions.join("\n") ||
+    JSON.stringify(preferences) !== JSON.stringify(baseline.preferences);
   return (
     <FeedbackForm
       feedback={save.feedback}
@@ -92,6 +133,22 @@ function GuidanceForm({ profile }: { profile: DomainProfile }) {
         if (!save.isPending) save.mutate();
       }}
     >
+      {profile.domain === "mail" ? (
+        <MailProfilePreferenceFields
+          preferences={preferences}
+          onChange={setPreferences}
+          disabled={save.isPending}
+        />
+      ) : null}
+      {profile.domain === "calendar" ? (
+        <CalendarProfilePreferenceFields
+          draft={baseline.status === "draft"}
+          sourceIds={baseline.sourceContexts.map((source) => source.sourceId)}
+          preferences={preferences}
+          onChange={setPreferences}
+          disabled={save.isPending}
+        />
+      ) : null}
       <Field>
         <FieldLabel htmlFor={`${profile.domain}-objective`}>Objective</FieldLabel>
         <Input
@@ -135,4 +192,16 @@ function GuidanceForm({ profile }: { profile: DomainProfile }) {
       </Button>
     </FeedbackForm>
   );
+}
+
+function validateCalendarPreferences(
+  preferences: DomainProfile["preferences"],
+  status: DomainProfile["status"],
+) {
+  // Drafts can be incomplete; validation must not fill missing authority or strip hidden fields.
+  (status === "draft"
+    ? calendarProfilePreferencesSchema.partial()
+    : calendarProfilePreferencesSchema
+  ).parse(preferences);
+  return preferences;
 }

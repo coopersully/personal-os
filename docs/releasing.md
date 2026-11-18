@@ -203,3 +203,8 @@ the installed bundle or request elevated permission as a fallback. Incoming cold
 open/join/widget actions release automatic-install authority before the startup check
 is scheduled, so their intent remains in the running process. Background refresh events
 do not release that authority.
+
+The workflow retains those configured account bindings and passes them to the build as
+`PERSONAL_OS_HOST_PROFILE_BASE64`, `PERSONAL_OS_WIDGET_PROFILE_BASE64`,
+`PERSONAL_OS_KEYCHAIN_ACCESS_GROUP`, and `PERSONAL_OS_UPDATER_PUBLIC_KEY`. Local signed
+builds use the `PERSONAL_OS_*` process variables directly.

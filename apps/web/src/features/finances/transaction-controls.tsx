@@ -1,203 +1,465 @@
-import type { FinanceAccount, FinanceCategory, FinanceTransaction } from "@personal-os/domain";
+import type {
+  FinanceAccount,
+  FinanceCategory,
+  FinancesWorkspacePreferences,
+  FinanceTransaction,
+} from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { ActionButton as Button } from "@/components/action-button";
+import { ContentSkeleton } from "@/components/content-skeleton";
+import { FilterTrigger, SortOptionIcon, SortTrigger } from "@/components/data-view-controls";
+import { DateInput } from "@/components/date-input";
+import {
+  FloatingActionButton,
+  FloatingActionRegion,
+  FloatingActions,
+} from "@/components/floating-actions";
+import {
+  EyeIcon,
+  GridIcon,
+  LayersIcon,
+  PlusIcon,
+  ReceiptIcon,
+  TagsIcon,
+  UploadIcon,
+} from "@/components/icons";
+import {
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@/components/responsive-dialog";
+import { Field, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import {
-  WorkspaceSecondaryAppBar,
-  WorkspaceSecondaryAppBarActions,
-} from "@/components/workspace-secondary-app-bar";
+import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
+import { WorkspaceHeaderOptions } from "@/components/workspace-header-options";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { formatMoney } from "./format.js";
 import { requireFinanceResult } from "./position-material.js";
+import {
+  useFinancePresentationParams,
+  useSaveFinancePresentation,
+} from "./presentation-preferences";
+import {
+  type FinanceCategoryReadState,
+  financeTransactionCategoryLabel,
+} from "./transaction-category";
+import { transactionGroupingOptions } from "./transaction-groups";
+import { useFinanceWorkspaceReadiness } from "./use-finance-workspace-readiness";
 
 export function FinanceTransactionControls({
   accounts,
+  onImport,
+  onAddCategory,
+  exportAction,
   categories,
-  onAdd,
+  sort,
+  onSort,
 }: {
   accounts: FinanceAccount[];
+  onImport?: () => void;
+  onAddCategory?: () => void;
+  exportAction?: ReactNode;
   categories: FinanceCategory[];
-  onAdd: () => void;
+  sort?: string;
+  onSort?: (value: string) => void;
 }) {
   const [params, setParams] = useSearchParams();
+  const compactHeader = useMediaQuery("(max-width: 767px)");
+  const workspace = useFinanceWorkspaceReadiness();
+  const canCreate =
+    workspace.manualCreationVisible === true &&
+    !workspace.isError &&
+    !workspace.isPending &&
+    workspace.readiness?.workspaceAccessible === true &&
+    !params.has("financeTask");
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const openingDialog = useRef(false);
+  const legacyReview = params.get("review");
+  const reviewState =
+    params.get("reviewState") ??
+    (["all", "resolved", "needs_review"].includes(legacyReview ?? "") ? legacyReview : "all");
   const activeFilters =
-    ["accountId", "categoryId", "from", "to", "pending"].filter((key) => params.get(key)).length +
-    (params.get("review") && params.get("review") !== "all" ? 1 : 0);
-  return (
-    <>
-      <WorkspaceSecondaryAppBar aria-label="Transaction controls">
-        <WorkspaceSecondaryAppBarActions>
-          <Button asChild size="sm" variant="outline">
-            <Link to="/finances/imports">Import history</Link>
-          </Button>
-          <Button onClick={onAdd} size="sm">
-            New transaction
-          </Button>
-        </WorkspaceSecondaryAppBarActions>
-      </WorkspaceSecondaryAppBar>
-      <form
-        aria-label="Filter transactions"
-        key={params.toString()}
-        onSubmit={(event) => {
-          event.preventDefault();
-          const form = new FormData(event.currentTarget);
-          const next = new URLSearchParams(params);
-          for (const key of [
-            "search",
-            "accountId",
-            "categoryId",
-            "from",
-            "to",
-            "pending",
-            "review",
-          ]) {
-            const value = String(form.get(key) ?? "").trim();
-            if (value) next.set(key, value);
-            else next.delete(key);
-          }
-          next.delete("transactionId");
-          setParams(next);
+    ["search", "accountId", "categoryId", "from", "to", "pending"].filter((key) => params.get(key))
+      .length + (reviewState && reviewState !== "all" ? 1 : 0);
+  const presentation = useFinancePresentationParams();
+  const savePresentation = useSaveFinancePresentation();
+  const view = presentation.get("view") === "cards" ? "cards" : "table";
+  const ViewIcon = view === "cards" ? GridIcon : ReceiptIcon;
+  const viewControl = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Transaction view: ${view === "cards" ? "Cards" : "Table"}`}
+        >
+          <ViewIcon />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <DropdownMenuRadioGroup
+          value={view}
+          onValueChange={(value) => {
+            savePresentation.mutate({
+              financeTransactionView:
+                value as FinancesWorkspacePreferences["financeTransactionView"],
+            });
+            setParams((current) => {
+              const next = new URLSearchParams(current);
+              next.set("view", value);
+              return next;
+            });
+          }}
+        >
+          <DropdownMenuRadioItem value="table">
+            <ReceiptIcon />
+            Table
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="cards">
+            <GridIcon />
+            Cards
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+  const createAction = canCreate ? (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <FloatingActionButton label="Add in Transactions">
+          <PlusIcon />
+        </FloatingActionButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        onCloseAutoFocus={(event) => {
+          if (openingDialog.current) event.preventDefault();
+          openingDialog.current = false;
         }}
       >
-        <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
-          <FieldGroup className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-            <Field>
-              <FieldLabel htmlFor="transaction-search">Search</FieldLabel>
-              <Input
-                id="transaction-search"
-                name="search"
-                maxLength={160}
-                defaultValue={params.get("search") ?? ""}
-                placeholder="Merchant or notes"
-              />
-            </Field>
-            <div className="flex flex-wrap items-end gap-2">
-              <Button type="submit" variant="outline">
-                Apply filters
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  setParams({});
-                  setFiltersOpen(false);
-                }}
-              >
-                Clear
-              </Button>
-              <CollapsibleTrigger asChild>
+        <DropdownMenuItem
+          asChild
+          onSelect={() => {
+            openingDialog.current = true;
+          }}
+        >
+          <Link
+            to={{
+              pathname: "/finances/transactions",
+              search: `?${params}`,
+              hash: "finance-add-transaction",
+            }}
+          >
+            <PlusIcon />
+            Add transaction
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            openingDialog.current = true;
+            onAddCategory?.();
+          }}
+        >
+          <TagsIcon />
+          Add category
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            openingDialog.current = true;
+            onImport?.();
+          }}
+        >
+          <UploadIcon />
+          Import transactions
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : null;
+  return (
+    <>
+      {!compactHeader ? (
+        <WorkspaceHeaderControls label="Transaction view" placement="leading">
+          {viewControl}
+        </WorkspaceHeaderControls>
+      ) : null}
+      <WorkspaceHeaderControls label="Transaction controls">
+        <ResponsiveDialog open={filtersOpen} onOpenChange={setFiltersOpen}>
+          <ResponsiveDialogTrigger asChild>
+            <FilterTrigger
+              compact
+              label="Filters"
+              active={activeFilters > 0}
+              count={activeFilters}
+              aria-label={activeFilters ? `Filters (${activeFilters} active)` : "Filters"}
+            />
+          </ResponsiveDialogTrigger>
+          <ResponsiveDialogContent data-finance-dialog data-finance-size="default">
+            <ResponsiveDialogHeader>
+              <ResponsiveDialogTitle>Filter transactions</ResponsiveDialogTitle>
+              <ResponsiveDialogDescription>
+                Choose which transactions appear in this view.
+              </ResponsiveDialogDescription>
+            </ResponsiveDialogHeader>
+            <form
+              className="flex min-h-0 flex-col overflow-hidden"
+              aria-label="Filter transactions"
+              key={params.toString()}
+              onSubmit={(event) => {
+                event.preventDefault();
+                const form = new FormData(event.currentTarget);
+                const next = new URLSearchParams(params);
+                for (const key of [
+                  "search",
+                  "accountId",
+                  "categoryId",
+                  "from",
+                  "to",
+                  "pending",
+                  "reviewState",
+                ]) {
+                  const value = String(form.get(key) ?? "").trim();
+                  if (value) next.set(key, value);
+                  else next.delete(key);
+                }
+                if (["all", "resolved", "needs_review"].includes(next.get("review") ?? ""))
+                  next.delete("review");
+                next.delete("transactionId");
+                setParams(next);
+                setFiltersOpen(false);
+              }}
+            >
+              <ResponsiveDialogBody>
+                <FieldGroup className="mb-5">
+                  <Field>
+                    <FieldLabel htmlFor="transaction-search">Search</FieldLabel>
+                    <Input
+                      id="transaction-search"
+                      name="search"
+                      maxLength={160}
+                      defaultValue={params.get("search") ?? ""}
+                      placeholder="Merchant or notes"
+                    />
+                  </Field>
+                </FieldGroup>
+                <FieldGroup className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <Field>
+                    <FieldLabel htmlFor="transaction-account">Account</FieldLabel>
+                    <NativeSelect
+                      id="transaction-account"
+                      name="accountId"
+                      defaultValue={params.get("accountId") ?? ""}
+                    >
+                      <NativeSelectOption value="">All accounts</NativeSelectOption>
+                      {accounts.map((account) => (
+                        <NativeSelectOption key={account.id} value={account.id}>
+                          {account.name}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="transaction-category">Category</FieldLabel>
+                    <NativeSelect
+                      id="transaction-category"
+                      name="categoryId"
+                      defaultValue={params.get("categoryId") ?? ""}
+                    >
+                      <NativeSelectOption value="">All categories</NativeSelectOption>
+                      {categories.map((category) => (
+                        <NativeSelectOption key={category.id} value={category.id}>
+                          {category.name}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="transaction-review">Review</FieldLabel>
+                    <NativeSelect
+                      id="transaction-review"
+                      name="reviewState"
+                      defaultValue={reviewState ?? "all"}
+                    >
+                      <NativeSelectOption value="all">All review states</NativeSelectOption>
+                      <NativeSelectOption value="needs_review">Needs review</NativeSelectOption>
+                      <NativeSelectOption value="resolved">Reviewed</NativeSelectOption>
+                    </NativeSelect>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="transaction-from">From</FieldLabel>
+                    <TransactionDate
+                      id="transaction-from"
+                      name="from"
+                      initialValue={params.get("from") ?? ""}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="transaction-to">Through</FieldLabel>
+                    <TransactionDate
+                      id="transaction-to"
+                      name="to"
+                      initialValue={params.get("to") ?? ""}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="transaction-posted">Posting state</FieldLabel>
+                    <NativeSelect
+                      id="transaction-posted"
+                      name="pending"
+                      defaultValue={params.get("pending") ?? ""}
+                    >
+                      <NativeSelectOption value="">Pending and posted</NativeSelectOption>
+                      <NativeSelectOption value="pending">Pending</NativeSelectOption>
+                      <NativeSelectOption value="posted">Posted</NativeSelectOption>
+                    </NativeSelect>
+                  </Field>
+                </FieldGroup>
+              </ResponsiveDialogBody>
+              <ResponsiveDialogFooter className="flex-row justify-end">
                 <Button
                   type="button"
                   variant="ghost"
-                  aria-label={activeFilters ? `Filters (${activeFilters} active)` : "Filters"}
+                  onClick={() => {
+                    const next = new URLSearchParams(params);
+                    for (const key of [
+                      "search",
+                      "accountId",
+                      "categoryId",
+                      "from",
+                      "to",
+                      "pending",
+                      "reviewState",
+                      "transactionId",
+                    ])
+                      next.delete(key);
+                    if (["all", "resolved", "needs_review"].includes(next.get("review") ?? ""))
+                      next.delete("review");
+                    setParams(next);
+                    setFiltersOpen(false);
+                  }}
                 >
-                  Filters
-                  {activeFilters ? (
-                    <Badge variant="secondary" aria-hidden="true">
-                      {activeFilters}
-                    </Badge>
-                  ) : null}
+                  Clear filters
                 </Button>
-              </CollapsibleTrigger>
-            </div>
-          </FieldGroup>
-          {/* Mounted fields keep pending edits and are included in FormData while closed. */}
-          <CollapsibleContent forceMount hidden={!filtersOpen} className="pt-3">
-            <FieldGroup className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              <Field>
-                <FieldLabel htmlFor="transaction-account">Account</FieldLabel>
-                <NativeSelect
-                  id="transaction-account"
-                  name="accountId"
-                  defaultValue={params.get("accountId") ?? ""}
-                >
-                  <NativeSelectOption value="">All accounts</NativeSelectOption>
-                  {accounts.map((account) => (
-                    <NativeSelectOption key={account.id} value={account.id}>
-                      {account.name}
-                    </NativeSelectOption>
+                <Button type="submit">Apply filters</Button>
+              </ResponsiveDialogFooter>
+            </form>
+          </ResponsiveDialogContent>
+        </ResponsiveDialog>
+        <WorkspaceHeaderOptions>
+          {compactHeader ? viewControl : null}
+          {onSort ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <SortTrigger compact label="Sort transactions" aria-label="Sort transactions" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuRadioGroup value={sort ?? "date:desc"} onValueChange={onSort}>
+                  {(
+                    [
+                      ["date:desc", "Newest first"],
+                      ["date:asc", "Oldest first"],
+                      ["amount:desc", "Highest amount"],
+                      ["amount:asc", "Lowest amount"],
+                      ["merchant:asc", "Merchant A–Z"],
+                      ["merchant:desc", "Merchant Z–A"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <DropdownMenuRadioItem key={value} value={value}>
+                      <SortOptionIcon value={value} />
+                      {label}
+                    </DropdownMenuRadioItem>
                   ))}
-                </NativeSelect>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="transaction-category">Category</FieldLabel>
-                <NativeSelect
-                  id="transaction-category"
-                  name="categoryId"
-                  defaultValue={params.get("categoryId") ?? ""}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+          {view === "cards" ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="icon" variant="ghost" aria-label="Display transactions">
+                  <EyeIcon />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Group by</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={presentation.get("group") ?? "none"}
+                  onValueChange={(value) => {
+                    savePresentation.mutate({
+                      financeTransactionGroup:
+                        value as FinancesWorkspacePreferences["financeTransactionGroup"],
+                    });
+                    setParams((current) => {
+                      const next = new URLSearchParams(current);
+                      next.set("group", value);
+                      return next;
+                    });
+                  }}
                 >
-                  <NativeSelectOption value="">All categories</NativeSelectOption>
-                  {categories.map((category) => (
-                    <NativeSelectOption key={category.id} value={category.id}>
-                      {category.name}
-                    </NativeSelectOption>
+                  {transactionGroupingOptions.map(([value, label]) => (
+                    <DropdownMenuRadioItem key={value} value={value}>
+                      <LayersIcon />
+                      {label}
+                    </DropdownMenuRadioItem>
                   ))}
-                </NativeSelect>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="transaction-review">Review</FieldLabel>
-                <NativeSelect
-                  id="transaction-review"
-                  name="review"
-                  defaultValue={params.get("review") ?? "all"}
-                >
-                  <NativeSelectOption value="all">All review states</NativeSelectOption>
-                  <NativeSelectOption value="needs_review">Needs review</NativeSelectOption>
-                  <NativeSelectOption value="resolved">Reviewed</NativeSelectOption>
-                </NativeSelect>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="transaction-from">From</FieldLabel>
-                <Input
-                  id="transaction-from"
-                  name="from"
-                  type="date"
-                  defaultValue={params.get("from") ?? ""}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="transaction-to">Through</FieldLabel>
-                <Input
-                  id="transaction-to"
-                  name="to"
-                  type="date"
-                  defaultValue={params.get("to") ?? ""}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="transaction-posted">Posting state</FieldLabel>
-                <NativeSelect
-                  id="transaction-posted"
-                  name="pending"
-                  defaultValue={params.get("pending") ?? ""}
-                >
-                  <NativeSelectOption value="">Pending and posted</NativeSelectOption>
-                  <NativeSelectOption value="pending">Pending</NativeSelectOption>
-                  <NativeSelectOption value="posted">Posted</NativeSelectOption>
-                </NativeSelect>
-              </Field>
-            </FieldGroup>
-          </CollapsibleContent>
-        </Collapsible>
-      </form>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+          {exportAction}
+        </WorkspaceHeaderOptions>
+      </WorkspaceHeaderControls>
+      {createAction ? (
+        <FloatingActionRegion align="end">
+          <FloatingActions aria-label="Transaction actions">{createAction}</FloatingActions>
+        </FloatingActionRegion>
+      ) : null}
     </>
   );
 }
 
+function TransactionDate({
+  id,
+  name,
+  initialValue,
+}: {
+  id: string;
+  name: string;
+  initialValue: string;
+}) {
+  const [value, setValue] = useState(initialValue);
+  return <DateInput id={id} name={name} value={value} onValueChange={setValue} />;
+}
+
 export function FinanceLinkedTransaction({
   id,
+  categories = [],
+  categoryReadState = "unavailable",
   onBreakdown,
   onCategorize,
 }: {
   id: string;
+  categories?: FinanceCategory[];
+  categoryReadState?: FinanceCategoryReadState;
   onBreakdown: (transaction: FinanceTransaction) => void;
   onCategorize: (transaction: FinanceTransaction) => void;
 }) {
@@ -205,7 +467,8 @@ export function FinanceLinkedTransaction({
     queryKey: ["finance-transaction", id],
     queryFn: async () => requireFinanceResult(await api.getFinanceTransaction(id)),
   });
-  if (transaction.isPending) return <p role="status">Loading source transaction…</p>;
+  if (transaction.isPending)
+    return <ContentSkeleton label="Loading source transaction…" rows={3} />;
   if (transaction.isError && !transaction.data)
     return (
       <div>
@@ -239,7 +502,7 @@ export function FinanceLinkedTransaction({
       <dl className="my-4 grid grid-cols-2 gap-3 text-sm">
         <div>
           <dt className="text-muted-foreground">Category</dt>
-          <dd>{item.category ?? "Uncategorized"}</dd>
+          <dd>{financeTransactionCategoryLabel(item, categories, categoryReadState)}</dd>
         </div>
         <div>
           <dt className="text-muted-foreground">Direction</dt>

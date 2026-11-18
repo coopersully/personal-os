@@ -32,7 +32,7 @@ export function mailAgentAccessReadiness({
         : {
             ...(setup.data.accounts.length === 0
               ? {
-                  action: { label: "Connect Mail", to: "/settings?section=connections" },
+                  action: { label: "Connect Mail", to: "/settings?page=connections" },
                   nextStep: "Connect a Mail account",
                 }
               : {}),

@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { idSchema } from "../common.js";
 import { maintenanceRunSchema, maintenanceScopeSchema } from "../maintenance.js";
+import { financeAttentionSnapshotSchema } from "./attention.js";
+import { financeBudgetPlanContextSchema } from "./budget-approval.js";
 import { financeInteractionQuestionSchema } from "./common.js";
+import { financeConversationBatchSchema } from "./conversation.js";
 import { financeWorkflowUnavailableSchema } from "./workflow-contracts.js";
 
 /** The only live Finance maintenance entrypoint; historical judgments are evidence only. */
@@ -9,10 +12,18 @@ export const financeMaintenanceInputSchema = z.discriminatedUnion("operation", [
   z
     .object({
       operation: z.literal("start"),
+      automationScheduleId: idSchema.optional(),
       scope: maintenanceScopeSchema.default({ type: "all_outstanding" }),
     })
     .strict(),
   z.object({ operation: z.literal("resume"), runId: idSchema }).strict(),
+  z
+    .object({
+      operation: z.literal("continue"),
+      continuationId: idSchema,
+      automationScheduleId: idSchema,
+    })
+    .strict(),
 ]);
 export type FinanceMaintenanceInput = z.infer<typeof financeMaintenanceInputSchema>;
 
@@ -28,6 +39,11 @@ export type FinanceMaintenanceRecovery = z.infer<typeof financeMaintenanceRecove
 
 export const financeMaintenanceNextActionSchema = z.discriminatedUnion("tool", [
   z.object({
+    tool: z.literal("get_finance_status"),
+    arguments: z.object({ scope: maintenanceScopeSchema }),
+    reason: z.string().min(1).max(1000),
+  }),
+  z.object({
     tool: z.literal("get_finance_ledger_challenge"),
     arguments: z.object({ challengeId: idSchema }),
     reason: z.string().min(1).max(1000),
@@ -38,7 +54,20 @@ export const financeMaintenanceNextActionSchema = z.discriminatedUnion("tool", [
     reason: z.string().min(1).max(1000),
   }),
 ]);
+export const financeMonthlyWorkSchema = z.object({
+  period: z.string(),
+  enabled: z.boolean(),
+  scope: maintenanceScopeSchema,
+  carryover: z.literal("none"),
+  attention: financeAttentionSnapshotSchema,
+  budget: financeBudgetPlanContextSchema,
+  guidance: z.array(z.string()),
+});
+export type FinanceMonthlyWork = z.infer<typeof financeMonthlyWorkSchema>;
+
 export const financeMaintenancePayloadSchema = z.object({
+  monthlyWork: financeMonthlyWorkSchema.nullable().optional(),
+  conversationBatch: financeConversationBatchSchema.nullable().optional(),
   run: maintenanceRunSchema.nullable(),
   challengeId: idSchema.nullable(),
   nextAction: financeMaintenanceNextActionSchema.nullable(),
@@ -48,6 +77,7 @@ export type FinanceMaintenancePayload = z.infer<typeof financeMaintenancePayload
 
 export const financeSetupInputSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("start") }),
+  z.object({ operation: z.literal("prepare_budget") }),
   z.object({
     answer: z.string().trim().min(1).max(10_000),
     expectedVersion: z.number().int().positive(),
@@ -83,6 +113,7 @@ export const financeSetupPayloadSchema = z.object({
   maintenanceRunId: idSchema.nullable(),
   canonicalMaintenanceRunId: idSchema.nullable(),
   question: financeInteractionQuestionSchema.nullable(),
+  availableQuestions: z.array(financeInteractionQuestionSchema).optional(),
   sessionId: idSchema,
   stage: z.enum([
     "collecting_profile",

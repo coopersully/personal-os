@@ -20,7 +20,7 @@ import {
 import { z } from "zod";
 import { apiResult, result } from "../tool-result.js";
 
-const id = idSchema.describe("ilo object identifier");
+const id = idSchema.describe("nohmi object identifier");
 const expectedRevision = z
   .number()
   .int()

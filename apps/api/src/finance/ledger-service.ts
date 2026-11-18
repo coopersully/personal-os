@@ -7,6 +7,7 @@ import {
   financeClassificationDecisions,
   financeEconomicEvents,
   financeEventTransactions,
+  financeTransactionAllocations,
   financeTransactionRelationships,
   financeTransactionRevisions,
   financeTransactions,
@@ -16,9 +17,15 @@ import type {
   FinanceTransaction,
   FinanceTransactionRelationship,
 } from "@personal-os/domain";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
-import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
+import {
+  executeFinanceIdempotently,
+  type FinanceMutationContext,
+  requireFinanceMutation,
+  type FinanceTransaction as SourceAdmissionTransaction,
+} from "./context.js";
+import { requireFinanceExecutionGuard } from "./execution-owner-guard.js";
 import { nextFinanceTransactionRevision } from "./transaction-revision-lock.js";
 
 type FinanceExecutor = Pick<Database, "delete" | "insert" | "select" | "update">;
@@ -115,15 +122,29 @@ function provenance(context: FinanceMutationContext, now: Date, confidence: numb
   };
 }
 
+/** The database advances this generation for every material transaction edit. */
+function transactionVersion(revision: bigint): number {
+  const version = Number(revision);
+  if (!Number.isSafeInteger(version))
+    throw new AppError("conflict", "The transaction version exceeds the supported numeric range.");
+  return version;
+}
+
 export function createFinanceLedgerService(input: { db: Database; now: () => Date }) {
   const { db, now } = input;
 
-  async function ownedTransaction(userId: string, id: string, executor: FinanceExecutor = db) {
-    const [row] = await executor
+  async function ownedTransaction(
+    userId: string,
+    id: string,
+    executor: FinanceExecutor = db,
+    lock = false,
+  ) {
+    const query = executor
       .select()
       .from(financeTransactions)
       .where(and(eq(financeTransactions.id, id), eq(financeTransactions.userId, userId)))
       .limit(1);
+    const [row] = await (lock ? query.for("update") : query);
     if (!row) throw new AppError("not_found", "The transaction was not found.");
     return row;
   }
@@ -139,8 +160,158 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
   }
 
   return {
+    /** Only the admitted transaction action calls this writer after locked native/source revalidation. */
+    async admitProviderSourceFacts(
+      facts: readonly {
+        transactionId: string;
+        accountId: string;
+        transactionRevision: string;
+        currencyCode: string;
+        providerDirection: "income" | "expense";
+      }[],
+      sourceHash: string,
+      context: FinanceMutationContext,
+      tx: SourceAdmissionTransaction,
+    ) {
+      requireFinanceMutation(context);
+      requireFinanceExecutionGuard(tx, context.userId);
+      const locked = await tx
+        .select({
+          row: financeTransactions,
+          updatedFence: sql<string>`${financeTransactions.updatedAt}::text`,
+        })
+        .from(financeTransactions)
+        .where(
+          and(
+            eq(financeTransactions.userId, context.userId),
+            inArray(
+              financeTransactions.id,
+              facts.map((fact) => fact.transactionId),
+            ),
+          ),
+        )
+        .orderBy(financeTransactions.id)
+        .for("update");
+      const rows = locked.map((entry) => entry.row);
+      if (
+        rows.length !== facts.length ||
+        rows.some((row) => {
+          const fact = facts.find((entry) => entry.transactionId === row.id);
+          return (
+            !fact ||
+            row.accountId !== fact.accountId ||
+            row.contextualRevision.toString() !== fact.transactionRevision ||
+            (row.currencyCode !== null && row.currencyCode !== fact.currencyCode) ||
+            (row.providerDirection !== null && row.providerDirection !== fact.providerDirection)
+          );
+        })
+      )
+        throw new AppError("conflict", "Native source facts changed before admission.");
+      const entries = [];
+      for (const before of rows) {
+        const fact = facts.find((entry) => entry.transactionId === before.id);
+        if (!fact) throw new AppError("conflict", "A source target is unavailable.");
+        const changed = before.currencyCode === null || before.providerDirection === null;
+        let after = before;
+        if (changed) {
+          // PostgreSQL timestamps retain microseconds that a JavaScript Date cannot represent.
+          const fence = locked.find((entry) => entry.row.id === before.id);
+          if (!fence) throw new AppError("conflict", "A native source fence is unavailable.");
+          const version = await nextFinanceTransactionRevision(tx, before.id);
+          const [written] = await tx
+            .update(financeTransactions)
+            .set({
+              currencyCode: before.currencyCode ?? fact.currencyCode,
+              providerDirection: before.providerDirection ?? fact.providerDirection,
+              updatedAt: now(),
+            })
+            .where(
+              and(
+                eq(financeTransactions.id, before.id),
+                eq(financeTransactions.userId, context.userId),
+                eq(financeTransactions.accountId, before.accountId),
+                eq(financeTransactions.contextualRevision, before.contextualRevision),
+                sql`${financeTransactions.updatedAt} = ${fence.updatedFence}::timestamptz`,
+              ),
+            )
+            .returning();
+          if (!written)
+            throw new AppError("conflict", "Native source admission lost its revision fence.");
+          after = written;
+          await tx.insert(financeTransactionRevisions).values({
+            userId: context.userId,
+            transactionId: before.id,
+            version: Math.max(2, version),
+            changes: {
+              sourceHash,
+              currencyCode: { before: before.currencyCode, after: after.currencyCode },
+              providerDirection: {
+                before: before.providerDirection,
+                after: after.providerDirection,
+              },
+            },
+            provenance: provenance(context, now()),
+          });
+        }
+        entries.push({
+          transactionId: before.id,
+          accountId: before.accountId,
+          changed,
+          before: {
+            currencyCode: before.currencyCode,
+            providerDirection: before.providerDirection,
+            transactionRevision: before.contextualRevision.toString(),
+          },
+          after: {
+            currencyCode: fact.currencyCode,
+            providerDirection: fact.providerDirection,
+            transactionRevision: after.contextualRevision.toString(),
+          },
+        });
+      }
+      return entries;
+    },
     async getTransaction(userId: string, id: string) {
-      return result(transaction(await ownedTransaction(userId, id)), "Transaction loaded.");
+      // One statement keeps the parent revision and its allocations in the same snapshot.
+      const rows = await db
+        .select({ parent: financeTransactions, allocation: financeTransactionAllocations })
+        .from(financeTransactions)
+        .leftJoin(
+          financeTransactionAllocations,
+          and(
+            eq(financeTransactionAllocations.transactionId, financeTransactions.id),
+            eq(financeTransactionAllocations.userId, userId),
+            eq(financeTransactionAllocations.state, "active"),
+          ),
+        )
+        .where(and(eq(financeTransactions.id, id), eq(financeTransactions.userId, userId)))
+        .orderBy(financeTransactionAllocations.allocationOrder);
+      const row = rows[0]?.parent;
+      if (!row) throw new AppError("not_found", "The transaction was not found.");
+      return result(
+        {
+          ...transaction(row),
+          allocations: rows.flatMap(({ allocation }) =>
+            allocation
+              ? [
+                  {
+                    allocationOrder: allocation.allocationOrder,
+                    amount: allocation.amount / 100,
+                    categoryId: allocation.categoryId,
+                    id: allocation.id,
+                    invalidatedAt: allocation.invalidatedAt?.toISOString() ?? null,
+                    rationale: allocation.rationale,
+                    revision: allocation.revision,
+                    state: allocation.state,
+                    treatment: allocation.treatment,
+                  },
+                ]
+              : [],
+          ),
+          version: transactionVersion(row.contextualRevision),
+        },
+        "Transaction loaded.",
+      );
     },
 
     async removeTransaction(id: string, idempotencyKey: string, context: FinanceMutationContext) {
@@ -345,9 +516,9 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
           payload: input,
         },
         async (tx) => {
-          const original = await ownedTransaction(context.userId, input.transactionId, tx);
-          const nextRevision = await nextFinanceTransactionRevision(tx, original.id);
-          const currentVersion = Math.max(1, nextRevision - 1);
+          const nextRevision = await nextFinanceTransactionRevision(tx, input.transactionId);
+          const original = await ownedTransaction(context.userId, input.transactionId, tx, true);
+          const currentVersion = transactionVersion(original.contextualRevision);
           if (input.expectedVersion !== currentVersion)
             throw new AppError(
               "conflict",

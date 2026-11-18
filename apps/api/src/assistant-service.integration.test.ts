@@ -413,6 +413,7 @@ describe.sequential("assistant setup service", () => {
     await expect(service.getSetupStatus(context().principal)).resolves.toMatchObject({
       domains: expect.arrayContaining([
         {
+          approvedProfileApproval: null,
           approvedProfileStatus: null,
           approvedProfileVersion: null,
           canRead: true,
@@ -423,6 +424,7 @@ describe.sequential("assistant setup service", () => {
           profileVersion: 4,
         },
         {
+          approvedProfileApproval: null,
           approvedProfileStatus: null,
           approvedProfileVersion: null,
           canRead: true,
@@ -433,6 +435,7 @@ describe.sequential("assistant setup service", () => {
           profileVersion: null,
         },
         {
+          approvedProfileApproval: null,
           approvedProfileStatus: null,
           approvedProfileVersion: null,
           canRead: false,
@@ -630,6 +633,7 @@ describe.sequential("assistant setup service", () => {
     ).resolves.toMatchObject({
       domains: expect.arrayContaining([
         expect.objectContaining({
+          approvedProfileApproval: null,
           approvedProfileStatus: null,
           domain: "finances",
           profileStatus: "draft",
@@ -797,6 +801,11 @@ describe.sequential("assistant setup service", () => {
     await expect(service.getSetupStatus(financeContext.principal)).resolves.toMatchObject({
       domains: expect.arrayContaining([
         {
+          approvedProfileApproval: {
+            agentId: null,
+            source: "user_instruction",
+            userId: financeUser.id,
+          },
           approvedProfileStatus: "active",
           approvedProfileVersion: 2,
           canRead: true,

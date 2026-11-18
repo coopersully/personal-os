@@ -5,6 +5,9 @@ description: Safely evolve nohmi PostgreSQL storage with Drizzle. Use when modif
 
 # personal-os database
 
+Apply the repository [tracking lifecycle](../../../docs/engineering/work-context.md#mandatory-tracking-lifecycle)
+to assigned durable work; pure read-only use of this skill creates no tracking work.
+
 Follow `docs/engineering/database-migrations.md`. The Drizzle schema,
 generated SQL, and migration journal must describe the same release transition.
 
@@ -17,7 +20,8 @@ generated SQL, and migration journal must describe the same release transition.
    indexes, and preservation of existing values.
 4. Add repository/service behavior and tests against a database initialized by
    the repository migrations.
-5. Run the focused tests, then `pnpm verify` before handoff.
+5. Run focused tests during iteration; obtain complete frozen-candidate verification before merge
+   under `docs/engineering/delivery-verification.md`, reusing valid evidence.
 
 ## Preserve migration history
 

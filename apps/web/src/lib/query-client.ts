@@ -7,6 +7,9 @@ import {
   QueryClient,
 } from "@tanstack/react-query";
 
+// Native updater status belongs to the installation, not the signed-in server session.
+const isSessionQuery = (query: Query) => query.meta?.sessionIndependent !== true;
+
 export function createAppQueryClient(defaultOptions: DefaultOptions = {}) {
   let sessionGeneration = 0;
   let sessionIdentity: unknown;
@@ -17,8 +20,12 @@ export function createAppQueryClient(defaultOptions: DefaultOptions = {}) {
     // A failed refresh may retain stale data for a network outage, but never
     // for an authoritative access denial. Cancel old-session requests too.
     const deniedQueries =
-      error.status === 401 ? client.getQueryCache().getAll() : deniedQuery ? [deniedQuery] : [];
-    if (error.status === 401) void client.cancelQueries();
+      error.status === 401
+        ? client.getQueryCache().findAll({ predicate: isSessionQuery })
+        : deniedQuery
+          ? [deniedQuery]
+          : [];
+    if (error.status === 401) void client.cancelQueries({ predicate: isSessionQuery });
     for (const query of deniedQueries) {
       query.setState({
         data: undefined,

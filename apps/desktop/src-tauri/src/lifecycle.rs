@@ -93,6 +93,34 @@ pub async fn action(app: tauri::AppHandle, value: Value) {
         }
     }
     match action {
+        "pet_toggle" => {
+            if crate::pet::toggle(&app).await.is_err() {
+                show(&app);
+                forward(&app, json!({"action":"error","message":"Could not open pet quick access. Try again."})).await;
+            }
+        }
+        "pet_disable" => {
+            if crate::desktop::disable_pet(app.clone()).await.is_err() {
+                show(&app);
+                forward(&app, json!({"action":"error","message":"Could not disable the pet. Try again in Desktop pet settings."})).await;
+            }
+        }
+        "pet_hide" => crate::pet::hide(&app),
+        "pet_presentation" => {
+            if let Some(window) = app.get_webview_window("pet") {
+                let _ = window.emit("pet-presentation", &value);
+            }
+        }
+        "pet_snapshot_changed" => {
+            if let Some(window) = app.get_webview_window("pet") {
+                let _ = window.emit("pet-snapshot-changed", ());
+            }
+        }
+        "pet_clear" => {
+            if let Some(window) = app.get_webview_window("pet") {
+                let _ = window.destroy();
+            }
+        }
         "open" => {
             if let Some(path) = value["path"].as_str().filter(|p| safe_route(p)) {
                 show(&app);

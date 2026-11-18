@@ -1,0 +1,4 @@
+interface:
+  display_name: "Handoff"
+  short_description: "Take a nohmi PR or worktree through merge and production."
+  default_prompt: "Use $handoff to take delivery ownership of the current nohmi worktree or pull request through acceptance, protected merge and verified production delivery."

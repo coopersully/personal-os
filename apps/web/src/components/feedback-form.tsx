@@ -1,5 +1,6 @@
 import { type ComponentProps, useEffect, useId, useRef, useState } from "react";
 import type { MutationFeedbackState } from "../lib/feedback.js";
+import { useSettingsError } from "../lib/settings-feedback.js";
 import { MutationFeedback } from "./mutation-feedback.js";
 
 type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
@@ -55,6 +56,11 @@ export function FeedbackForm({
   const id = useId();
   const focusRequested = useRef(false);
   const [errors, setErrors] = useState<FieldError[]>([]);
+  const localErrors = errors.filter((error) => error.source !== "server");
+  useSettingsError(
+    localErrors.length ? localErrors.map((error) => error.message).join(" ") : null,
+    "Check the highlighted settings fields.",
+  );
   const names = useRef(fieldNames);
   names.current = fieldNames;
 

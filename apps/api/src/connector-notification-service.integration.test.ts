@@ -827,8 +827,8 @@ describe.sequential("connector notification service", () => {
         .from(calendarAccounts)
         .where(eq(calendarAccounts.id, icloudAccount.id));
       expect(reconnectAccount).toMatchObject({
-        syncError: "Reconnect this iCloud account to resume syncing.",
-        syncRecovery: "reconnect",
+        syncError: null,
+        syncRecovery: null,
       });
     } finally {
       await database.db.delete(calendarAccounts).where(eq(calendarAccounts.id, icloudAccount.id));

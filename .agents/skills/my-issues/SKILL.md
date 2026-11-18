@@ -1,6 +1,7 @@
 ---
 name: my-issues
 description: Use when explicitly viewing the authenticated user's legacy nohmi GitHub issues or their linked pull requests.
+disable-model-invocation: true
 ---
 
 # My issues

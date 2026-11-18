@@ -291,6 +291,11 @@ export const knowledgeRecordSchema = knowledgeRecordSnapshotSchema.extend({
   trashedAt: isoDateTimeSchema.nullable(),
   /** The record whose trash action moved this one; restore and delete now act on that group. */
   trashGroupId: idSchema.nullable(),
+  /**
+   * Owner only: changes on every Trash and restore of this record. Delete now confirms it, so a
+   * confirmation prepared before a Trash or restore no longer applies. Agents never receive it.
+   */
+  trashVersion: z.number().int().nonnegative().optional(),
 });
 export type KnowledgeRecord = z.infer<typeof knowledgeRecordSchema>;
 /** What the owner reads for a purged record ID: a content-free tombstone. */

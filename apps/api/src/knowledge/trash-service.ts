@@ -57,6 +57,7 @@ async function trashDerivationClosure(
     UPDATE knowledge_records r SET
       trashed_at = ${at.toISOString()}::timestamptz,
       trash_group_id = ${recordId}::uuid,
+      trash_version = r.trash_version + 1,
       status_before_trash = (
         SELECT v.snapshot->>'status' FROM knowledge_revisions v
         WHERE v.user_id = r.user_id AND v.record_id = r.id AND v.revision = r.revision
@@ -195,7 +196,12 @@ export function createKnowledgeTrashService({ db, now }: { db: Database; now: ()
           );
         await tx
           .update(knowledgeRecords)
-          .set({ trashedAt: null, trashGroupId: null, statusBeforeTrash: null })
+          .set({
+            trashedAt: null,
+            trashGroupId: null,
+            statusBeforeTrash: null,
+            trashVersion: sql`${knowledgeRecords.trashVersion} + 1`,
+          })
           .where(
             and(
               eq(knowledgeRecords.userId, principal.userId),
@@ -207,12 +213,12 @@ export function createKnowledgeTrashService({ db, now }: { db: Database; now: ()
     deleteNow(principal: Principal, raw: KnowledgeDeleteNowInput) {
       const input = knowledgeDeleteNowInputSchema.parse(raw);
       return run("delete_now", principal, input, async (tx, current, at) => {
-        // A confirmation prepared before a restore, a re-trash or a new derived record no longer
-        // describes what would be erased; only the state the person confirmed is deleted.
-        const expected =
-          input.expectedTrashedAt === null ? null : Date.parse(input.expectedTrashedAt);
-        if ((current.trashedAt?.getTime() ?? null) !== expected)
+        // A confirmation prepared before a Trash or restore no longer describes what would be
+        // erased, even when the record is back in the state it was in (live, say, with a new
+        // derived record); only the exact Trash state the person confirmed is deleted.
+        if (current.trashVersion !== input.expectedTrashVersion)
           throw new AppError("conflict", "This memory's Trash state changed.", {
+            trashVersion: current.trashVersion,
             trashedAt: current.trashedAt?.toISOString() ?? null,
           });
         const { userId } = principal;

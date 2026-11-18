@@ -348,7 +348,7 @@ describe.sequential("registered memory lifecycle", () => {
       const deletion = {
         ...identity,
         action: "delete_now" as const,
-        expectedTrashedAt: inTrash?.trashedAt ?? null,
+        expectedTrashVersion: inTrash?.trashVersion ?? -1,
         mutationKey: randomUUID(),
       };
       expect(await f.owner.updateKnowledge(deletion)).toMatchObject({

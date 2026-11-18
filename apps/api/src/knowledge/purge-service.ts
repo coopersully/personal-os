@@ -2,10 +2,14 @@ import {
   type Database,
   knowledgeDerivations,
   knowledgeRecords,
+  knowledgeRecordTags,
   knowledgeRelationships,
   knowledgeRevisionMetadata,
   knowledgeRevisions,
   knowledgeSources,
+  knowledgeTagAliases,
+  knowledgeTagMerges,
+  knowledgeTags,
   knowledgeTombstones,
   users,
 } from "@personal-os/database";
@@ -125,11 +129,56 @@ export async function purgeTrashedKnowledge(
   await tx
     .delete(knowledgeSources)
     .where(and(eq(knowledgeSources.userId, userId), inArray(knowledgeSources.recordId, ids)));
+  const tagIds = (
+    await tx
+      .selectDistinct({ tagId: knowledgeRecordTags.tagId })
+      .from(knowledgeRecordTags)
+      .where(
+        and(eq(knowledgeRecordTags.userId, userId), inArray(knowledgeRecordTags.recordId, ids)),
+      )
+  ).map(({ tagId }) => tagId);
   // Record-owned links without explicit cleanup above (such as tags) cascade from this row.
   await tx
     .delete(knowledgeRecords)
     .where(and(eq(knowledgeRecords.userId, userId), inArray(knowledgeRecords.id, ids)));
+  await deleteUnreferencedKnowledgeTags(tx, userId, tagIds);
   return ids.length;
+}
+
+/**
+ * A tag only purged memory carried is gone with it, so its name cannot surface again through
+ * the trailing-`s` fold. A tag a merge or alias still names stays: undo needs its row and name.
+ */
+async function deleteUnreferencedKnowledgeTags(
+  tx: KnowledgeTransaction,
+  userId: string,
+  tagIds: string[],
+) {
+  if (!tagIds.length) return;
+  await tx.execute(sql`
+    DELETE FROM ${knowledgeTags} AS tag
+    WHERE tag.user_id = ${userId}
+      AND tag.id IN (${sql.join(
+        tagIds.map((id) => sql`${id}::uuid`),
+        sql`, `,
+      )})
+      AND NOT EXISTS (
+        SELECT 1 FROM ${knowledgeRecordTags} AS link
+        WHERE link.user_id = tag.user_id AND link.tag_id = tag.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM ${knowledgeTagAliases} AS alias
+        WHERE alias.user_id = tag.user_id AND (alias.tag_id = tag.id OR alias.alias = tag.name)
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM ${knowledgeTagMerges} AS merge
+        WHERE merge.user_id = tag.user_id
+          AND (
+            merge.into_tag_id = tag.id
+            OR merge.from_name = tag.name
+            OR tag.name = ANY (merge.carried_aliases)
+          )
+      )`);
 }
 
 /** Purges records whose Trash retention has passed, one owner transaction per record. */

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { idSchema, isoDateTimeSchema } from "./common.js";
+import { idSchema } from "./common.js";
 import {
   type KnowledgeRecordSnapshot,
   knowledgeAgentAccessSchema,
@@ -68,12 +68,12 @@ export const knowledgeTrashRetentionMs = 30 * 24 * 60 * 60 * 1000;
 export const knowledgeTrashInputSchema = z.object(mutationIdentity).strict();
 export type KnowledgeTrashInput = z.infer<typeof knowledgeTrashInputSchema>;
 /**
- * Delete now also confirms the Trash state the person saw: when the record entered Trash, or
- * null for a live record. Restore and Trash leave the revision unchanged, so the revision alone
- * cannot tell a stale confirmation from a fresh one.
+ * Delete now also confirms the Trash state the person saw, as the record's `trashVersion`.
+ * Trash and restore leave the revision unchanged but always change the Trash version, so a
+ * confirmation prepared before either, live or in Trash, no longer applies.
  */
 export const knowledgeDeleteNowInputSchema = knowledgeTrashInputSchema
-  .extend({ expectedTrashedAt: isoDateTimeSchema.nullable() })
+  .extend({ expectedTrashVersion: z.number().int().nonnegative() })
   .strict();
 export type KnowledgeDeleteNowInput = z.infer<typeof knowledgeDeleteNowInputSchema>;
 

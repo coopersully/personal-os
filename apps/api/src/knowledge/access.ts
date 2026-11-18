@@ -40,6 +40,8 @@ export type KnowledgeRecordState = {
   /** Trash state; a trashed record is never disclosed to an agent. */
   trashedAt: Date | null;
   trashGroupId: string | null;
+  /** Changes on every Trash and restore; Delete now confirms it. */
+  trashVersion: number;
   ownerHeld: boolean;
   agentAccess: KnowledgeAgentAccess;
   core: boolean;
@@ -239,6 +241,7 @@ const revisionSelection = {
   claimKey: knowledgeRevisionMetadata.claimKey,
   trashedAt: knowledgeRecords.trashedAt,
   trashGroupId: knowledgeRecords.trashGroupId,
+  trashVersion: knowledgeRecords.trashVersion,
   ownerHeld: knowledgeRecords.ownerHeld,
   agentAccess: knowledgeRecords.agentAccess,
   core: knowledgeRecords.core,
@@ -276,6 +279,7 @@ export const knowledgeNotTrashed = isNull(knowledgeRecords.trashedAt);
 export const detachedKnowledgeRecordState: KnowledgeRecordState = {
   trashedAt: null,
   trashGroupId: null,
+  trashVersion: 0,
   ownerHeld: false,
   agentAccess: "allowed",
   core: false,
@@ -489,6 +493,7 @@ export function projectKnowledgeRevision(
     hasSidecar: row.metadata !== null,
     trashedAt: row.trashedAt,
     trashGroupId: row.trashGroupId,
+    trashVersion: row.trashVersion,
     ownerHeld: row.ownerHeld,
     agentAccess: row.agentAccess,
     core: row.core,
@@ -1220,6 +1225,8 @@ export function createKnowledgeAccess(now: () => Date) {
       lastConfirmedAt: revision.lastConfirmedAt?.toISOString() ?? null,
       trashedAt: revision.trashedAt?.toISOString() ?? null,
       trashGroupId: revision.trashGroupId,
+      // How often a record went through Trash is the person's to see, never an agent's.
+      ...(principal.actorType === "user" ? { trashVersion: revision.trashVersion } : {}),
     };
   }
 

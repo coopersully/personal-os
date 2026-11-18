@@ -79,9 +79,9 @@ release backfills them onto existing workspace-scoped connections. Update accept
 supersede, dispute, archive, unarchive, restrict and raise sensitivity; revising or superseding a
 memory the person holds stores a linked proposal instead. Confirmation, widening restrictions,
 agent access, lowering sensitivity, Trash, restore, Delete now, export and undoing a tag merge use
-human-authenticated API calls. Delete now carries `expectedTrashedAt`, the record's `trashedAt` as
-shown or `null` for a live record, and returns 409 with the current `trashedAt` when it no longer
-matches. The person settles a pending proposal only with `resolve_conflict`; confirming, disputing
+human-authenticated API calls. Delete now carries `expectedTrashVersion`, the record's
+`trashVersion` as shown, which every Trash and restore advances, and returns 409 with the current
+`trashVersion` and `trashedAt` when it no longer matches. The person settles a pending proposal only with `resolve_conflict`; confirming, disputing
 or revising it returns 409, as does accepting one whose original another proposal already
 replaced. Revision history is available through the API.
 

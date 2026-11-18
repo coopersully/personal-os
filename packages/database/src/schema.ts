@@ -7054,6 +7054,8 @@ export const knowledgeRecords = pgTable(
     trashedAt: timestamp("trashed_at", { withTimezone: true }),
     trashGroupId: uuid("trash_group_id"),
     statusBeforeTrash: text("status_before_trash"),
+    /** Counts every Trash and restore transition, so Delete now confirms one exact Trash state. */
+    trashVersion: integer("trash_version").notNull().default(0),
     /** The latest content revision was written by the person, or the person confirmed it. */
     ownerHeld: boolean("owner_held").notNull().default(false),
     /** Person-only override; `blocked` hides the record from every agent read. */
@@ -7064,6 +7066,7 @@ export const knowledgeRecords = pgTable(
   (table) => [
     uniqueIndex("knowledge_records_owner_id_idx").on(table.userId, table.id),
     check("knowledge_records_agent_access", sql`${table.agentAccess} IN ('allowed', 'blocked')`),
+    check("knowledge_records_trash_version", sql`${table.trashVersion} >= 0`),
     check(
       "knowledge_records_status_before_trash",
       sql`${table.statusBeforeTrash} IN ('proposed', 'active', 'disputed', 'superseded', 'archived', 'expired')`,

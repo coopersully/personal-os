@@ -284,10 +284,12 @@ API (all owner-scoped; person-only routes require a signed-in session):
   `GET /v1/knowledge/:id/history`; `POST /v1/knowledge/:id/actions` with actions `revise`,
   `supersede`, `dispute`, `archive`, `unarchive`, `restrict`, `confirm`, `set_access`,
   `resolve_conflict`, `trash`, `restore`, `delete_now`.
-  - `delete_now` also takes `expectedTrashedAt`: the record's `trashedAt` as the person saw it, or
-    `null` for a live record. Trash and restore leave the revision unchanged, so this is what
-    tells a stale confirmation apart. A mismatch returns 409 with the current `trashedAt` in the
-    details; an exact retry of a completed request replays its receipt.
+  - `delete_now` also takes `expectedTrashVersion`: the record's `trashVersion` as the person saw
+    it. Trash and restore leave the revision unchanged but each advances the Trash version of
+    every record in the group, so a confirmation prepared before a Trash or restore no longer
+    applies, even once the record is live again. A mismatch returns 409 with the current
+    `trashVersion` and `trashedAt` in the details and erases nothing; an exact retry of a
+    completed request replays its receipt. Only the owner's reads carry `trashVersion`.
   - A pending proposal (`proposed`) is settled only with `resolve_conflict`. The person's
     `confirm`, `dispute` or `revise` of a pending proposal returns 409 and changes nothing.
     Accepting a proposal (`keep: "proposed"`) whose original another proposal already replaced

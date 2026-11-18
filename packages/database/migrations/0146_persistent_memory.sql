@@ -4,10 +4,12 @@ CREATE TABLE knowledge_records (
  revision integer NOT NULL DEFAULT 1, created_at timestamptz NOT NULL DEFAULT now(),
  updated_at timestamptz NOT NULL DEFAULT now(),
  trashed_at timestamptz NULL, trash_group_id uuid NULL, status_before_trash text NULL,
+ trash_version integer NOT NULL DEFAULT 0,
  owner_held boolean NOT NULL DEFAULT false, agent_access text NOT NULL DEFAULT 'allowed',
  core boolean NOT NULL DEFAULT false, last_confirmed_at timestamptz NULL,
  CONSTRAINT knowledge_records_owner_id_idx UNIQUE(user_id,id),
  CONSTRAINT knowledge_records_agent_access CHECK (agent_access IN ('allowed', 'blocked')),
+ CONSTRAINT knowledge_records_trash_version CHECK (trash_version >= 0),
  CONSTRAINT knowledge_records_status_before_trash CHECK (
   status_before_trash IN ('proposed', 'active', 'disputed', 'superseded', 'archived', 'expired')
  ),

@@ -12,6 +12,7 @@ import {
   knowledgeRevisionMetadata,
   knowledgeRevisions,
   knowledgeSources,
+  knowledgeTags,
   knowledgeTombstones,
   migrateDatabase,
   sessions,
@@ -33,6 +34,7 @@ import { createKnowledgeLifecycleService } from "./lifecycle-service.js";
 import { createKnowledgePurgeService } from "./purge-service.js";
 import { createKnowledgeRecordService } from "./record-service.js";
 import { createKnowledgeSearchService } from "./search-service.js";
+import { createKnowledgeTagService } from "./tag-service.js";
 
 const planning = { purpose: "planning" } as const;
 
@@ -133,9 +135,11 @@ describe("memory trash and purge", () => {
     const records = createKnowledgeRecordService(config);
     const lifecycle = createKnowledgeLifecycleService(config);
     /** The record's Trash state as the owner sees it now, which a fresh Delete now confirms. */
-    async function trashedAt(id: string) {
+    async function trashVersion(id: string) {
       const current = await records.get(owner, { id });
-      return "trashedAt" in current ? current.trashedAt : null;
+      if (!("trashVersion" in current) || current.trashVersion === undefined)
+        throw new Error("Expected the owner to see the Trash version.");
+      return current.trashVersion;
     }
     async function act(
       action: "trash" | "restore" | "delete_now",
@@ -150,7 +154,7 @@ describe("memory trash and purge", () => {
       return lifecycle.mutate(
         principal,
         action === "delete_now"
-          ? { ...identity, action, expectedTrashedAt: await trashedAt(record.id) }
+          ? { ...identity, action, expectedTrashVersion: await trashVersion(record.id) }
           : { ...identity, action },
       );
     }
@@ -160,11 +164,12 @@ describe("memory trash and purge", () => {
       records,
       lifecycle,
       act,
-      trashedAt,
+      trashVersion,
       search: createKnowledgeSearchService(config),
       context: createKnowledgeContextService(config),
       exporter: createKnowledgeExportService(config),
       purge: createKnowledgePurgeService(config),
+      tags: createKnowledgeTagService(config),
       advance: (ms: number) => {
         clock += ms;
       },
@@ -849,8 +854,8 @@ describe("memory trash and purge", () => {
     const f = await fixture();
     const a = await f.save(fact("stale-delete-value"));
     await f.act("trash", a);
-    const seen = await f.trashedAt(a.id);
-    expect(seen).not.toBeNull();
+    const seen = await f.trashVersion(a.id);
+    expect(seen).toBe(1);
     // Another session restores the record and derives a new memory from it.
     await f.act("restore", a);
     const derived = await f.save(derivedFrom(a, "stale-delete-derived"));
@@ -858,10 +863,13 @@ describe("memory trash and purge", () => {
       action: "delete_now" as const,
       recordId: a.id,
       expectedRevision: a.revision,
-      expectedTrashedAt: seen,
+      expectedTrashVersion: seen,
       mutationKey: randomUUID(),
     };
-    await expect(f.lifecycle.mutate(f.owner, stale)).rejects.toMatchObject({ status: 409 });
+    await expect(f.lifecycle.mutate(f.owner, stale)).rejects.toMatchObject({
+      status: 409,
+      details: { trashVersion: 2, trashedAt: null },
+    });
     // Re-trashing it later is a new Trash state, so the old confirmation still does not apply.
     f.advance(60_000);
     await f.act("trash", a);
@@ -871,10 +879,104 @@ describe("memory trash and purge", () => {
     for (const id of [a.id, derived.id])
       expect(await f.records.get(f.owner, { id })).toMatchObject({ id, revision: 1 });
     // A confirmation of the current state deletes, and its exact retry replays.
-    const fresh = { ...stale, expectedTrashedAt: await f.trashedAt(a.id) };
+    const fresh = { ...stale, expectedTrashVersion: await f.trashVersion(a.id) };
     const deleted = await f.lifecycle.mutate(f.owner, fresh);
     expect(deleted).toMatchObject({ outcome: "forgotten" });
     expect(await f.lifecycle.mutate(f.owner, fresh)).toEqual(deleted);
+  });
+
+  it("purge_removes_a_tag_only_purged_memory_carried", async () => {
+    const f = await fixture();
+    const purged = await f.save(fact("purged-tag-value", { tags: ["budget"] }));
+    const kept = await f.save(fact("kept-tag-value", { tags: ["shared"] }));
+    const alsoPurged = await f.save(fact("also-purged-value", { tags: ["shared"] }));
+    await f.act("delete_now", purged);
+    await f.act("delete_now", alsoPurged);
+    const names = (
+      await database.db
+        .select({ name: knowledgeTags.name })
+        .from(knowledgeTags)
+        .where(eq(knowledgeTags.userId, f.owner.userId))
+    ).map(({ name }) => name);
+    expect(names.sort()).toEqual(["shared"]);
+    // The plural fold no longer finds the purged name, so an agent cannot learn it.
+    const saved = await f.save(
+      fact("agent-plural-value", {
+        tags: ["budgets"],
+        evidence: [{ type: "observation", reference: "Observed in a planning session." }],
+      }),
+      f.agent,
+    );
+    expect(saved.tags).toEqual(["budgets"]);
+    expect(await f.records.get(f.owner, { id: kept.id })).toMatchObject({ tags: ["shared"] });
+  });
+
+  it("purge_keeps_a_tag_a_merge_still_references", async () => {
+    const f = await fixture();
+    const a = await f.save(fact("merged-from-value", { tags: ["money"] }));
+    const b = await f.save(fact("merged-into-value", { tags: ["finance"] }));
+    await f.tags.merge(f.owner, { from: "money", into: "finance", mutationKey: randomUUID() });
+    // Tags are record state, so the merge leaves both revisions as they were.
+    await f.act("delete_now", a);
+    await f.act("delete_now", b);
+    const names = (
+      await database.db
+        .select({ name: knowledgeTags.name })
+        .from(knowledgeTags)
+        .where(eq(knowledgeTags.userId, f.owner.userId))
+    ).map(({ name }) => name);
+    // Undo still needs both rows: the merge names `money` and files into `finance`.
+    expect(names.sort()).toEqual(["finance", "money"]);
+  });
+
+  it("delete_now_refuses_a_stale_live_confirmation_after_trash_and_restore", async () => {
+    const f = await fixture();
+    const a = await f.save(fact("stale-live-value"));
+    // Session 1 prepares Delete now while the record is live.
+    const stale = {
+      action: "delete_now" as const,
+      recordId: a.id,
+      expectedRevision: a.revision,
+      expectedTrashVersion: await f.trashVersion(a.id),
+      mutationKey: randomUUID(),
+    };
+    expect(stale.expectedTrashVersion).toBe(0);
+    // Session 2 trashes and restores it, then derives a new memory from it.
+    await f.act("trash", a);
+    await f.act("restore", a);
+    const derived = await f.save(derivedFrom(a, "stale-live-derived"));
+    // Live again with an unchanged revision, but not the state session 1 confirmed.
+    await expect(f.lifecycle.mutate(f.owner, stale)).rejects.toMatchObject({
+      status: 409,
+      details: { trashVersion: 2, trashedAt: null },
+    });
+    for (const id of [a.id, derived.id]) {
+      expect(await f.records.get(f.owner, { id })).toMatchObject({ id, trashedAt: null });
+      expect(
+        await database.db
+          .select()
+          .from(knowledgeTombstones)
+          .where(eq(knowledgeTombstones.recordId, id)),
+      ).toEqual([]);
+    }
+    // A fresh confirmation of the live state deletes both, and its exact retry replays.
+    const fresh = { ...stale, expectedTrashVersion: 2, mutationKey: randomUUID() };
+    const deleted = await f.lifecycle.mutate(f.owner, fresh);
+    expect(deleted).toMatchObject({ outcome: "forgotten" });
+    expect(await f.lifecycle.mutate(f.owner, fresh)).toEqual(deleted);
+    expect(await f.records.get(f.owner, { id: derived.id })).toMatchObject({ state: "forgotten" });
+  });
+
+  it("trash_and_restore_advance_the_trash_version_of_every_group_member", async () => {
+    const f = await fixture();
+    const a = await f.save(fact("versioned-source"));
+    const b = await f.save(derivedFrom(a, "versioned-derived"));
+    await f.act("trash", a);
+    expect([await f.trashVersion(a.id), await f.trashVersion(b.id)]).toEqual([1, 1]);
+    await f.act("restore", a);
+    expect([await f.trashVersion(a.id), await f.trashVersion(b.id)]).toEqual([2, 2]);
+    // Agents never see how often a record went through Trash.
+    expect(await f.records.get(f.agent, { id: a.id })).not.toHaveProperty("trashVersion");
   });
 
   it("purge_is_idempotent", async () => {

@@ -1,7 +1,8 @@
 # nohmi User Knowledge
 
-- Status: Approved target product contract; not yet implemented as a complete system
-- Last reconciled: 2026-11-12
+- Status: Approved target product contract; agent-managed memory foundation in source (PR #419,
+  not merged or deployed)
+- Last reconciled: 2026-11-18
 
 ## Purpose
 
@@ -18,8 +19,8 @@ permissions still apply; sharing an account does not give every agent unrestrict
 
 The purpose is not to remember everything or place a transcript into every model prompt. The
 purpose is to retrieve the smallest trustworthy context needed for a specific decision, disclose
-what is missing, learn from outcomes, and let the person inspect and correct the resulting model of
-their life.
+what is missing, record what the person says as soon as they say it, and let the person inspect and
+correct the resulting model of their life.
 
 User Knowledge is multi-user infrastructure even when an early environment has one account. Every
 knowledge object, revision, relationship, evidence source, embedding, search candidate, context
@@ -79,9 +80,13 @@ Every knowledge record must carry:
 - a stable identity, kind, typed value, and schema version;
 - global, workspace, and entity scopes;
 - provenance, source references, and the actor that created or revised it;
-- confidence and a status of `proposed`, `active`, `disputed`, `superseded`, or `expired`;
-- observed, valid-from, valid-through, reviewed, and next-review times where applicable;
-- sensitivity, allowed purposes, and disclosure policy;
+- an origin of `stated` (the person said or entered it) or `inferred` (an agent's conclusion), which
+  never changes, and whether the person holds the current value (`ownerHeld`);
+- a status of `proposed`, `active`, `disputed`, `superseded`, `archived`, or `expired`, plus a
+  separate Trash state;
+- 1-8 tags, a `core` flag, and updated, last-confirmed, valid-from and valid-through times;
+- sensitivity, the person's per-record agent access, workspace restriction, and optional purposes
+  that rank relevance but never gate access;
 - relationships to other knowledge and exact workspace records; and
 - immutable revision and supersession history.
 
@@ -97,61 +102,60 @@ specifies cross-agent retrieval, mutation, history, and acceptance requirements.
 design is pending written review; these account-owned knowledge principles are settled decisions.
 
 The [completion specification](../superpowers/specs/2026-10-12-finance-texting-completion-design.md)
-now defines the proposed typed storage, opt-in read/write scopes, bounded context, lifecycle, narrow
-deterministic promotion rule and migration contract. The
-[shared toolkit plan](../superpowers/plans/2026-10-12-shared-toolkit-completion.md) maps these to
-implementation and acceptance tasks. They remain target design, not delivered persistent memory.
+and [shared toolkit plan](../superpowers/plans/2026-10-12-shared-toolkit-completion.md) first
+proposed typed storage, opt-in scopes and a narrow promotion rule. The November 15
+[agent-managed memory design](../superpowers/specs/2026-11-15-persistent-memory-design.md)
+supersedes their memory portions: memory scopes are on by default and there is no promotion rule.
 
 The source record and an exact excerpt or safe structured observation should remain available when
 the person is allowed to inspect it. A generated summary is useful retrieval material but cannot be
 the only evidence for a durable belief.
 
-## Learning lifecycle
+## Memory lifecycle
 
-### November 12, 2026 completion decision
+### November 15, 2026 decision: agents manage memory
 
-Cooper confirmed that sufficiently evidenced low-risk preferences may be accepted automatically,
-while retaining their inferred origin and easy correction. Sensitive facts require explicit owner
-confirmation. Knowledge confirmation never changes agent authority; permission or action-policy
-changes still require the owning domain's separate approval flow.
+The [agent-managed memory design](../superpowers/specs/2026-11-15-persistent-memory-design.md)
+supersedes the November 12 design and its owner-heavy lifecycle. Cooper decided that agents manage
+memory and the person is the override:
 
-The [dedicated memory design](../superpowers/specs/2026-11-12-persistent-memory-design.md) and
-[implementation plan](../superpowers/plans/2026-11-12-persistent-memory.md) now own completion scope.
-They supersede the memory portions of the historical shared-toolkit plans, without adopting their
-unrelated Finance/Texting, general work-claim or goal-redesign work.
+1. When the person says something important, the agent saves it right away, with tags. The memory
+   is active at once, including an agent's inference, which stays labeled `inferred`.
+2. Agents search before saving. When a memory changes, they update or supersede it instead of
+   saving a duplicate. They can also dispute, archive, unarchive, restrict to a workspace, raise
+   sensitivity, and merge tags.
+3. When an agent revises or supersedes a memory the person entered or confirmed, the person's
+   value stays active and the agent's version becomes a linked proposal. Both show as a conflict
+   until the person resolves it.
+4. Only the person can confirm, widen a restriction, set agent access, lower sensitivity, export,
+   undo a tag merge, or move memory to and from Trash.
+5. Every memory an agent receives carries origin, `ownerHeld`, status, sensitivity, tags,
+   freshness, validity and source references. The agent decides whether a memory is good enough to
+   act on; nohmi supplies the signals, not a trust score.
 
-Initial engineering defaults restrict automatic acceptance to presentation detail and format:
-three independent first-party user selections on three distinct local dates within 30 days,
-no contrary selection or conflict, and enabled learning. Inferred origin remains visible after
-acceptance. Owner correction or rejection suppresses automatic relearning until explicitly reset.
-Other inferred claims remain proposals. Sensitive agent proposals are owner-only and confirmation
-does not enable sensitive agent disclosure in this release.
+There is no automatic learning or promotion rule. The earlier three-selection rule for presentation
+preferences was removed; those preferences are ordinary memories that agents or the person save.
 
-Correction preserves ordinary history; forgetting deliberately erases live and historical content,
-dependent copies and receipt replay, retaining only content-free recovery metadata. Original domain
-records remain separately owned. Restore-safe deletion requires the independently durable deletion
-ledger and verified recovery path described in the design; external agents' already received copies
-cannot be recalled. These are target requirements, not claims of implemented behavior.
+### Recall
 
-1. A user statement may create active knowledge immediately when its meaning and scope are clear.
-2. An agent observation creates proposed knowledge with evidence, confidence, scope, sensitivity,
-   and an expiry or review condition.
-3. Repeated outcomes, corrections, or reuse reinforce or contradict the proposal.
-4. The user may promote, edit, restrict, reject, or supersede a proposal at any time.
-5. nohmi may automatically promote a safely inferred proposal after repeated reinforcement or
-   successful reuse establishes the domain-defined threshold.
-6. Promotion records the evidence and reason; it does not create or expand action authority.
-7. Later contradictory evidence lowers confidence or creates a review rather than silently
-   rewriting the active belief.
+Every session starts with a compact memory core in `get_ilo_context`: memories marked `core`
+(lasting preferences, standing constraints and identity-level facts), the tag index with counts,
+and totals. It is capped at 4 KiB and reports truncation. Agents search by text and tags for
+everything else. Sensitive memories are returned by search and reads, labeled `sensitive`, but never
+load into the core or a workspace workflow's memory section. A memory the person blocks is
+invisible to agents everywhere.
 
-Automatic promotion is limited to knowledge categories whose consequence is reversible and whose
-meaning can be evaluated from reliable evidence. Sensitive facts, identity claims, high-impact
-financial assumptions, and any rule that changes external systems require the stricter
-domain-specific confirmation or approval boundary.
+### Trash and purge
 
-Each knowledge kind defines its own reinforcement model. Repetition alone is insufficient when the
-same upstream source is duplicated, when the observed behavior may reflect a temporary constraint,
-or when the inference would materially affect another person.
+Forgetting is a soft delete. Trash moves a memory and every memory derived from it out of every
+agent path at once. The person can restore them within 30 days. After 30 days, or when the person
+chooses Delete now, purge removes content, revisions, sources, tag links and receipt payloads and
+leaves a content-free tombstone, so other memories' references read as forgotten. Local backups
+taken before purge, and agents that already read the memory, may still have it. Original domain
+records remain separately owned.
+
+Tag merges file one tag under another without changing any memory's content; the person can undo
+a merge.
 
 ## Retrieval and context packs
 
@@ -162,14 +166,16 @@ rebuildable retrieval aids.
 Retrieval follows this order:
 
 1. Establish the caller, purpose, workspace, target entities, time horizon, and evidence cutoff.
-2. Apply ownership, authorization, sensitivity, purpose, and workspace filters before exposing
-   candidates.
+2. Apply ownership, authorization, agent access, Trash, sensitivity, and workspace filters before
+   exposing candidates. Purpose ranks candidates; it never gates access.
 3. Retrieve candidates through structured relationships, exact filters, full-text search, and
    semantic similarity.
-4. Rank by relevance, active status, freshness, confidence, provenance quality, and contradiction.
+4. Rank by tag and text relevance, purpose, active status, freshness, provenance quality, and
+   contradiction.
 5. Return a bounded context pack that separates fact, user preference, inference, policy,
    recommendation, and missing knowledge.
-6. Record the knowledge revisions used by a consequential recommendation or maintenance run.
+6. Later: record the knowledge revisions used by a consequential recommendation or maintenance run.
+   Persisted context-use records and `explain_context` are not part of the current round.
 
 Agents should not receive the complete knowledge graph by default. A Finance tool should not see
 unrelated Mail content, and an agent scoped only to Tasks should not receive sensitive financial
@@ -206,18 +212,18 @@ Each requested child operation enforces workspace access and disclosure policy i
 
 ## Agent tools
 
-The target agent interface includes:
+The agent interface is:
 
-- `get_nohmi_context`: identity, time, authority, workspace readiness, knowledge readiness, and
-  available intent surfaces;
-- `get_context_for_intent`: a bounded context pack for a declared purpose, workspace, and target;
-- `search_user_knowledge`: surgical hybrid search with explicit kind, scope, time, and sensitivity
+- `get_ilo_context`: identity, time, authority, workspace readiness, available tools, and, with
+  `knowledge:read`, the session-start memory core and tag index;
+- `get_context_for_intent`: a bounded context pack for an optional purpose, workspace, and target;
+- `search_user_knowledge`: text and tag search with kind, workspace, purpose, status and origin
   filters;
-- `get_knowledge`: one record with evidence, relationships, revisions, and current status;
-- `propose_knowledge`: record a typed, sourced hypothesis without treating it as active fact;
-- `update_knowledge`: user-authorized correction or scope change;
-- `promote_knowledge`: explicit user promotion or a recorded domain-owned safe-promotion outcome;
-- `supersede_knowledge`: preserve history while replacing an outdated belief.
+- `get_knowledge`: one record with sources, relationships and current status;
+- `save_knowledge`: save typed, tagged, sourced memory, active at once;
+- `update_knowledge`: revise, supersede, dispute, archive, unarchive, restrict or raise
+  sensitivity, with owner-held changes stored as proposals; and
+- `merge_knowledge_tags`: file one tag under another.
 
 High-level workspace tools assemble bounded evidence and expose applicable workflows and next
 actions. Callers also use surgical knowledge tools to retrieve, contribute, correct, dispute, and
@@ -238,16 +244,17 @@ records the initiating purpose, scopes, sources, and knowledge revisions used.
 
 The person should encounter this system as **About you** or **Your context**, not as a database
 administration screen. It should provide simple sections for priorities and goals, people,
-circumstances, routines, preferences, constraints, workspace knowledge, and recent learnings.
+circumstances, routines, preferences, constraints, workspace knowledge, and recent changes.
 
 The interface must let the person:
 
-- see what nohmi believes and how confident it is;
+- see what nohmi remembers and how fresh it is, with no confidence percentages;
 - distinguish what they said from what an external agent inferred and identify that agent/run;
 - inspect the source and every workspace allowed to use it;
-- promote, correct, restrict, dispute, supersede, or delete knowledge;
-- review recent automatic promotions and their reinforcement evidence;
-- understand which decision or workflow used a belief; and
+- confirm, correct, resolve conflicts, restrict, block from agents, archive, trash, restore, or
+  delete memory now;
+- manage tags, including undoing a merge;
+- later, understand which decision or workflow used a belief; and
 - export their knowledge, relationships, history, and machine-readable schema.
 
 Contextual workspace interfaces should offer the same controls without forcing the person to leave
@@ -261,11 +268,12 @@ the item they are reviewing.
   logging, and export treatment as the underlying sensitive data.
 - Cross-workspace access is purpose-limited and auditable; a broad read scope is not permission to
   include every relevant-looking belief in model context.
-- Sensitive categories use stricter promotion, disclosure, and review policies.
+- Sensitive memories never load automatically into the core or workflow memory sections. Agents
+  may mark memory sensitive or raise it; only the person can lower it.
 - Deleting or disconnecting a provider projection does not silently delete user-authored knowledge,
   but affected provenance becomes unavailable or stale and is surfaced for review.
-- The person can disable learning, automatic promotion, or cross-workspace use by category and can
-  inspect the practical consequence before saving the change.
+- The person can block any memory from agents or restrict it to a workspace. Category-level
+  controls remain future work.
 
 Fine-grained per-agent controls over which workspace records or User Knowledge categories may enter
 an external model host's context are planned but deferred. Until that later layer is designed and
@@ -274,15 +282,30 @@ privacy rules above; the deferred control must not be described as available.
 
 ## Relationship to current implementation
 
-The initial source implementation provides `POST /v1/knowledge`,
-`GET /v1/knowledge/:id?purpose=…`, and registered `save_knowledge` / `get_knowledge` MCP tools.
-PostgreSQL owns record identity, immutable initial revisions, attributed sources, relationships,
-and retry receipts. Explicit `knowledge:read` and `knowledge:write` grants are opt-in for agents;
-existing credentials receive no new grants. Every read and retry rechecks the live credential,
-owner, purpose, workspace and inherited source scopes. Sensitive records remain owner-only until
-category disclosure controls exist. An agent statement retains original wording and external
-session/message references; an agent interpretation remains proposed inference. A knowledge receipt
-and redacted audit event commit together, without changing workspace action policy.
+PR #419 (COO-166, COO-167) implements the agent-managed memory foundation in source. It is not
+merged or deployed; the [implementation log](implementation-log.md) records what it ships.
+
+- **Storage.** Migration `0146_persistent_memory` creates owner-keyed records, immutable revisions,
+  sources, relationships, derivations, receipts, tags, tag aliases and merges, record-tag links and
+  tombstones in PostgreSQL. Full-text search is a PostgreSQL index; there is no vector search.
+- **API.** `POST/GET /v1/knowledge`, `GET /v1/knowledge/:id`, `/:id/history`, `/:id/actions`,
+  `/search`, `/context`, `/tags`, `/tags/merge`, `/tags/unmerge` and `/export`, with typed client
+  methods. `get_ilo_context` carries the memory core, and `maintain_finances` starts and
+  `maintain_mail` responses carry a 16 KiB workspace memory section, both without sensitive memory.
+- **Disclosure.** Every read rechecks the live credential, owner, agent access, Trash state and
+  workspace scopes. A memory derived from others takes the narrowest workspace and the highest
+  sensitivity of its live sources at read time; the person is never denied their own memory.
+- **Trash.** Person-only Trash, restore and Delete now; a background pass at least daily purges
+  memory trashed more than 30 days ago.
+- **Agent access.** `knowledge:read` and `knowledge:write` are default grants for new OAuth
+  consents and personal access tokens. Migration `0146` backfills both onto every live agent
+  credential that holds a workspace scope and no memory scope, with an audit row each. The consent screen and
+  Agents settings on web and iPhone list them. The person cannot yet remove only the memory scopes
+  from a connection; the current way is to revoke the connection and issue a new one without them.
+  Per-scope removal is a known gap.
+- **Not in this round.** Memory screens on web and iPhone (follow-up PRs, COO-168), per-scope
+  removal, vector search, automatic learning, `explain_context` and context-use records, and an
+  external deletion record that survives a backup restore.
 
 Incoming typed values are limited to 8 KiB of serialized UTF-8 JSON, with ordinary text fields
 limited to 2,048 characters. Inference propositions allow 8,256 characters so automatic agent
@@ -291,12 +314,8 @@ truncation. The 8 KiB request-value limit still applies to directly submitted in
 inference envelopes may exceed that input limit. Reads and exact retries retain the persisted
 proposition verbatim.
 
-This is a save/read foundation, not the complete target system: correction, deletion controls,
-promotion, conflict resolution, search, context packs, source migration, and About you remain
-unimplemented. Goal revision evidence is rejected until Goals exposes a revision contract.
-Focused PostgreSQL and registered MCP/API/client tests establish source behavior, not production
-availability. No provider or production mutation is required by these tests.
-
+Goal revision evidence is rejected until Goals exposes a revision contract. Focused PostgreSQL and
+registered MCP/API/client tests establish source behavior, not production availability.
 
 | Current record | What it provides | Why it is not complete User Knowledge |
 | --- | --- | --- |

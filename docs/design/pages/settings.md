@@ -58,20 +58,15 @@ Use the shared [feedback rubric](../feedback.md) for every operation.
 
 ## Memory
 
-Memory lives in the Personal group at `/settings?section=memory`. Saved records show
-their origin and current review state. All memory includes expired and superseded
-records, which can still be inspected or forgotten. The selected use filters the
-records by permitted purpose. Text search sends its input in the authenticated search body.
-Record details disclose sources, contributors, permitted uses, and paginated
-history on request. Corrections save explicitly and revision conflicts retain the
-draft until the person has reviewed the latest revision. A rejected page cursor
-clears previously displayed memory while the app rechecks access and reloads the list.
+The Memory screen is not in Settings yet. The web screen ships in PR 2 and the iPhone screen in
+PR 3 (COO-168). Their target is in
+[the agent-managed memory design](../../superpowers/specs/2026-11-15-persistent-memory-design.md)
+§5.9: All, Conflicts, Archived and Trash lists; text and tag search; origin, sensitivity and
+freshness on each row; and confirm, resolve, archive, restrict, Trash, restore, Delete now, export
+and tag management with Sonner feedback.
 
-Forgetting previews dependent copies and revision counts before confirmation.
-Source material and exported downloads remain in their original locations. While
-erasure runs, Settings displays the operation state and offers status or retry
-controls. A fresh session can recover a pending or blocked operation from the
-owner-only status endpoint. Only confirmed completion gets a success toast.
+Until then, Agents settings and the consent screen show the memory permission as one line,
+"Memory: read and save what nohmi knows about you", which new connections receive by default.
 
 ## Titles and subsection headers
 

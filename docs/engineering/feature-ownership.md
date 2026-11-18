@@ -102,7 +102,7 @@ maintenance, question, learning, status, or review layers into Integration-owned
 
 A workspace owner owns the semantics of its steward: living ledger, researched expert playbook,
 definition of maintained, rulebook, surgical operations, maintenance-step graph, questions and
-proposals, knowledge contract, learning behavior, health/advisory model, review artifact, and domain status. These
+proposals, knowledge contract, memory saved from answers, health/advisory model, review artifact, and domain status. These
 contracts stay in the domain's normal paths and are described in a completed
 [`workspace steward charter`](../product/workspace-charter-template.md).
 

@@ -24,7 +24,7 @@ select the next required step without replaying completed work. Use this map for
 | Internal Personal OS identity and user-facing nohmi spelling | [Naming contract](../product/naming.md), [CS-15 Product identity](code-standards.md#product-identity-cs-15) |
 | Workspace purpose and interfaces | [Workspaces](../product/workspaces.md) |
 | What stewardship means and who owns execution | [Workspace stewardship](../product/workspace-stewardship.md) |
-| Shared personal context, learning, and consent | [User Knowledge](../product/user-knowledge.md) |
+| Shared personal memory, agent access, Trash, and consent | [User Knowledge](../product/user-knowledge.md) |
 | Full Finance/Texting toolkit design under written review | [Shared toolkit](../superpowers/specs/2026-09-28-shared-agent-toolkit-design.md), [Finance](../superpowers/specs/2026-09-28-finance-toolkit-design.md), [Texting](../superpowers/specs/2026-09-28-texting-toolkit-design.md) |
 | Detailed Finance/Texting completion contracts and implementation tasks | [Completion spec](../superpowers/specs/2026-10-12-finance-texting-completion-design.md), [implementation map](../superpowers/plans/2026-10-12-finance-texting-completion.md) |
 | Finance/Texting source coverage and remaining implementation order | [Spec reconciliation](finance-texting-spec-reconciliation.md) |
@@ -66,7 +66,7 @@ evidence in the nearest current document; keep temporary execution status in Lin
 | Several surfaces show one record | Preserve native domain records and typed source links; do not create competing copies. |
 | A provider fails or data is old | Show capability, freshness, failure, and recovery; never manufacture success. |
 | New background work | Persist accepted work and recovery state. External hosts own recurring maintenance schedules. |
-| Learning changes behavior | Separate facts, inference, preferences, and action policy. Learned knowledge cannot grant authority. |
+| Memory changes behavior | Separate stated facts, inference, preferences, and action policy. Memory cannot grant authority. |
 | New multi-user behavior | Enforce owner isolation in storage, retrieval, API, tools, notifications, and tests. |
 | UI adds complexity | Lead with the next useful action; disclose provenance and advanced controls progressively. |
 | A small local fix has an obvious solution | Implement and verify it in the worker; no separate planning ceremony. |

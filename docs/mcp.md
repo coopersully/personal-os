@@ -130,24 +130,34 @@ contracts and must not be advertised until current discovery and tests prove the
 
 ### User Knowledge
 
-The registered shared tools use the credential's live grants and one declared retrieval purpose:
+The registered memory tools use the credential's live grants. Purposes are optional relevance
+hints, not access checks:
 
-- `get_ilo_context` lists available tools and includes memory guidance for credentials that can
-  retrieve context;
-- `get_context_for_intent` returns a bounded context pack for a declared purpose and optional target;
-- `search_user_knowledge` and `get_knowledge` for precise inspection;
-- `save_knowledge` for sourced statements and proposals, and `update_knowledge` for authorized
-  revision, dispute, or supersession.
+- `get_ilo_context` lists available tools, includes memory guidance, and, for credentials with
+  `knowledge:read`, a `memory` section: the compact session-start core of lasting memories, the tag
+  index with counts, totals and truncation flags, capped at 4 KiB;
+- `search_user_knowledge` finds memory by text and tags, and `get_knowledge` reads one record;
+- `get_context_for_intent` returns a bounded context pack for an optional purpose and target;
+- `save_knowledge` saves typed memory with 1-8 tags, active at once;
+- `update_knowledge` revises, supersedes, disputes, archives, unarchives, restricts or raises the
+  sensitivity of a record; and
+- `merge_knowledge_tags` files one tag under another.
 
-Search before saving. Cite the supporting sources, distinguish stated knowledge from inference, and
-fetch fresh context after changing a record. Retrieval enforces scope, purpose, sensitivity, and
-workspace policy. User-authored knowledge may become active immediately. Agent inferences begin
-as proposals. Knowledge never grants or expands action authority.
+Save memory as soon as the person says something important. Search before saving, reuse tags from
+the tag index, mark lasting preferences, standing constraints and identity-level facts `core`, and
+update or supersede an existing memory instead of saving a duplicate. Check each memory's origin
+(stated or inferred), freshness and conflicts before acting on it, and cite the supporting
+sources. An agent revision of a memory the person entered or confirmed becomes a linked proposal
+instead of overwriting it. Sensitive memories are returned by search and reads, labeled
+`sensitive`, but never load into the core or workflow memory sections; memories the person
+blocks are invisible to agents. Memory grants no permission and never expands action authority.
 
 Fine-grained per-agent controls over which workspace records or User Knowledge categories may enter
-an external model host's context remain planned. The current tools use credential scopes,
-purpose-bounded API results, and existing privacy policy. Human-authenticated API calls handle
-confirmation, restriction, forgetting, export, and learning controls.
+an external model host's context remain planned. The current tools use credential scopes, workspace
+restriction, the person's per-record agent access and existing privacy policy. Human-authenticated
+API calls handle confirmation, widening restrictions, agent access, lowering sensitivity, Trash,
+restore, Delete now, export and undoing tag merges. Trash removes a memory from every agent path at
+once, keeps it recoverable for 30 days, then purges it to a content-free tombstone.
 
 See the [tool dictionary](engineering/workspace-agent-tools.md),
 [`User Knowledge`](product/user-knowledge.md), and [`ADR 0005`](architecture/0005-user-knowledge.md).

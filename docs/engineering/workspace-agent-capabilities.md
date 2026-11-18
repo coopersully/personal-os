@@ -62,29 +62,36 @@ envelope alone: inspect outcome, pending work, per-item dispositions and canonic
 
 ### Shared memory
 
-Begin with `get_ilo_context`. When it lists `search_user_knowledge`, search for the current
-purpose before saving a duplicate. Use `get_knowledge` to inspect a specific record and
-`get_context_for_intent` to fetch bounded evidence. Cite the supporting sources and distinguish
-stated knowledge from inference. Carry forward conflicts, tentative material, and missing inputs
-as shown. Fetch fresh context after a mutation. Memory provides evidence; action authority
-comes from the API's current policy and grants.
+Begin with `get_ilo_context`. For credentials with `knowledge:read` it carries a `memory` section:
+the session-start core of lasting memories, the tag index and counts. Search with
+`search_user_knowledge` for anything else, and before saving, so an existing memory is updated or
+superseded instead of duplicated. Save as soon as the person says something important, reuse tags
+from the tag index and mark lasting preferences, standing constraints and identity-level facts
+`core`. Use `get_knowledge` to inspect a specific record and `get_context_for_intent` to fetch
+bounded evidence. Check origin (stated or inferred), freshness and conflicts before acting, cite
+the supporting sources, and carry forward conflicts, tentative material, and missing inputs as
+shown. Fetch fresh context after a mutation. Memory provides evidence and grants no permission;
+action authority comes from the API's current policy and grants.
 
-The four read tools require `knowledge:read`. `save_knowledge` and `update_knowledge` also
-require `knowledge:write`. Update accepts revise, dispute and supersede subject to current
-record policy. Confirmation, restriction, forgetting, export, learning settings and the
-recording of first-party selections use human-authenticated API calls. Revision history is
-available through the purpose-checked API.
+The four read tools require `knowledge:read`. `save_knowledge`, `update_knowledge` and
+`merge_knowledge_tags` also require `knowledge:write`. Both memory scopes are default grants, and
+release backfills them onto existing workspace-scoped connections. Update accepts revise,
+supersede, dispute, archive, unarchive, restrict and raise sensitivity; revising or superseding a
+memory the person holds stores a linked proposal instead. Confirmation, widening restrictions,
+agent access, lowering sensitivity, Trash, restore, Delete now, export and undoing a tag merge use
+human-authenticated API calls. Revision history is available through the API.
 
 The save endpoint retains `POST /v1/knowledge` with `X-Knowledge-Receipt-Version: 1`. Its
 discriminant is `outcome`. Every receipt has `receiptId` and `recordId`; only `readable`
-has a `record`. `pending_owner_review` and `forgotten` carry IDs only. The typed client and
-MCP save tool consume the same union. Memory responses use `Cache-Control: no-store`.
+has a `record`. `trashed`, the person's Trash receipt, and `forgotten` carry IDs only. An agent's
+retried mutation whose record is in Trash, purged or hidden from it returns `forgotten`. The typed client and MCP save tool
+consume the same union. Memory responses use `Cache-Control: no-store`.
 
-Erasure admission requires the stable suppression key and an independent deletion ledger.
-The default API composition returns an unavailable error before admitting a new operation.
-With both dependencies configured, an admitted operation remains pending or blocked until local
-erasure and a verified external ledger receipt complete. The registered integration suite uses
-PostgreSQL and an injected ledger to exercise this contract.
+Trash replaces erasure. Trashing a memory moves it and every memory derived from it to Trash and
+removes them from every agent path at once. The person can restore them within 30 days or use
+Delete now. A background pass, at least daily, purges memory trashed more than 30 days ago,
+leaving a content-free tombstone so references read as forgotten. The registered integration
+suite exercises this on PostgreSQL.
 
 Examples (copy the observed revision/IDs into mutation arguments):
 

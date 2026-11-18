@@ -14,6 +14,7 @@ import {
   type KnowledgeMutationInput,
   type KnowledgeRecord,
   knowledgeContextPackSchema,
+  knowledgeMemoryUnavailableHint,
   knowledgeReceiptSchema,
   knowledgeWorkflowMemoryMaxBytes,
 } from "@personal-os/domain";
@@ -401,7 +402,7 @@ describe("workspace workflow memory", () => {
     expect(memory.nextCursor).toBeNull();
   });
 
-  it("a_memory_failure_still_starts_maintenance_with_null_memory", async () => {
+  it("a_memory_failure_still_starts_maintenance_with_unavailable_memory", async () => {
     const f = await setUp();
     // A unique value in a real record's content, echoed by the failures below the way a parse
     // error can echo the value it rejected. It must never reach the log.
@@ -434,11 +435,13 @@ describe("workspace workflow memory", () => {
 
     const started = await routes.post("/v1/finances/maintenance", { operation: "start" });
     expect(started.status).toBe(200);
-    expect(await started.json()).toHaveProperty("data.memory", null);
+    // A failure is marked, so the agent never reads it as having no memory access (M4).
+    const unavailable = { state: "unavailable", hint: knowledgeMemoryUnavailableHint };
+    expect(await started.json()).toHaveProperty("data.memory", unavailable);
     for (let i = 0; i < 2; i++) {
       const mail = await routes.post("/v1/mail/maintenance", {});
       expect(mail.status).toBe(200);
-      expect(await mail.json()).toHaveProperty("memory", null);
+      expect(await mail.json()).toHaveProperty("memory", unavailable);
     }
 
     expect(failing.workflowSection).toHaveBeenCalledWith(host, {

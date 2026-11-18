@@ -150,7 +150,10 @@ update or supersede an existing memory instead of saving a duplicate. Check each
 sources. An agent revision of a memory the person entered or confirmed becomes a linked proposal
 instead of overwriting it. Sensitive memories are returned by search and reads, labeled
 `sensitive`, but never load into the core or workflow memory sections; memories the person
-blocks are invisible to agents. Memory grants no permission and never expands action authority.
+blocks are invisible to agents. A memory core or workflow section marked `unavailable` could not
+be loaded and is not empty; search memory instead. The memory guidance in `get_ilo_context` tells a
+session to save memory only when `save_knowledge` is available to it. Memory grants no permission
+and never expands action authority.
 
 Fine-grained per-agent controls over which workspace records or User Knowledge categories may enter
 an external model host's context remain planned. The current tools use credential scopes, workspace

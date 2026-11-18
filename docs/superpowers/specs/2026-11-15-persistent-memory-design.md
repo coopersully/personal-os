@@ -299,7 +299,9 @@ API (all owner-scoped; person-only routes require a signed-in session):
   (person only).
 - `GET /v1/knowledge/export` (person only; paginated 50 per page; includes tags, origin and history;
   excludes purged content).
-- `get_ilo_context` gains the memory section in 5.2.
+- `get_ilo_context` gains the memory section in 5.2. Without `knowledge:read` it is omitted, and a
+  workflow memory section is `null`. A core or workflow section that fails to build is
+  `{ state: "unavailable", hint }` instead, so a failure never reads as no memory access.
 
 MCP: `save_knowledge`, `get_knowledge`, `update_knowledge` (agent actions from 5.4),
 `search_user_knowledge`, `get_context_for_intent`, `merge_knowledge_tags`. Remove `explain_context`

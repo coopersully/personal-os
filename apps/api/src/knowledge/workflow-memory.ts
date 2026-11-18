@@ -1,4 +1,8 @@
-import type { KnowledgeContextPack, KnowledgePurpose } from "@personal-os/domain";
+import {
+  type KnowledgePurpose,
+  type KnowledgeWorkflowMemoryResult,
+  knowledgeMemoryUnavailable,
+} from "@personal-os/domain";
 import { AppError } from "../errors.js";
 import type { Principal, RequestLog } from "../types.js";
 import type { createKnowledgeContextService } from "./context-service.js";
@@ -12,12 +16,15 @@ const workflowPurposes = {
 export type KnowledgeWorkflowWorkspace = keyof typeof workflowPurposes;
 /** The request a section accompanies, as its failure log reports it. */
 export type KnowledgeWorkflowRequest = Pick<RequestLog, "requestId" | "method" | "path" | "status">;
-/** Memory for a maintenance start, or null when the caller cannot read it or it failed. */
+/**
+ * Memory for a maintenance start: null when the caller cannot read memory, and the
+ * `unavailable` marker when it could not be built.
+ */
 export type KnowledgeWorkflowMemory = (
   principal: Principal,
   workspace: KnowledgeWorkflowWorkspace,
   request: KnowledgeWorkflowRequest,
-) => Promise<KnowledgeContextPack | null>;
+) => Promise<KnowledgeWorkflowMemoryResult>;
 
 /**
  * Only the stack's frame lines. The whole message header is removed first: a parse error can
@@ -49,7 +56,7 @@ export function knowledgeFailureFields(error: unknown) {
 
 /**
  * Builds a workflow's memory section without ever failing the maintenance it accompanies. A
- * failure is logged and the section reads as null.
+ * failure is logged and the section reads as `unavailable`, never as no memory access.
  */
 export function createKnowledgeWorkflowMemory({
   context,
@@ -73,7 +80,7 @@ export function createKnowledgeWorkflowMemory({
         durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
         ...request,
       });
-      return null;
+      return knowledgeMemoryUnavailable;
     }
   };
 }

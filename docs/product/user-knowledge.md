@@ -292,6 +292,9 @@ merged or deployed; the [implementation log](implementation-log.md) records what
   `/search`, `/context`, `/tags`, `/tags/merge`, `/tags/unmerge` and `/export`, with typed client
   methods. `get_ilo_context` carries the memory core, and `maintain_finances` starts and
   `maintain_mail` responses carry a 16 KiB workspace memory section, both without sensitive memory.
+  Without `knowledge:read` the core is omitted and a workflow section is `null`; a section that
+  could not be built reads `{ state: "unavailable", hint }`, so a failure never looks like no
+  memory access.
 - **Disclosure.** Every read rechecks the live credential, owner, agent access, Trash state and
   workspace scopes. A memory derived from others takes the narrowest workspace and the highest
   sensitivity of its live sources at read time; the person is never denied their own memory.

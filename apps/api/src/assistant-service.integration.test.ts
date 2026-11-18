@@ -13,6 +13,7 @@ import {
   migrateDatabase,
   users,
 } from "@personal-os/database";
+import { knowledgeMemoryUnavailableHint, personalOsAgentContextSchema } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq } from "drizzle-orm";
 import { createAssistantService } from "./assistant-service.js";
@@ -186,7 +187,7 @@ describe.sequential("assistant setup service", () => {
     });
   });
 
-  it("keeps identity and readiness when the session memory core fails", async () => {
+  it("marks memory unavailable and keeps identity and readiness when the core fails", async () => {
     const secret = "private-memory-value";
     const log = vi.fn();
     const failing = createAssistantService({
@@ -211,7 +212,9 @@ describe.sequential("assistant setup service", () => {
       identity: { actorType: "agent", displayName: "Setup Test", userId },
       readiness: { domains: expect.any(Array) },
     });
-    expect(result).not.toHaveProperty("memory");
+    // Marked, unlike a caller without memory access, whose context omits the section (M4).
+    expect(result.memory).toEqual({ state: "unavailable", hint: knowledgeMemoryUnavailableHint });
+    expect(personalOsAgentContextSchema.parse(result).memory).toEqual(result.memory);
     expect(log).toHaveBeenCalledExactlyOnceWith({
       event: "knowledge_core_failed",
       errorName: "Error",

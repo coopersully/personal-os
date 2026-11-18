@@ -50,6 +50,21 @@ export const knowledgeCoreSchema = z
   })
   .strict();
 export type KnowledgeCore = z.infer<typeof knowledgeCoreSchema>;
+
+export const knowledgeMemoryUnavailableHint =
+  "Memory could not be loaded this time. It is not empty: search or read memory before relying on what it would hold, or try again.";
+/**
+ * A memory section that failed to build. Without `knowledge:read` the section is absent (the
+ * session core) or null (a workflow section); a failure is marked, so it never reads as no memory.
+ */
+export const knowledgeMemoryUnavailableSchema = z
+  .object({ state: z.literal("unavailable"), hint: z.literal(knowledgeMemoryUnavailableHint) })
+  .strict();
+export type KnowledgeMemoryUnavailable = z.infer<typeof knowledgeMemoryUnavailableSchema>;
+export const knowledgeMemoryUnavailable: KnowledgeMemoryUnavailable = {
+  state: "unavailable",
+  hint: knowledgeMemoryUnavailableHint,
+};
 export type KnowledgeCoreEntry = KnowledgeCore["records"][number];
 
 function label(value: string) {

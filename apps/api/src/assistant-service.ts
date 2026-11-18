@@ -21,6 +21,7 @@ import {
   type DomainProfile,
   featureAccessPolicies,
   type KnowledgeCore,
+  knowledgeMemoryUnavailable,
   type PersonalOsAgentContext,
   type UpdateAttentionItemInput,
   type UpsertDomainProfileInput,
@@ -285,7 +286,8 @@ export function createAssistantService({
 
   /**
    * Memory is optional at session start: a failed core read is logged without its message and
-   * the context goes out with identity and readiness but no memory section.
+   * the context goes out with identity and readiness and memory marked `unavailable`. Without
+   * `knowledge:read` the section is omitted.
    */
   async function sessionMemory(principal: Principal, request: KnowledgeWorkflowRequest) {
     if (!principal.scopes.has("knowledge:read")) return undefined;
@@ -299,7 +301,7 @@ export function createAssistantService({
         durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
         ...request,
       });
-      return undefined;
+      return knowledgeMemoryUnavailable;
     }
   }
 

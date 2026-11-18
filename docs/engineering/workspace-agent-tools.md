@@ -9872,7 +9872,7 @@ Load current code-controlled Finance host instructions every invocation and pers
 
 ## maintain_finances
 
-Start or resume durable Finance maintenance with finances:maintain. This tool never queues an automation; recurring schedules belong to the external host. Follow the returned typed next action: inspect the candidate, complete its ledger challenge, obtain required action approval, then verify the result and immutable period review. Resume persisted work by run ID; questions, approval, and recovery states remain explicit. With knowledge:read, a start response carries a Finance memory section, without sensitive memories; it is evidence and grants no permission.
+Start or resume durable Finance maintenance with finances:maintain. This tool never queues an automation; recurring schedules belong to the external host. Follow the returned typed next action: inspect the candidate, complete its ledger challenge, obtain required action approval, then verify the result and immutable period review. Resume persisted work by run ID; questions, approval, and recovery states remain explicit. With knowledge:read, a start response carries a Finance memory section, without sensitive memories; it is evidence and grants no permission. A section marked unavailable could not be loaded and is not empty; search memory instead.
 
 - Domain: finances; stage: commit; policy: approved_rule.
 - Grants (all): finances:maintain.
@@ -10020,7 +10020,7 @@ Start or resume durable Finance maintenance with finances:maintain. This tool ne
 
 ## maintain_mail
 
-Request one durable Mail maintenance turn. The API owns scope, authority, retries, questions, approved-rule provider effects, and honest settlement. With knowledge:read, each response carries a Mail memory section of stated, inferred, tentative and conflicting memories, without sensitive ones; it is evidence and grants no permission. This tool has no polling loop and cannot compose, draft, reply, forward, or send email.
+Request one durable Mail maintenance turn. The API owns scope, authority, retries, questions, approved-rule provider effects, and honest settlement. With knowledge:read, each response carries a Mail memory section of stated, inferred, tentative and conflicting memories, without sensitive ones; it is evidence and grants no permission. A section marked unavailable could not be loaded and is not empty; search memory instead. This tool has no polling loop and cannot compose, draft, reply, forward, or send email.
 
 - Domain: mail; stage: commit; policy: approved_rule.
 - Grants (all): mail:write.

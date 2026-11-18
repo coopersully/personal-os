@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { idSchema } from "../common.js";
-import { knowledgeWorkflowMemorySchema } from "../knowledge-retrieval.js";
+import { knowledgeWorkflowMemoryResultSchema } from "../knowledge-retrieval.js";
 import { maintenanceRunSchema, maintenanceScopeSchema } from "../maintenance.js";
 import { financeAttentionSnapshotSchema } from "./attention.js";
 import { financeBudgetPlanContextSchema } from "./budget-approval.js";
@@ -73,8 +73,11 @@ export const financeMaintenancePayloadSchema = z.object({
   challengeId: idSchema.nullable(),
   nextAction: financeMaintenanceNextActionSchema.nullable(),
   recovery: financeMaintenanceRecoverySchema.nullable(),
-  /** Finance memory on `start` responses only; null without `knowledge:read`. */
-  memory: knowledgeWorkflowMemorySchema.nullable().optional(),
+  /**
+   * Finance memory on `start` responses only; null without `knowledge:read`, and an
+   * `unavailable` marker when it could not be built.
+   */
+  memory: knowledgeWorkflowMemoryResultSchema.optional(),
 });
 export type FinanceMaintenancePayload = z.infer<typeof financeMaintenancePayloadSchema>;
 

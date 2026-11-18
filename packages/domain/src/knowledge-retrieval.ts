@@ -7,6 +7,7 @@ import {
   knowledgeRecordSchema,
   knowledgeWorkspaceSchema,
 } from "./knowledge.js";
+import { knowledgeMemoryUnavailableSchema } from "./knowledge-core.js";
 import { knowledgeTagsInputSchema } from "./knowledge-tags.js";
 
 export const knowledgeRetrievalMaxRecords = 50;
@@ -149,3 +150,11 @@ export const knowledgeWorkflowMemorySchema = knowledgeContextPackSchema.refine(
     new TextEncoder().encode(JSON.stringify(pack)).byteLength <= knowledgeWorkflowMemoryMaxBytes,
   "A workflow memory section cannot exceed 16 KiB.",
 );
+/**
+ * A workflow response's memory field: the section, an `unavailable` marker when it could not be
+ * built, or null when the caller lacks `knowledge:read`.
+ */
+export const knowledgeWorkflowMemoryResultSchema = z
+  .union([knowledgeWorkflowMemorySchema, knowledgeMemoryUnavailableSchema])
+  .nullable();
+export type KnowledgeWorkflowMemoryResult = z.infer<typeof knowledgeWorkflowMemoryResultSchema>;

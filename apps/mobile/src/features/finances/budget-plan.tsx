@@ -64,9 +64,7 @@ export function BudgetPlanDestinations() {
 export function FinanceBudgetPlanScreen() {
   const params = useLocalSearchParams<{ view?: string; id?: string; month?: string }>();
   const { owner, timezone } = useFinance();
-  const month =
-    budgetMonth(params.month) ??
-    (timezone ? spendingMonth(timezone) : undefined);
+  const month = budgetMonth(params.month) ?? (timezone ? spendingMonth(timezone) : undefined);
   if (params.view === "edit") return <BudgetPlanEditor key={owner} />;
   if (params.view === "buckets" && month) return <BudgetBuckets month={month} />;
   if (params.view === "bucket" && month)

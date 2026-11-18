@@ -723,7 +723,9 @@ it("keeps listing the last usable custom range while the fields hold an unusable
     fireEvent.change(screen.getByLabelText(field), { target: { value } });
     // The correction sits at the fields, with the range the list still shows.
     expect(screen.getByText(problem)).toBeVisible();
-    expect(screen.getByText("Showing Nov 2 – Nov 18 until these dates are corrected.")).toBeVisible();
+    expect(
+      screen.getByText("Showing Nov 2 – Nov 18 until these dates are corrected."),
+    ).toBeVisible();
     expect(screen.getByText("No transactions in this view.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Select transactions" })).toBeVisible();
   }

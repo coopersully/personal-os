@@ -156,8 +156,7 @@ function PlanForm({
   // The reviewed version stays with the draft; a background refresh never replaces either.
   const [snapshot] = useState(record);
   const [month, setMonth] = useState(
-    () =>
-      snapshot?.effectiveFrom ?? (timezone ? spendingMonth(timezone) : ""),
+    () => snapshot?.effectiveFrom ?? (timezone ? spendingMonth(timezone) : ""),
   );
   const [rationale, setRationale] = useState(snapshot?.rationale ?? "");
   const [assumptions, setAssumptions] = useState(() =>

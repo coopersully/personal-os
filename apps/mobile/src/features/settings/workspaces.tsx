@@ -129,9 +129,9 @@ const preferenceGroups = [
     help: "These layout choices apply on web and desktop. The iPhone keeps its native Mail layout.",
   },
   {
-    title: "Calendar layout on other devices",
+    title: "Calendar layout",
     keys: ["calendarView", "showWeekends", "weekStartsOn"],
-    help: "These choices apply to the web and desktop calendar, not the iPhone agenda.",
+    help: "Calendar view and weekends apply to the web and desktop calendar, not the iPhone agenda. Week start applies on iPhone too: it sets the Calendar week and where This week begins in Spending.",
   },
   {
     title: "Following today on other devices",
@@ -155,9 +155,9 @@ const preferenceGroups = [
     keys: ["financeManualVisibility", "financeTransactionGroup"],
   },
   {
-    title: "Finance layout on other devices",
+    title: "Finance layout",
     keys: ["financeSpendingView", "financeSpendingGrouping", "financeTransactionView"],
-    help: "These shared web and desktop layout choices do not change the iPhone Finance views.",
+    help: "Spending view applies on iPhone, where bubbles opens as the list. Grouping and transaction layout apply on web and desktop.",
   },
 ];
 function WorkspacePreferencesEditor({ initial }: { initial: WorkspaceSettings }) {

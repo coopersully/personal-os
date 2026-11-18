@@ -1576,5 +1576,8 @@ whether a proposed time is free while creating or editing.
 - Limits that need an API change: there is no route to end a snooze, so ending one records a
   snooze that has already passed; thread summaries do not carry when a snooze ends, so Snoozed
   shows no return time and an ended snooze cannot be undone.
-- Focused Mail tests, mobile type checking and lint passed. This is not a production or
-  TestFlight release.
+- Focused Mail tests, mobile type checking and lint passed. Observed in the iPhone simulator on
+  the demo fixture: snooze from a row and from an open conversation, the Snoozed list, End
+  snooze, selection, and a selection snoozed and undone. The fixture mailbox refuses provider
+  writes, so a selection marked read or archived was seen only as a refusal. This is not a
+  production or TestFlight release.

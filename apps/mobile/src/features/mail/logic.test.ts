@@ -2,6 +2,7 @@ import { ApiClientError } from "@personal-os/api-client";
 import type { Mailbox, MailThreadSummary } from "@personal-os/domain";
 import { expect, it } from "vitest";
 import {
+  actionsKey,
   archivedMailboxIds,
   conversations,
   endedSnooze,
@@ -261,4 +262,14 @@ it("ends a snooze with a time that has already passed", () => {
 it("counts conversations in words", () => {
   expect(conversations(1)).toBe("1 conversation");
   expect(conversations(3)).toBe("3 conversations");
+});
+
+it("gives a menu a new key when an action or its icon changes", () => {
+  const read = { id: "unread", icon: "check" };
+  const snooze = { id: "snooze", icon: "clock" };
+  expect(actionsKey([read, snooze])).toBe(actionsKey([{ ...read }, { ...snooze }]));
+  expect(actionsKey([read, snooze])).not.toBe(
+    actionsKey([read, { id: "archive", icon: "archive" }, snooze]),
+  );
+  expect(actionsKey([read])).not.toBe(actionsKey([{ id: "unread", icon: "mail" }]));
 });

@@ -208,6 +208,14 @@ export function endedSnooze(now = new Date()) {
   return new Date(now.getTime() - 24 * HOUR).toISOString();
 }
 
+/**
+ * Identifies a set of actions by what each one shows. The iOS menu reads its icons once when it
+ * mounts, so a menu whose actions change is given a new key and mounts again with the right ones.
+ */
+export function actionsKey(actions: readonly { id: string; icon: string }[]) {
+  return actions.map((action) => `${action.id}:${action.icon}`).join("|");
+}
+
 export function conversations(count: number) {
   return count === 1 ? "1 conversation" : `${count} conversations`;
 }

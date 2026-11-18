@@ -4,7 +4,7 @@ import { Icon } from "../../components/icons";
 import type { RowAction } from "../../components/row-action-button";
 import { RowActions } from "../../components/row-actions";
 import { spacing, useTheme, workspaceColor } from "../../theme";
-import { messageTime, senderName } from "./logic";
+import { actionsKey, messageTime, senderName } from "./logic";
 
 /**
  * One conversation: sender, time, subject and preview, with unread carried by dot and weight.
@@ -117,7 +117,9 @@ export function ThreadRow({
           </Text>
         </View>
       </Pressable>
-      {!selecting && <RowActions label={`Actions for ${subject}`} actions={actions} />}
+      {!selecting && (
+        <RowActions key={actionsKey(actions)} label={`Actions for ${subject}`} actions={actions} />
+      )}
     </View>
   );
 }

@@ -13,7 +13,7 @@ import { spacing, useTheme } from "../../theme";
 import { MailComposer } from "./composer";
 import { confirmMailRead, retryMailRead, useMailAccounts, useMailMessages } from "./data";
 import { type ComposeStart, forwardStart, replyStart } from "./draft-logic";
-import { senderName } from "./logic";
+import { actionsKey, senderName } from "./logic";
 
 const people = (addresses: MailAddress[]) => addresses.map(senderName).join(", ");
 
@@ -76,7 +76,12 @@ export function MailReader({
           onClose={close}
           trailing={
             offered.length ? (
-              <RowActions placement="header" label="Conversation actions" actions={offered} />
+              <RowActions
+                key={actionsKey(offered)}
+                placement="header"
+                label="Conversation actions"
+                actions={offered}
+              />
             ) : undefined
           }
         />

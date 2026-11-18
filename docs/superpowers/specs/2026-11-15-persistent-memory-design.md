@@ -284,6 +284,14 @@ API (all owner-scoped; person-only routes require a signed-in session):
   `GET /v1/knowledge/:id/history`; `POST /v1/knowledge/:id/actions` with actions `revise`,
   `supersede`, `dispute`, `archive`, `unarchive`, `restrict`, `confirm`, `set_access`,
   `resolve_conflict`, `trash`, `restore`, `delete_now`.
+  - `delete_now` also takes `expectedTrashedAt`: the record's `trashedAt` as the person saw it, or
+    `null` for a live record. Trash and restore leave the revision unchanged, so this is what
+    tells a stale confirmation apart. A mismatch returns 409 with the current `trashedAt` in the
+    details; an exact retry of a completed request replays its receipt.
+  - A pending proposal (`proposed`) is settled only with `resolve_conflict`. The person's
+    `confirm`, `dispute` or `revise` of a pending proposal returns 409 and changes nothing.
+    Accepting a proposal (`keep: "proposed"`) whose original another proposal already replaced
+    returns 409; `keep: "current"` still retires it.
 - `POST /v1/knowledge/search`; `POST /v1/knowledge/context`.
 - `GET /v1/knowledge/tags`; `POST /v1/knowledge/tags/merge`; `POST /v1/knowledge/tags/unmerge`
   (person only).

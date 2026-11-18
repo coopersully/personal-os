@@ -296,7 +296,14 @@ merged or deployed; the [implementation log](implementation-log.md) records what
   workspace scopes. A memory derived from others takes the narrowest workspace and the highest
   sensitivity of its live sources at read time; the person is never denied their own memory.
 - **Trash.** Person-only Trash, restore and Delete now; a background pass at least daily purges
-  memory trashed more than 30 days ago.
+  memory trashed more than 30 days ago. Delete now sends `expectedTrashedAt`, the record's
+  `trashedAt` as shown (or `null` for a live record); if the record was restored, re-trashed or
+  is otherwise in a different Trash state, it returns 409 with the current `trashedAt` and erases
+  nothing.
+- **Conflicts.** An agent's revision or supersession of memory the person holds becomes a linked
+  `proposed` record. The person settles it only with `resolve_conflict`: confirming, disputing or
+  revising a pending proposal returns 409, and accepting one whose original another proposal
+  already replaced returns 409, while keeping the current memory still retires it.
 - **Agent access.** `knowledge:read` and `knowledge:write` are default grants for new OAuth
   consents and personal access tokens. Migration `0146` backfills both onto every live agent
   credential that holds a workspace scope and no memory scope, with an audit row each. The consent screen and

@@ -1,5 +1,5 @@
 import type { MailAddress, MailThreadSummary } from "@personal-os/domain";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { ActivityIndicator, Modal, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Action, Actions } from "../../components/forms/form-rows";
@@ -13,7 +13,7 @@ import { spacing, useTheme } from "../../theme";
 import { MailComposer } from "./composer";
 import { confirmMailRead, retryMailRead, useMailAccounts, useMailMessages } from "./data";
 import { type ComposeStart, forwardStart, replyStart } from "./draft-logic";
-import { senderName } from "./logic";
+import { actionsKey, senderName } from "./logic";
 
 const people = (addresses: MailAddress[]) => addresses.map(senderName).join(", ");
 
@@ -21,17 +21,20 @@ const people = (addresses: MailAddress[]) => addresses.map(senderName).join(", "
  * Reads one conversation. Its messages live in memory only while this sheet is open. A caller
  * that cannot change the conversation passes no `actions`, and the header shows no control.
  * With `compose`, the loaded conversation also offers Reply and Forward; the composer opens
- * inside this sheet, so closing it returns to the conversation.
+ * inside this sheet, so closing it returns to the conversation. `sheet` is a further sheet the
+ * opener wants over the conversation, such as the time to snooze it until.
  */
 export function MailReader({
   thread,
   actions,
   compose = false,
+  sheet,
   close,
 }: {
   thread: MailThreadSummary;
   actions?: readonly RowAction[];
   compose?: boolean;
+  sheet?: ReactNode;
   close: () => void;
 }) {
   const t = useTheme();
@@ -73,7 +76,12 @@ export function MailReader({
           onClose={close}
           trailing={
             offered.length ? (
-              <RowActions placement="header" label="Conversation actions" actions={offered} />
+              <RowActions
+                key={actionsKey(offered)}
+                placement="header"
+                label="Conversation actions"
+                actions={offered}
+              />
             ) : undefined
           }
         />
@@ -157,6 +165,7 @@ export function MailReader({
           ))}
         </ScrollView>
         {composing && <MailComposer start={composing} close={() => setComposing(null)} />}
+        {sheet}
       </SafeAreaView>
     </Modal>
   );

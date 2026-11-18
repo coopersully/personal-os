@@ -2,7 +2,10 @@ import { ApiClientError } from "@personal-os/api-client";
 import type { Mailbox, MailThreadSummary } from "@personal-os/domain";
 import { expect, it } from "vitest";
 import {
+  actionsKey,
   archivedMailboxIds,
+  conversations,
+  endedSnooze,
   leftMailTarget,
   MAIL_PAGE_SIZE,
   mailboxIcon,
@@ -11,8 +14,13 @@ import {
   mergeMailPages,
   messageTime,
   nextMailPage,
+  pickedSnooze,
+  pickerDay,
+  scopeTarget,
   scopeTitle,
   senderName,
+  snoozeChoices,
+  snoozeTime,
   sortMailboxes,
   withMailChanges,
   withMailRow,
@@ -177,4 +185,91 @@ it("puts a conversation back at its place by date", () => {
   // Older than a full last page: it belongs to a page not read yet.
   const full = [Array.from({ length: MAIL_PAGE_SIZE }, (_, index) => at(`n${index}`, "30"))];
   expect(withMailRow(full, at("a", "10"))).toBe(full);
+});
+
+it("names the Snoozed list and keeps each scope's lists apart", () => {
+  expect(scopeTitle({ kind: "snoozed" })).toBe("Snoozed");
+  expect(scopeTarget({ kind: "inbox" })).toBe("inbox");
+  expect(scopeTarget({ kind: "snoozed" })).toBe("snoozed");
+  expect(scopeTarget({ kind: "mailbox", mailboxId: "m1", title: "Receipts", account: "A" })).toBe(
+    "m1",
+  );
+});
+
+it("takes a conversation being snoozed out of every list but Snoozed, and back", () => {
+  const rows = [{ ...thread, id: "a", mailboxIds: ["inbox"], unread: true }] as MailThreadSummary[];
+  expect(withMailChanges(rows, new Map([["a", { snoozed: true }]]), "inbox")).toEqual([]);
+  expect(withMailChanges(rows, new Map([["a", { snoozed: true }]]), "snoozed")).toEqual(rows);
+  expect(withMailChanges(rows, new Map([["a", { snoozed: false }]]), "snoozed")).toEqual([]);
+  // The marker is nohmi's own state and never becomes a field of the row.
+  expect(withMailChanges(rows, new Map([["a", { snoozed: false }]]), "inbox")).toEqual(rows);
+});
+
+it("offers snooze times ahead of now, with mornings at eight and next week on a Monday", () => {
+  // A Wednesday afternoon and a Monday morning, in the device's own time.
+  for (const now of [new Date(2026, 10, 18, 15, 30), new Date(2026, 10, 16, 7, 0)]) {
+    const [hours, tomorrow, week] = snoozeChoices(now);
+    expect([hours.label, tomorrow.label, week.label]).toEqual([
+      "In 3 hours",
+      "Tomorrow morning",
+      "Next week",
+    ]);
+    expect(hours.until.getTime() - now.getTime()).toBe(3 * 3_600_000);
+    expect(pickerDay(tomorrow.until)).toBe(
+      pickerDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)),
+    );
+    expect([tomorrow.until.getHours(), tomorrow.until.getMinutes()]).toEqual([8, 0]);
+    expect(week.until.getDay()).toBe(1);
+    expect(week.until.getHours()).toBe(8);
+    const days = (week.until.getTime() - now.getTime()) / 86_400_000;
+    expect(days).toBeGreaterThan(0.9);
+    expect(days).toBeLessThanOrEqual(7.1);
+  }
+  // On a Monday, next week is the Monday after, never later the same day.
+  expect(pickerDay(snoozeChoices(new Date(2026, 10, 16, 7, 0))[2].until)).toBe("2026-11-23");
+});
+
+it("reads a picked day and time on this device and refuses the past or the impossible", () => {
+  const now = new Date(2026, 10, 18, 15, 30);
+  expect(pickedSnooze("2026-11-20", "09:30", now)).toEqual(new Date(2026, 10, 20, 9, 30));
+  expect(pickedSnooze("2026-11-18", "15:31", now)).toEqual(new Date(2026, 10, 18, 15, 31));
+  expect(pickedSnooze("2026-11-18", "15:30", now)).toBeNull();
+  expect(pickedSnooze("2026-11-17", "09:00", now)).toBeNull();
+  expect(pickedSnooze("2026-02-31", "09:00", now)).toBeNull();
+  expect(pickedSnooze("2026-11-20", "25:00", now)).toBeNull();
+  expect(pickedSnooze("tomorrow", "09:00", now)).toBeNull();
+  expect(pickedSnooze("2026-11-20", "nine", now)).toBeNull();
+});
+
+it("says when a snooze ends with the day only when it is not today", () => {
+  const now = new Date(2026, 10, 18, 15, 30);
+  const today = new Date(2026, 10, 18, 18, 30);
+  const later = new Date(2026, 10, 23, 8, 0);
+  const time = (date: Date) => date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  expect(snoozeTime(today, now)).toBe(time(today));
+  expect(snoozeTime(later, now)).toBe(
+    `${later.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}, ${time(later)}`,
+  );
+  expect(snoozeTime(new Date(Date.now() + 60_000))).toContain(":");
+});
+
+it("ends a snooze with a time that has already passed", () => {
+  const now = new Date("2026-11-18T15:30:00.000Z");
+  expect(endedSnooze(now)).toBe("2026-11-17T15:30:00.000Z");
+  expect(new Date(endedSnooze()).getTime()).toBeLessThan(Date.now());
+});
+
+it("counts conversations in words", () => {
+  expect(conversations(1)).toBe("1 conversation");
+  expect(conversations(3)).toBe("3 conversations");
+});
+
+it("gives a menu a new key when an action or its icon changes", () => {
+  const read = { id: "unread", icon: "check" };
+  const snooze = { id: "snooze", icon: "clock" };
+  expect(actionsKey([read, snooze])).toBe(actionsKey([{ ...read }, { ...snooze }]));
+  expect(actionsKey([read, snooze])).not.toBe(
+    actionsKey([read, { id: "archive", icon: "archive" }, snooze]),
+  );
+  expect(actionsKey([read])).not.toBe(actionsKey([{ id: "unread", icon: "mail" }]));
 });

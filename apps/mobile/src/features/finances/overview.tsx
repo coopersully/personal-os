@@ -1,7 +1,7 @@
 import { router } from "expo-router";
 import { View } from "react-native";
 import { balanceHint, balancesFor } from "./balances";
-import { useFinanceRead, useSpending, useUpcoming } from "./data";
+import { useFinanceRead, useMonthSpending, useUpcoming } from "./data";
 import { OverviewMetric } from "./overview-metric";
 import { expectedAmount, financeLabel, formatLocalDate, formatMoney } from "./presentation";
 import { FinishFinanceSetup } from "./setup";
@@ -9,7 +9,7 @@ import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Section } from "./ui"
 import { upcomingCategory, useUpcomingCategories } from "./upcoming-category";
 
 export function FinanceOverviewScreen() {
-  const spending = useSpending("month");
+  const spending = useMonthSpending();
   const upcoming = useUpcoming();
   const categories = useUpcomingCategories(
     !!upcoming.data?.occurrences.some((item) => item.source?.kind === "obligation"),

@@ -397,7 +397,8 @@ const periodLabels = {
   custom: "Custom",
 } as const satisfies Record<SpendingPeriod, string>;
 const periods = Object.keys(periodLabels) as SpendingPeriod[];
-const views = ["List", "Trends", "Rhythm"] as const;
+const viewLabels = { list: "List", trends: "Trends", rhythm: "Rhythm" } as const;
+const views = Object.values(viewLabels);
 type SpendingView = (typeof views)[number];
 const isPeriod = (value: unknown): value is SpendingPeriod =>
   periods.includes(value as SpendingPeriod);
@@ -405,10 +406,12 @@ const isPeriod = (value: unknown): value is SpendingPeriod =>
 export function FinanceSpendingScreen() {
   const { timezone } = useFinance();
   const [mode, setMode] = useState<"Summary" | "Transactions">("Summary");
-  const [view, setView] = useState<SpendingView>("List");
-  // Null follows the saved default period; a choice here lasts for this visit only.
+  // Null follows the saved default view and period; a choice here lasts for this visit only.
+  const [chosenView, setView] = useState<SpendingView | null>(null);
   const [chosen, setChosen] = useState<SpendingPeriod | null>(null);
   const [custom, setCustom] = useState<{ from: string; through: string } | null>(null);
+  // The last custom range that could be read, kept while the fields hold one that cannot.
+  const [usable, setUsable] = useState<{ from: string; through: string } | null>(null);
   const [evidence, setEvidence] = useState<{
     title: string;
     reference: FinanceSpendingReferenceFilter;
@@ -427,6 +430,7 @@ export function FinanceSpendingScreen() {
   const preferences = useSpendingPreferences();
   const saved = preferences.data;
   const period = chosen ?? saved?.period ?? "week";
+  const view = chosenView ?? (saved ? viewLabels[saved.view] : "List");
   const today = timezone ? spendingToday(timezone) : null;
   const dates = custom ?? (today ? { from: today, through: today } : null);
   const problem =
@@ -435,6 +439,8 @@ export function FinanceSpendingScreen() {
     today && saved && !problem
       ? spendingRange(period, today, saved.weekStartsOn, dates ?? undefined)
       : null;
+  // Transactions keeps its list on the last usable range; only the fields show the correction.
+  const listed = range ?? (problem && today ? (usable ?? { from: today, through: today }) : null);
   const scope: FinanceSpendingScope | null =
     range && saved && timezone
       ? {
@@ -532,8 +538,10 @@ export function FinanceSpendingScreen() {
           from={dates.from}
           through={dates.through}
           problem={problem}
+          shown={mode === "Transactions" && problem ? listed : null}
           onChange={(from, through) => {
             setCustom({ from, through });
+            if (!customRangeProblem(from, through)) setUsable({ from, through });
             setEvidence(null);
           }}
         />
@@ -548,8 +556,8 @@ export function FinanceSpendingScreen() {
           }}
         />
       )}
-      {mode === "Transactions" && range ? (
-        <Transactions from={range.from} through={range.through} onAdd={add} />
+      {mode === "Transactions" && listed ? (
+        <Transactions from={listed.from} through={listed.through} onAdd={add} />
       ) : (
         <>
           {addAction}

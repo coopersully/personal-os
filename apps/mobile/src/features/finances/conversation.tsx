@@ -94,18 +94,15 @@ export function Conversation() {
   );
   const placed = sequences.every((value) => value !== null);
   const newest = sequences.reduce<bigint>((max, value) => (value && value > max ? value : max), 0n);
-  const oldest = sequences.reduce<bigint>(
-    (min, value) => (value !== null && value < min ? value : min),
-    newest,
-  );
   const readThrough = unread?.readThrough;
-  const hasOlder = query.hasNextPage;
-  /** Records the shown messages as read. Opening the tab alone never does; showing them does. */
+  /**
+   * Records the conversation as read through its latest message. Opening the tab alone never
+   * does; showing the transcript does, however many earlier messages are still unloaded, so a
+   * read mark far behind the latest page cannot leave the unread badge standing.
+   */
   const markSeen = useCallback(() => {
     if (!visible || !placed || !nearBottom.current || readThrough === undefined) return;
     if (newest <= readThrough || newest <= marked.current) return;
-    // Unread messages older than the loaded page have not been shown; never mark past them.
-    if (hasOlder && oldest > readThrough) return;
     marked.current = newest;
     void api
       .markFinanceConversationRendered(newest.toString())
@@ -114,7 +111,7 @@ export function Conversation() {
       .catch(() => {
         if (marked.current === newest) marked.current = 0n;
       });
-  }, [api, client, owner, visible, placed, newest, oldest, readThrough, hasOlder]);
+  }, [api, client, owner, visible, placed, newest, readThrough]);
   useEffect(markSeen, [markSeen]);
   // Measure the actual composer region, accounting for the native tab bar and workspace header.
   useEffect(() => {

@@ -35,6 +35,10 @@ export function spendingToday(timezone: string, now = new Date()) {
   }).format(now);
 }
 
+/** The account's current calendar month as the API's `YYYY-MM` value. */
+export const spendingMonth = (timezone: string, now = new Date()) =>
+  spendingToday(timezone, now).slice(0, 7);
+
 export function spendingRange(
   period: SpendingPeriod,
   today: string,

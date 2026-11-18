@@ -1,9 +1,11 @@
+import type { FinanceSpendingScope } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect } from "expo-router";
 import { useCallback } from "react";
 import { AppState } from "react-native";
 import { useAuth } from "../auth/context";
-import { periodScope, upcomingScope } from "./presentation";
+import { upcomingScope } from "./presentation";
+import { spendingRange, spendingToday } from "./spending-math";
 
 export function useFinance() {
   const { session, state } = useAuth();
@@ -25,9 +27,23 @@ export function useFinanceRead<T>(
   });
   return { ...query, feedbackKey: JSON.stringify(queryKey) };
 }
-export function useSpending(period: "week" | "month") {
+/**
+ * This month's spending on the fixed basis Overview and Budget state beside their figures: your
+ * share, pending included, refunds subtracted. The Spending screen applies the saved preferences.
+ */
+export function useMonthSpending() {
   const { timezone } = useFinance();
-  const scope = timezone ? periodScope(period, timezone) : null;
+  const scope: FinanceSpendingScope | null = timezone
+    ? {
+        ...spendingRange("month", spendingToday(timezone), "monday"),
+        timezone,
+        accountIds: null,
+        categoryIds: null,
+        basis: "personal_cost",
+        includePending: true,
+        subtractRefunds: true,
+      }
+    : null;
   const query = useFinanceRead(
     ["spending", scope],
     (api) => {

@@ -26,6 +26,11 @@ overrides:
   "@modelcontextprotocol/core>zod": "4.6.6"
   "@modelcontextprotocol/server>zod": "4.6.6"
 
+# Tracked exception (COO-265): see docs/engineering/code-standards.md, Dependency audit exceptions.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-fc5q-39xc-vjpf
+
 allowBuilds:
   '@biomejs/biome': true
   '@playwright/browser-chromium': true

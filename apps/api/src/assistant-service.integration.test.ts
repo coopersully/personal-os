@@ -153,6 +153,12 @@ describe.sequential("assistant setup service", () => {
     await container.stop();
   });
 
+  const request = {
+    requestId: "assistant-request",
+    method: "GET",
+    path: "/v1/assistant/context",
+    status: 200,
+  };
   const context = () => ({
     principal: {
       actorId: userId,
@@ -164,7 +170,7 @@ describe.sequential("assistant setup service", () => {
   });
 
   it("returns authoritative agent identity, scopes, readiness, time, and work-surface links", async () => {
-    await expect(service.getContext(context().principal)).resolves.toMatchObject({
+    await expect(service.getContext(context().principal, request)).resolves.toMatchObject({
       access: { grantedScopes: ["calendar:read", "mail:read", "mail:write"] },
       generatedAt: "2026-07-28T15:00:00.000Z",
       identity: { actorType: "agent", displayName: "Setup Test", userId },
@@ -178,6 +184,42 @@ describe.sequential("assistant setup service", () => {
       readiness: { domains: expect.any(Array) },
       time: { timestamp: "2026-07-28T15:00:00.000Z", timezone: "UTC" },
     });
+  });
+
+  it("keeps identity and readiness when the session memory core fails", async () => {
+    const secret = "private-memory-value";
+    const log = vi.fn();
+    const failing = createAssistantService({
+      appBaseUrl: "https://app.example.com",
+      db: database.db,
+      knowledgeCore: {
+        build: async () => {
+          throw new Error(`Invalid memory: ${secret}\n    at ${secret}`);
+        },
+      },
+      log,
+      now: () => new Date("2026-07-28T15:00:00.000Z"),
+      profileRequiresApproval: () => false,
+      validateProfileSources: async () => undefined,
+    });
+    const principal = {
+      ...context().principal,
+      scopes: new Set([...context().principal.scopes, "knowledge:read" as const]),
+    };
+    const result = await failing.getContext(principal, request);
+    expect(result).toMatchObject({
+      identity: { actorType: "agent", displayName: "Setup Test", userId },
+      readiness: { domains: expect.any(Array) },
+    });
+    expect(result).not.toHaveProperty("memory");
+    expect(log).toHaveBeenCalledExactlyOnceWith({
+      event: "knowledge_core_failed",
+      errorName: "Error",
+      errorStack: expect.stringMatching(/^\s+at /u),
+      durationMs: expect.any(Number),
+      ...request,
+    });
+    expect(JSON.stringify(log.mock.calls)).not.toContain(secret);
   });
 
   it("stores versioned domain profiles and reports scoped setup status", async () => {

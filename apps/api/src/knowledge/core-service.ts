@@ -181,7 +181,9 @@ export function createKnowledgeCoreService({
       const [{ counts, candidates }, index] = await Promise.all([
         select(principal),
         // One more than the cap shows whether the index overflowed it. Tags only sensitive
-        // memory carries never load automatically.
+        // memory carries never load automatically. The index covers all memory the caller may
+        // read (R16), not only what the core would select: a tag on disputed, archived or
+        // expired memory is still worth reusing, so its count can exceed `counts.active`.
         tags.index(principal, { limit: knowledgeCoreMaxTags + 1 }, { excludeSensitive: true }),
       ]);
       return packKnowledgeCore(

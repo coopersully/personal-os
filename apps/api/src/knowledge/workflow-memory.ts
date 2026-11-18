@@ -20,21 +20,26 @@ export type KnowledgeWorkflowMemory = (
 ) => Promise<KnowledgeContextPack | null>;
 
 /**
- * Only the stack's frame lines. Every message line is dropped: a parse error can echo the memory
- * value it rejected, and a message may span several lines.
+ * Only the stack's frame lines. The whole message header is removed first: a parse error can
+ * echo the memory value it rejected, a message may span several lines, and a message line can
+ * itself look like a frame. When the stack does not start with that header, no stack is kept.
  */
-function stackFrames(stack: string | undefined) {
+function stackFrames(error: Error) {
+  const { stack } = error;
+  const header = error.message ? `${error.name}: ${error.message}` : error.name;
+  if (!stack?.startsWith(header)) return undefined;
   const frames = stack
-    ?.split("\n")
+    .slice(header.length)
+    .split("\n")
     .filter((line) => /^\s+at /u.test(line))
     .join("\n");
   return frames || undefined;
 }
 
 /** A failure's identity and location, never its message, which may carry memory content. */
-function failureFields(error: unknown) {
+export function knowledgeFailureFields(error: unknown) {
   if (!(error instanceof Error)) return { errorName: "NonError" };
-  const errorStack = stackFrames(error.stack);
+  const errorStack = stackFrames(error);
   return {
     errorName: error.name,
     ...(error instanceof AppError ? { errorCode: error.code } : {}),
@@ -64,7 +69,7 @@ export function createKnowledgeWorkflowMemory({
       log?.({
         event: "knowledge_workflow_memory_failed",
         workspace,
-        ...failureFields(error),
+        ...knowledgeFailureFields(error),
         durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
         ...request,
       });

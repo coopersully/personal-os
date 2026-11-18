@@ -54,9 +54,18 @@ export function registerAssistantRoutes({
     }),
   );
   app.get("/v1/assistant/connection-guide", (context) => context.json({ guide: connectionGuide }));
-  app.get("/v1/assistant/context", async (context) =>
-    context.json({ context: await assistant.getContext(context.get("principal")) }),
-  );
+  app.get("/v1/assistant/context", async (context) => {
+    // The context can carry the memory core; no cache may keep it.
+    context.header("Cache-Control", "no-store");
+    return context.json({
+      context: await assistant.getContext(context.get("principal"), {
+        requestId: context.get("requestId"),
+        method: context.req.method,
+        path: context.req.path,
+        status: 200,
+      }),
+    });
+  });
   app.get("/v1/assistant/setup-status", async (context) =>
     context.json({ setup: await assistant.getSetupStatus(context.get("principal")) }),
   );

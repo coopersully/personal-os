@@ -100,6 +100,7 @@ export type RequestLog = TransportDiagnostics & {
     | "workspace_review_search_source_failed"
     | "mail_attachment_download_failed"
     | "knowledge_workflow_memory_failed"
+    | "knowledge_core_failed"
     | "request";
   section?: "profile" | "preferences" | "income" | "budget" | "accounts" | "guidance" | "execution";
   failureCount?: number;

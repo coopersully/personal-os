@@ -153,6 +153,8 @@ async function setUp() {
         headers: { authorization: `${scheme} ${token}` },
       });
       expect(response.status).toBe(200);
+      // The context can carry memory, so no cache may keep it.
+      expect(response.headers.get("cache-control")).toBe("no-store");
       return ((await response.json()) as { context: { memory?: KnowledgeCore } }).context;
     },
   };

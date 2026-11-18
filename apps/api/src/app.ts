@@ -556,6 +556,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     appBaseUrl: dependencies.config.appBaseUrl,
     db: dependencies.db,
     knowledgeCore: createKnowledgeCoreService({ db: dependencies.db, now, tags: knowledgeTags }),
+    log: dependencies.log,
     now,
     profileRequiresApproval: (domain) => domain === "finances",
     validateProfileSources: async (

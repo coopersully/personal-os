@@ -74,6 +74,14 @@ export type ListState = {
 };
 const initialList: ListState = { view: "all", draft: "", text: "", tags: [], filters: false };
 
+/** At most `limit` UTF-16 units, never ending inside a character (half an emoji is invalid). */
+function clipText(text: string, limit: number) {
+  if (text.length <= limit) return text;
+  const clipped = text.slice(0, limit);
+  const last = clipped.charCodeAt(limit - 1);
+  return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped;
+}
+
 function listQuery({ view, text, tags, kind, workspace, origin }: ListState): KnowledgeQuery {
   return {
     ...(text ? { text } : {}),
@@ -387,7 +395,7 @@ function MemoryList({ api, access, list, setList, open, onAdd, onTags }: ListPro
             <Field
               label="Search memory"
               value={list.draft}
-              onChange={(value) => change({ draft: value.slice(0, 500) })}
+              onChange={(value) => change({ draft: clipText(value, 500) })}
               disabled={pending}
             />
             <SettingsActionRow
@@ -532,19 +540,26 @@ function MemoryListResults({
   const initial = list.value;
   const cursor = (more.at(-1) ?? initial)?.nextCursor;
   const pending = commands.busy || disabled;
+  // Which first page the extra pages continue. A refresh installs a new one, so a page asked
+  // for before it landed continues a list that is gone.
+  const sequence = useRef(0);
 
   /** Pull-to-refresh: the native spinner, and one Sonner error if either read fails. */
   async function refresh() {
     if (pending) return;
     const results = await Promise.allSettled([
-      list.refresh().then(() => setMore([])),
+      list.refresh().then(() => {
+        sequence.current += 1;
+        setMore([]);
+      }),
       refreshTags(),
     ]);
     const failed = results.find((result) => result.status === "rejected");
     if (failed) throw failed.reason;
   }
 
-  const records = initial ? [initial, ...more].flatMap((result) => result.items) : [];
+  const pages = initial ? [initial, ...more] : [];
+  const records = pages.flatMap((result) => result.items);
   return (
     <MemoryBody onRefresh={refresh} save={add}>
       {header(pending)}
@@ -571,28 +586,34 @@ function MemoryListResults({
           <MemoryText>
             {initial.state === "unavailable"
               ? "Memory is unavailable right now."
-              : filtered
-                ? "No memories match."
-                : emptyText[view]}
+              : initial.state === "partial"
+                ? "Some memories couldn’t be shown right now."
+                : filtered
+                  ? "No memories match."
+                  : emptyText[view]}
           </MemoryText>
         ))}
+      {records.length > 0 && pages.some((result) => result.state === "partial") && (
+        <MemoryText>Some memories couldn’t be shown right now.</MemoryText>
+      )}
       {cursor && (
         <SettingsActionRow
           label="Load more memory"
           disabled={pending}
-          onPress={() =>
+          onPress={() => {
+            const issued = sequence.current;
             void commands.run({
               loading: "Loading more memory…",
               failure: "Couldn’t load more memory.",
               cursor: true,
               request: () => api.searchKnowledge({ ...query, cursor }),
               complete: (result) => {
-                if (!access.observe(result)) return;
+                if (issued !== sequence.current || !access.observe(result)) return;
                 setMore((previous) => [...previous, result]);
                 return { message: "More memory loaded.", tone: "info" };
               },
-            })
-          }
+            });
+          }}
         />
       )}
       {footer(pending)}

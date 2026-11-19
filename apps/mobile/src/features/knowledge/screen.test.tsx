@@ -1391,6 +1391,43 @@ it("lists_load_more_and_reload_when_memory_changes", async () => {
   await waitFor(() => expect(h.toast.error).toHaveBeenCalledWith("Couldn’t load saved memory."));
 });
 
+it("a_page_requested_during_a_refresh_never_joins_the_refreshed_list", async () => {
+  h.api.searchKnowledge.mockResolvedValueOnce(page([base], 1, "next"));
+  setup();
+  await screen.findByRole("button", { name: "Load more memory" });
+  let refreshed!: (value: KnowledgePage) => void;
+  h.api.searchKnowledge.mockReturnValueOnce(new Promise((done) => (refreshed = done)));
+  press("Refresh list");
+  let more!: (value: KnowledgePage) => void;
+  h.api.searchKnowledge.mockReturnValueOnce(new Promise((done) => (more = done)));
+  press("Load more memory");
+  await act(async () => refreshed(page([base], 1, "next")));
+  const second = memory({ id: otherId, content: fact("owner", "tea", "green") });
+  await act(async () => more(page([second], 1)));
+  // The page continued the list the refresh replaced, so it is dropped.
+  expect(screen.queryByRole("button", { name: /Tea/ })).toBeNull();
+  expect(button("Load more memory")).toBeTruthy();
+});
+
+it("a_partial_page_says_some_memories_are_missing", async () => {
+  h.api.searchKnowledge.mockResolvedValueOnce(page([base], 1, null, "partial"));
+  setup();
+  await screen.findByRole("button", { name: /Communication style/ });
+  expect(screen.getByText("Some memories couldn’t be shown right now.")).toBeTruthy();
+});
+
+it("search_text_stops_before_a_character_that_would_cross_the_limit", async () => {
+  setup();
+  await screen.findByRole("button", { name: /Communication style/ });
+  const field = screen.getByRole("textbox", { name: "Search memory" });
+  fireEvent.change(field, { target: { value: "tea 😀" } });
+  expect(screen.getByRole("textbox", { name: "Search memory" })).toHaveProperty("value", "tea 😀");
+  // Half an emoji is not text the API accepts, so the whole emoji stays out. (A long value
+  // shows as the field's summary row.)
+  fireEvent.change(field, { target: { value: `${"a".repeat(499)}😀` } });
+  expect(button(`Search memory, ${"a".repeat(499)}`)).toBeTruthy();
+});
+
 it("shares_the_export_page_by_page", async () => {
   h.api.exportKnowledge.mockResolvedValueOnce(page([base], 1, "page-2", "partial"));
   h.share.shareMemoryPage.mockResolvedValue(true);

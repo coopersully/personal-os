@@ -148,7 +148,9 @@ export function useMemoryCommands(capture: () => Current, recover?: MemoryAccess
     }
   }
 
-  return { busy, run, finish };
+  /** Whether a command is running now, before its busy state has rendered. */
+  const running = useCallback(() => active.current, []);
+  return { busy, run, finish, running };
 }
 
 /**
@@ -208,21 +210,29 @@ export function useMemoryResource<T>(load: (signal: AbortSignal) => Promise<T | 
       throw error;
     }
   }, [load]);
-  /** Pull-to-refresh: keeps what is shown and lets the caller report a failure once. */
-  const refresh = useCallback(async () => {
-    active.current?.abort();
-    const controller = new AbortController();
-    active.current = controller;
-    try {
-      const value = await load(controller.signal);
-      if (!controller.signal.aborted && value !== undefined) setState({ value, loading: false });
-      return value;
-    } catch (error) {
-      // A newer read replaced this one, so its failure is not the person's to hear about.
-      if (controller.signal.aborted) return;
-      throw error;
-    }
-  }, [load]);
+  /**
+   * Pull-to-refresh: keeps what is shown and lets the caller report a failure once. `accept` is
+   * asked when the result arrives, so work that started meanwhile (an edit, a write) can keep
+   * what it is based on.
+   */
+  const refresh = useCallback(
+    async (accept?: () => boolean) => {
+      active.current?.abort();
+      const controller = new AbortController();
+      active.current = controller;
+      try {
+        const value = await load(controller.signal);
+        if (!controller.signal.aborted && value !== undefined && (accept?.() ?? true))
+          setState({ value, loading: false });
+        return value;
+      } catch (error) {
+        // A newer read replaced this one, so its failure is not the person's to hear about.
+        if (controller.signal.aborted) return;
+        throw error;
+      }
+    },
+    [load],
+  );
   useLayoutEffect(() => {
     void reload().catch(() => {});
     return () => active.current?.abort();

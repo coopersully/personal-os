@@ -8,7 +8,7 @@ import {
 } from "@personal-os/domain";
 import { randomUUID } from "expo-crypto";
 import { Stack } from "expo-router";
-import { type RefObject, useCallback, useLayoutEffect, useState } from "react";
+import { type RefObject, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { View } from "react-native";
 import { toast } from "sonner-native";
 import { Body, Facts, Heading } from "../../components/detail-content";
@@ -237,7 +237,10 @@ function RecordSession({
   back,
   edit,
   refresh,
-}: Props & { record: KnowledgeRecord; refresh: () => Promise<unknown> }) {
+}: Props & {
+  record: KnowledgeRecord;
+  refresh: (accept?: () => boolean) => Promise<unknown>;
+}) {
   const id = record.id;
   const t = useTheme();
   const commands = useMemoryCommands(access.capture, access.recover);
@@ -264,9 +267,14 @@ function RecordSession({
     else if (dirty) confirmDiscard(exitEdit);
     else exitEdit();
   }
+  // A refresh that lands once editing or a write has started would remount this memory and
+  // drop the draft or the write's outcome, so it applies only while the detail is still idle.
+  const reading = useRef(mode === "detail");
   useLayoutEffect(() => {
     back.current = leave;
+    reading.current = mode === "detail";
   });
+  const idle = () => reading.current && !commands.running();
 
   function update(
     body: ActionBody,
@@ -539,7 +547,7 @@ function RecordSession({
     });
   return (
     // A refresh remounts this memory, so it waits for a running action to report first.
-    <MemoryBody onRefresh={() => (commands.busy ? Promise.resolve() : refresh())}>
+    <MemoryBody onRefresh={() => (commands.busy ? Promise.resolve() : refresh(idle))}>
       <Stack.Screen
         options={{
           title: "Memory details",

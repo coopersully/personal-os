@@ -1765,6 +1765,29 @@ it("detail_and_tags_pull_to_refresh_report_one_error", async () => {
   expect(screen.getByText("#family · 2 memories")).toBeTruthy();
 });
 
+it("a_refresh_that_returns_after_editing_starts_keeps_the_draft", async () => {
+  setup();
+  await openMemory();
+  let arrive!: (record: KnowledgeRecord) => void;
+  h.api.getKnowledge.mockReturnValueOnce(new Promise((done) => (arrive = done)));
+  press("Refresh list");
+  menu("Edit memory");
+  fireEvent.change(screen.getByRole("textbox", { name: "Value" }), { target: { value: "prose" } });
+  // The refresh brings a changed record, but the person is editing: it never replaces the draft.
+  await act(async () => arrive(memory({ revision: 2, tags: ["writing"] })));
+  expect(screen.getByRole("textbox", { name: "Value" })).toHaveProperty("value", "prose");
+  press("Save changes");
+  await waitFor(() =>
+    expect(lastUpdate()).toMatchObject({ action: "revise", expectedRevision: 1 }),
+  );
+
+  // An idle detail still refreshes.
+  await screen.findByRole("button", { name: "Revision history" });
+  records.set(id, memory({ revision: 4, tags: ["refreshed"] }));
+  press("Refresh list");
+  await screen.findByText("#refreshed");
+});
+
 it("a_trashed_or_replaced_proposal_offers_no_resolution_and_a_pending_one_no_trash", async () => {
   const proposal = memory({
     id: proposalId,

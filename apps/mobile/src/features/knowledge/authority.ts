@@ -151,15 +151,21 @@ export function useMemoryCommands(capture: () => Current, recover?: MemoryAccess
   return { busy, run, finish };
 }
 
-/** A new memory keeps one key across exact retries, so an uncertain save never duplicates it. */
+/**
+ * A new memory keeps one key per body it submitted, so an uncertain save never duplicates it:
+ * returning to an earlier entry after trying another replays the earlier one's receipt, and a
+ * different body always gets a different key.
+ */
 export function useMutationKey() {
-  const previous = useRef<{ serialized: string; key: string } | null>(null);
+  const keys = useRef(new Map<string, string>());
   return (body: unknown) => {
     const serialized = JSON.stringify(body);
-    if (previous.current?.serialized !== serialized) {
-      previous.current = { serialized, key: randomUUID() };
+    let key = keys.current.get(serialized);
+    if (!key) {
+      key = randomUUID();
+      keys.current.set(serialized, key);
     }
-    return previous.current.key;
+    return key;
   };
 }
 

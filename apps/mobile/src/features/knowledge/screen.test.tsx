@@ -888,6 +888,29 @@ it("an_uncertain_add_keeps_its_key_for_an_exact_retry", async () => {
   expect(h.toast.success).not.toHaveBeenCalled();
 });
 
+it("returning_to_an_unconfirmed_entry_reuses_its_key", async () => {
+  h.api.saveKnowledge.mockRejectedValue(new Error("offline"));
+  setup();
+  fireEvent.click(await screen.findByRole("button", { name: "Add memory" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Fact" }), { target: { value: "x" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Value" }), { target: { value: "A" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Tags" }), { target: { value: "z" } });
+  const save = async (times: number) => {
+    press("Save changes");
+    await waitFor(() => expect(h.api.saveKnowledge).toHaveBeenCalledTimes(times));
+    await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(times));
+  };
+  await save(1);
+  fireEvent.change(screen.getByRole("textbox", { name: "Value" }), { target: { value: "B" } });
+  await save(2);
+  // A may have been saved even though its response was lost: retrying A replays its receipt.
+  fireEvent.change(screen.getByRole("textbox", { name: "Value" }), { target: { value: "A" } });
+  await save(3);
+  const [a, b, again] = h.api.saveKnowledge.mock.calls.map(([input]) => input.mutationKey);
+  expect(b).not.toBe(a);
+  expect(again).toBe(a);
+});
+
 it("merge_and_undo_tag", async () => {
   const mergeId = "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d05";
   const laterId = "6c7d8e9f-0a1b-4c2d-9e3f-4a5b6c7d8e06";

@@ -86,6 +86,11 @@ export function memoryDate(date: string) {
   return new Date(date).toLocaleDateString(undefined, { dateStyle: "medium" });
 }
 
+/** A date with its local time, for deadlines that end partway through a day. */
+export function memoryDateTime(date: string) {
+  return new Date(date).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
 /** Memories this one names, other than itself: its related records and relationship ends. */
 export function linkedMemoryIds(record: KnowledgeRecord) {
   const ids = [...record.relatedRecordIds];

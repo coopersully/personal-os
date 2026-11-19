@@ -6,6 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { type ReactNode, useEffect } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { RowAction } from "../../components/row-action-button";
+import { memoryDateTime } from "./presentation";
 import { MemoryScreen } from "./screen";
 
 vi.mock("react", async () => {
@@ -535,8 +536,14 @@ it("restore_and_delete_now_from_trash", async () => {
   await screen.findByText(/In Trash/);
   await openMemory();
   // The date is the end of the restore period; the purge follows it, not on it.
+  // It ends partway through a day, so the deadline carries the local time.
+  const deadline = memoryDateTime(
+    new Date(Date.parse("2026-11-14T15:00:00.000Z") + 30 * 86_400_000).toISOString(),
+  );
   expect(
-    screen.getByText(/You can restore it until .*; after that it’s deleted for good\./),
+    screen.getByText(
+      `Moved to Trash ${new Date("2026-11-14T15:00:00.000Z").toLocaleDateString(undefined, { dateStyle: "medium" })}. You can restore it until ${deadline}; after that it’s deleted for good.`,
+    ),
   ).toBeTruthy();
   expect(headerActions()).toEqual([]);
 

@@ -3,7 +3,7 @@ import { Alert } from "react-native";
 import { Section } from "../goals/controls";
 import { SettingsActionRow } from "../settings/settings-row";
 import { MemoryNote } from "./controls";
-import { memoryDate } from "./presentation";
+import { memoryDate, memoryDateTime } from "./presentation";
 
 /** What Trash and delete now cannot reach; both confirmations say so. */
 export const trashLimits =
@@ -67,7 +67,7 @@ export function TrashedMemory({
   return (
     <Section title="Trash">
       <MemoryNote>
-        {`Moved to Trash ${memoryDate(trashedAt)}. You can restore it until ${memoryDate(purgeAt)}; after that it’s deleted for good.`}
+        {`Moved to Trash ${memoryDate(trashedAt)}. You can restore it until ${memoryDateTime(purgeAt)}; after that it’s deleted for good.`}
       </MemoryNote>
       {root ? (
         <>

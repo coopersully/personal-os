@@ -280,7 +280,7 @@ function RecordSession({
       explain,
     }: {
       loading: string;
-      success: string;
+      success: string | ((result: KnowledgeMutationResult) => string);
       /** Shows what follows the change: this memory by default, or the list once it is gone. */
       next?: (result: KnowledgeMutationResult) => void;
       stale?: string;
@@ -304,10 +304,9 @@ function RecordSession({
       complete: (result) => {
         next(result);
         const leaves = body.action === "trash" || body.action === "delete_now";
-        return {
-          message:
-            leaves || result.outcome === "readable" ? success : "This memory is unavailable.",
-        };
+        if (!leaves && result.outcome !== "readable")
+          return { message: "This memory is unavailable." };
+        return { message: typeof success === "string" ? success : success(result) };
       },
       rejected: (error) => {
         if (error instanceof Explained) return error.message;
@@ -447,7 +446,10 @@ function RecordSession({
   const archived = baseline.status === "archived";
   const disputed = baseline.status === "disputed";
   const links = linked.value ?? [];
-  const original = baseline.conflictRecordIds[0];
+  /** The record a resolved proposal was retired in favor of: the one it proposed to change.
+   * Conflict IDs also list other memories for the same claim, so they never name it. */
+  const kept = (result: KnowledgeMutationResult) =>
+    result.outcome === "readable" ? (result.record.supersededBy ?? undefined) : undefined;
   // Core memory loads at session start for agents: never a sensitive or blocked memory. A
   // revise also settles a dispute, so a disputed memory is confirmed or edited first.
   const coreLock = disputed
@@ -603,7 +605,7 @@ function RecordSession({
                 {
                   loading: "Keeping your version…",
                   success: "Kept your version.",
-                  next: () => changed(original),
+                  next: (result) => changed(kept(result)),
                 },
               )
             }
@@ -620,7 +622,7 @@ function RecordSession({
             }
             disabled={disabled}
           />
-          {original && (
+          {baseline.conflictRecordIds.length > 0 && (
             <SettingsActionRow
               label="Edit and keep mine"
               icon="edit"
@@ -630,8 +632,14 @@ function RecordSession({
                   { action: "resolve_conflict", ...identity, keep: "current" },
                   {
                     loading: "Keeping your version…",
-                    success: "Kept your version. Edit it with the agent’s wording.",
-                    next: () => changed(original, memoryContent(baseline)),
+                    success: (result) =>
+                      kept(result)
+                        ? "Kept your version. Edit it with the agent’s wording."
+                        : "Kept your version.",
+                    next: (result) => {
+                      const target = kept(result);
+                      changed(target, target && memoryContent(baseline));
+                    },
                   },
                 )
               }

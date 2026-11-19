@@ -428,16 +428,18 @@ it("pending_proposal_offers_only_resolve_conflict", async () => {
 
 it("resolve_conflict_keep_mine_and_take_agents", async () => {
   records.set(id, memory({ conflictRecordIds: [proposalId] }));
-  records.set(
-    proposalId,
-    memory({
-      id: proposalId,
-      revision: 4,
-      status: "proposed",
-      content: fact("owner", "coffee", "oat milk"),
-      claimKey: null,
-      conflictRecordIds: [id],
-    }),
+  const pending = memory({
+    id: proposalId,
+    revision: 4,
+    status: "proposed",
+    content: fact("owner", "coffee", "oat milk"),
+    claimKey: null,
+    conflictRecordIds: [linkedId, id],
+  });
+  records.set(proposalId, pending);
+  // Keeping mine retires the proposal in favor of its target, which the receipt names.
+  h.api.updateKnowledge.mockImplementationOnce(async () =>
+    receipt({ ...pending, revision: 5, status: "superseded", supersededBy: id }),
   );
   setup();
   press("Conflicts");
@@ -1478,6 +1480,11 @@ it("edit_and_keep_mine_settles_the_conflict_then_edits_from_the_agents_wording",
     value: { subject: "owner", key: "communication_style", value: { type: "string", value } },
   });
   records.set(id, memory({ conflictRecordIds: [proposalId] }));
+  // Another memory the person saved for the same claim also conflicts, and sorts first.
+  records.set(
+    linkedId,
+    memory({ id: linkedId, content: preference("headings"), conflictRecordIds: [proposalId] }),
+  );
   records.set(
     proposalId,
     memory({
@@ -1487,7 +1494,7 @@ it("edit_and_keep_mine_settles_the_conflict_then_edits_from_the_agents_wording",
       ownerHeld: false,
       origin: "inferred",
       content: preference("numbered lists"),
-      conflictRecordIds: [id],
+      conflictRecordIds: [linkedId, id],
     }),
   );
   h.api.searchKnowledge.mockImplementation(async (query: { hasConflict?: boolean }) =>
@@ -1499,8 +1506,10 @@ it("edit_and_keep_mine_settles_the_conflict_then_edits_from_the_agents_wording",
   );
   h.api.updateKnowledge.mockImplementation(async (input: { recordId: string; action: string }) => {
     if (input.action === "resolve_conflict") {
-      records.set(proposalId, memory({ id: proposalId, status: "superseded" }));
+      // The API retires the proposal in favor of the record it proposed to change.
+      records.set(proposalId, memory({ id: proposalId, status: "superseded", supersededBy: id }));
       records.set(id, memory());
+      records.set(linkedId, memory({ id: linkedId, content: preference("headings") }));
     }
     return receipt(records.get(input.recordId) ?? base);
   });
@@ -1508,6 +1517,8 @@ it("edit_and_keep_mine_settles_the_conflict_then_edits_from_the_agents_wording",
   press("Conflicts");
   await waitFor(() => expect(lastQuery()).toEqual({ hasConflict: true }));
   fireEvent.click(await screen.findByRole("button", { name: /numbered lists/ }));
+  await screen.findByRole("button", { name: "Revision history" });
+  // A same-claim conflict is not what the proposal targets; resolving opens the real target.
   fireEvent.click(await screen.findByRole("button", { name: "Edit and keep mine" }));
   await waitFor(() =>
     expect(h.api.updateKnowledge).toHaveBeenCalledWith(
@@ -1528,6 +1539,7 @@ it("edit_and_keep_mine_settles_the_conflict_then_edits_from_the_agents_wording",
   const value = await screen.findByRole("textbox", { name: "Value" });
   expect(value).toHaveProperty("value", "numbered lists");
   expect(h.api.getKnowledge).toHaveBeenLastCalledWith({ id });
+  expect(h.api.getKnowledge).not.toHaveBeenCalledWith({ id: linkedId });
   expect(screen.getByText(/The agent’s wording is filled in/)).toBeTruthy();
   expect(h.toast.loading).toHaveBeenCalledTimes(1);
   press("Save changes");

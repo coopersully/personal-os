@@ -22,7 +22,6 @@ import {
   type Feedback,
   type MemoryAccess,
   type MemoryApi,
-  readableMemory,
   readMemory,
   statusOf,
   useMemoryCommands,
@@ -319,12 +318,18 @@ function RecordSession({
       rejected: (error) => {
         if (error instanceof Explained) return error.message;
         const status = statusOf(error);
-        if (status === 409 && editing) {
-          // Keep the draft: the person reviews the latest revision before saving again.
+        // Only a stale revision carries the current record; the person reviews it before saving.
+        if (status === 409 && editing && "current" in detailsOf(error)) {
           setConflict(input);
           setReviewed(undefined);
           return "Memory changed. Review the latest revision.";
         }
+        // Any other refusal of an edit, such as a replacement that leads back to this memory,
+        // keeps the draft open as it is: reloading would not change the answer.
+        if (status === 409 && editing)
+          return body.action === "supersede"
+            ? "That replacement leads back to this memory. Choose a different one."
+            : "This memory can’t take that change. Check it and try again.";
         if (status === 409) {
           changed(id);
           return stale;
@@ -368,11 +373,22 @@ function RecordSession({
     void commands.run({
       loading: "Loading the latest memory…",
       failure: "Couldn’t load the latest memory.",
-      request: () => api.getKnowledge({ id }).then(readableMemory),
+      request: () => api.getKnowledge({ id }),
       complete: (result) => {
+        // Deleted for good since the edit began: nothing is left to review or save over.
+        if ("state" in result) {
+          changed();
+          return { message: "This memory was deleted.", tone: "error" };
+        }
         setReviewed(result);
         return { message: "Latest revision loaded.", tone: "info" };
       },
+      rejected: (error) => {
+        if (statusOf(error) !== 404) return undefined;
+        changed();
+        return "This memory is no longer available.";
+      },
+      retain,
     });
   }
 
@@ -458,17 +474,20 @@ function RecordSession({
    * Conflict IDs also list other memories for the same claim, so they never name it. */
   const kept = (result: KnowledgeMutationResult) =>
     result.outcome === "readable" ? (result.record.supersededBy ?? undefined) : undefined;
-  // Core memory loads at session start for agents: never a sensitive or blocked memory. A
-  // revise also settles a dispute, so a disputed memory is confirmed or edited first.
+  // Core memory loads at session start for agents: never a sensitive or blocked memory, even
+  // one still marked core. That one can be taken out of core, never put in. A revise also
+  // settles a dispute, so a disputed memory is confirmed or edited first.
+  const coreIneligible =
+    baseline.agentAccess === "blocked"
+      ? "Agents can’t use this memory, so it never loads at session start."
+      : baseline.sensitivity === "sensitive"
+        ? "Sensitive memories never load at session start."
+        : undefined;
   const coreLock = disputed
     ? "Settle the dispute first: confirm or edit this memory."
     : baseline.core
       ? undefined
-      : baseline.agentAccess === "blocked"
-        ? "Agents can’t use this memory, so it never loads at session start."
-        : baseline.sensitivity === "sensitive"
-          ? "Sensitive memories never load at session start."
-          : undefined;
+      : coreIneligible;
   const actions: RowAction[] = [];
   if (live) {
     actions.push({
@@ -661,7 +680,7 @@ function RecordSession({
           {baseline.conflictRecordIds.map((conflictId) => (
             <SettingsActionRow
               key={conflictId}
-              label="Review the agent’s proposal"
+              label="Review conflicting memory"
               icon="agent"
               onPress={() => open(conflictId)}
               disabled={commands.busy}
@@ -682,7 +701,7 @@ function RecordSession({
         <Section title="Access">
           <ToggleRow
             label="Core memory"
-            detail={coreLock ?? "Agents load it at the start of every session."}
+            detail={coreLock ?? coreIneligible ?? "Agents load it at the start of every session."}
             value={baseline.core}
             onChange={(core) =>
               update(
@@ -797,9 +816,9 @@ function History({ api, access, id }: Pick<Props, "api" | "access" | "id">) {
               <Heading>{`Revision ${item.revision}`}</Heading>
               <Body>
                 {[
+                  // No date: createdAt is when the memory was added, the same on every revision.
                   memorySummary(memoryContent(item)).text,
                   savedBy(item.author),
-                  memoryDate(item.createdAt),
                 ].join(" · ")}
               </Body>
               <ClaimFacts record={item} />

@@ -459,7 +459,8 @@ it("resolve_conflict_keep_mine_and_take_agents", async () => {
   await waitFor(() => expect(h.api.getKnowledge).toHaveBeenLastCalledWith({ id }));
   await expectToast("Keeping your version…", "success", "Kept your version.");
 
-  press("Review the agent’s proposal");
+  // A conflict need not be a proposal, so its row says only that it conflicts.
+  press("Review conflicting memory");
   await screen.findByRole("button", { name: "Take the agent’s" });
   press("Take the agent’s");
   await waitFor(() =>
@@ -766,6 +767,8 @@ it("native_owner_reviews_and_corrects", async () => {
   await expectToast("Saving memory…", "success", "Memory saved.");
   press("Revision history");
   await screen.findByText("Revision 2");
+  // A revision has no time of its own (createdAt is when the memory was added), so none shows.
+  expect(screen.queryByText(/· You · /)).toBeNull();
   h.api.getKnowledgeHistory.mockResolvedValueOnce(page([base], 1));
   press("Load older revisions");
   await waitFor(() =>
@@ -818,7 +821,7 @@ it("a_stale_edit_keeps_the_draft_and_reviews_the_latest_revision", async () => {
   await openMemory();
   menu("Edit memory");
   fireEvent.change(screen.getByRole("textbox", { name: "Value" }), { target: { value: "prose" } });
-  h.api.updateKnowledge.mockRejectedValueOnce(conflict());
+  h.api.updateKnowledge.mockRejectedValueOnce(conflict({ current: base }));
   press("Save changes");
   await screen.findByText("You edited revision 1.");
   await expectToast("Saving memory…", "error", "Memory changed. Review the latest revision.");
@@ -904,6 +907,47 @@ it("a_field_both_versions_changed_waits_for_the_persons_choice", async () => {
       content: { value: { value: { value: "prose" } } },
     }),
   );
+});
+
+it("a_replacement_that_forms_a_cycle_keeps_the_editor_open", async () => {
+  setup();
+  await openMemory();
+  await offers("Replace with another memory");
+  menu("Replace with another memory");
+  fireEvent.change(screen.getByRole("textbox", { name: "Replacement memory ID" }), {
+    target: { value: id },
+  });
+  // A cycle refusal carries no current revision: it is not a stale edit.
+  h.api.updateKnowledge.mockRejectedValueOnce(conflict());
+  press("Save changes");
+  await expectToast(
+    "Replacing memory…",
+    "error",
+    "That replacement leads back to this memory. Choose a different one.",
+  );
+  expect(screen.queryByText("You edited revision 1.")).toBeNull();
+  // The draft keeps the replacement the person entered.
+  expect(button(`Replacement memory ID, ${id}`)).toBeTruthy();
+  expect(button("Save changes")).toHaveProperty("disabled", false);
+});
+
+it("reviewing_a_memory_that_was_deleted_returns_to_the_list", async () => {
+  setup();
+  await openMemory();
+  menu("Edit memory");
+  fireEvent.change(screen.getByRole("textbox", { name: "Value" }), { target: { value: "prose" } });
+  h.api.updateKnowledge.mockRejectedValueOnce(conflict({ current: base }));
+  press("Save changes");
+  await screen.findByText("You edited revision 1.");
+  h.api.getKnowledge.mockResolvedValueOnce({
+    id,
+    state: "forgotten",
+    trashedAt: "2026-11-14T15:00:00.000Z",
+    purgedAt: "2026-11-15T14:00:00.000Z",
+  });
+  press("Load current revision");
+  await expectToast("Loading the latest memory…", "error", "This memory was deleted.");
+  await screen.findByRole("button", { name: "Add memory" });
 });
 
 it("invalid_or_unchanged_edits_do_not_save", async () => {
@@ -1716,7 +1760,9 @@ it("core_toggle_explains_when_it_is_unavailable", async () => {
   records.set(id, memory({ sensitivity: "sensitive", core: true }));
   press("Refresh list");
   await waitFor(() => expect(core()).toHaveProperty("disabled", false));
-  expect(screen.getByText("Agents load it at the start of every session.")).toBeTruthy();
+  // It still says why it does not load, rather than promising that it does.
+  expect(screen.getByText("Sensitive memories never load at session start.")).toBeTruthy();
+  expect(screen.queryByText("Agents load it at the start of every session.")).toBeNull();
 });
 
 it("tag_chips_stop_at_eight", async () => {

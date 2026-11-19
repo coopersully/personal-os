@@ -205,20 +205,45 @@ export function contentDraft(kind: Kind, draft: Record<string, string>, original
   return knowledgeWriteContentSchema.safeParse({ kind, value });
 }
 
-/** A field both the person and a newer revision changed, differently. */
-export type DraftConflict = { field: string; label: string; mine: string; theirs: string };
+/**
+ * A field both the person and a newer revision changed, differently. `fields` holds the newer
+ * revision's parts of it, which choosing that side sets together.
+ */
+export type DraftConflict = {
+  field: string;
+  label: string;
+  mine: string;
+  theirs: string;
+  fields?: Record<string, string>;
+};
 type ClaimDraft = { kind: Kind; fields: Record<string, string> };
+/** One editable field of a claim: its draft names, compared and chosen as a unit. */
+type DraftField = { field: string; label: string; names: string[] };
 
-function draftFieldLabels(kind: Kind): Array<[string, string]> {
+/**
+ * The fields a rebase compares. A typed value and its type are one field: taken apart, the
+ * other side's type could reinterpret the person's value ("no" as the boolean true).
+ */
+function draftFields(kind: Kind): DraftField[] {
   return [
-    ...contentFields[kind].map(({ name, label }): [string, string] => [name, label]),
+    ...contentFields[kind].map(({ name, label }) => ({ field: name, label, names: [name] })),
     ...(kind === "fact" || kind === "preference"
-      ? ([
-          ["valueType", "Value type"],
-          ["value", "Value"],
-        ] as Array<[string, string]>)
+      ? [{ field: "value", label: "Value", names: ["valueType", "value"] }]
       : []),
   ];
+}
+
+function draftText({ field, names }: DraftField, fields: Record<string, string>) {
+  if (field !== "value") return fields[names[0] ?? ""] ?? "";
+  return `${fields.value ?? ""} (${memoryLabel(fields.valueType ?? "string")})`;
+}
+
+/** What a draft would save, in the person's terms, or a plain note when it is incomplete. */
+function draftSummary(draft: ClaimDraft, base: MemoryContent) {
+  const parsed = contentDraft(draft.kind, draft.fields, base);
+  if (!parsed.success) return `Your edit (incomplete ${memoryLabel(draft.kind).toLowerCase()})`;
+  const summary = memorySummary(parsed.data);
+  return `${summary.title}: ${summary.text}`;
 }
 
 /**
@@ -234,10 +259,13 @@ export function rebaseClaim(
 ): ClaimDraft & { conflicts: DraftConflict[] } {
   const was = fieldDraft(base);
   const now = fieldDraft(theirs);
+  const pick = (names: string[], fields: Record<string, string>) =>
+    names.map((name) => fields[name] ?? "");
+  const same = (a: string[], b: string[]) => a.every((value, index) => value === b[index]);
   if (base.kind !== theirs.kind || mine.kind !== base.kind) {
     const mineChanged =
       mine.kind !== base.kind ||
-      draftFieldLabels(base.kind).some(([name]) => (mine.fields[name] ?? "") !== (was[name] ?? ""));
+      draftFields(base.kind).some(({ names }) => !same(pick(names, mine.fields), pick(names, was)));
     const theirsChanged = JSON.stringify(base) !== JSON.stringify(theirs);
     if (!mineChanged) return { kind: theirs.kind, fields: now, conflicts: [] };
     if (!theirsChanged) return { ...mine, conflicts: [] };
@@ -248,7 +276,7 @@ export function rebaseClaim(
         {
           field: "claim",
           label: "Memory",
-          mine: "Your edit",
+          mine: draftSummary(mine, base),
           theirs: `${summary.title}: ${summary.text}`,
         },
       ],
@@ -256,13 +284,21 @@ export function rebaseClaim(
   }
   const fields = { ...mine.fields };
   const conflicts: DraftConflict[] = [];
-  for (const [name, label] of draftFieldLabels(base.kind)) {
-    const before = was[name] ?? "";
-    const after = now[name] ?? "";
-    const current = mine.fields[name] ?? "";
-    if (current === before) fields[name] = after;
-    else if (after !== before && after !== current)
-      conflicts.push({ field: name, label, mine: current, theirs: after });
+  for (const field of draftFields(base.kind)) {
+    const { names } = field;
+    const before = pick(names, was);
+    const after = pick(names, now);
+    const current = pick(names, mine.fields);
+    const newer = Object.fromEntries(names.map((name, index) => [name, after[index] ?? ""]));
+    if (same(current, before)) Object.assign(fields, newer);
+    else if (!same(after, before) && !same(after, current))
+      conflicts.push({
+        field: field.field,
+        label: field.label,
+        mine: draftText(field, mine.fields),
+        theirs: draftText(field, now),
+        fields: newer,
+      });
   }
   return { kind: base.kind, fields, conflicts };
 }

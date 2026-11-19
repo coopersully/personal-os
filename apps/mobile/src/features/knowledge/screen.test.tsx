@@ -950,6 +950,35 @@ it("reviewing_a_memory_that_was_deleted_returns_to_the_list", async () => {
   await screen.findByRole("button", { name: "Add memory" });
 });
 
+it("keeping_my_value_keeps_its_type_too", async () => {
+  const preference = (value: { type: string; value: unknown }) =>
+    ({
+      kind: "preference",
+      value: { subject: "owner", key: "communication_style", value },
+    }) as KnowledgeRecord["content"];
+  records.set(id, memory({ content: preference({ type: "string", value: "yes" }) }));
+  setup();
+  await openMemory();
+  menu("Edit memory");
+  fireEvent.change(screen.getByRole("textbox", { name: "Value" }), { target: { value: "no" } });
+  h.api.updateKnowledge.mockRejectedValueOnce(conflict({ current: base }));
+  press("Save changes");
+  await screen.findByText("You edited revision 1.");
+  records.set(id, memory({ revision: 3, content: preference({ type: "boolean", value: true }) }));
+  press("Load current revision");
+  await screen.findByText("Current revision 3");
+  press("Use this revision");
+  expect(screen.getByText(/Yours: no \(String\)/)).toBeTruthy();
+  press("Keep my value");
+  press("Save changes");
+  await waitFor(() =>
+    expect(lastUpdate()).toMatchObject({
+      expectedRevision: 3,
+      content: preference({ type: "string", value: "no" }),
+    }),
+  );
+});
+
 it("invalid_or_unchanged_edits_do_not_save", async () => {
   setup();
   await openMemory();

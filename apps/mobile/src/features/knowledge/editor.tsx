@@ -207,7 +207,7 @@ export function MemoryEditor({
         const content = memoryContent(record);
         setKind(content.kind);
         setDraft(fieldDraft(content));
-      } else setDraft((fields) => ({ ...fields, [conflict.field]: conflict.theirs }));
+      } else setDraft((fields) => ({ ...fields, ...conflict.fields }));
     });
   }
 

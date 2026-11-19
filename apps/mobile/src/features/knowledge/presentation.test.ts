@@ -193,7 +193,15 @@ it("rebases_untouched_fields_and_keeps_the_persons_changes", () => {
   expect(rebaseClaim(lisbon, porto, { kind: "fact", fields: madrid })).toEqual({
     kind: "fact",
     fields: madrid,
-    conflicts: [{ field: "value", label: "Value", mine: "Madrid", theirs: "Porto" }],
+    conflicts: [
+      {
+        field: "value",
+        label: "Value",
+        mine: "Madrid (String)",
+        theirs: "Porto (String)",
+        fields: { valueType: "string", value: "Porto" },
+      },
+    ],
   });
   // Both made the same change: nothing to choose.
   const same = { ...fieldDraft(lisbon), value: "Porto" };
@@ -208,10 +216,64 @@ it("rebases_a_change_of_kind_as_one_claim", () => {
     fields: fieldDraft(goal),
     conflicts: [],
   });
-  const changed = { kind: "preference" as const, fields: { subject: "owner", key: "tone" } };
+  const changed = {
+    kind: "preference" as const,
+    fields: { subject: "owner", key: "tone", valueType: "string", value: "warm" },
+  };
   expect(rebaseClaim(claim, claim, changed)).toEqual({ ...changed, conflicts: [] });
   expect(rebaseClaim(claim, goal, changed)).toEqual({
     ...changed,
-    conflicts: [{ field: "claim", label: "Memory", mine: "Your edit", theirs: expect.any(String) }],
+    // Each side reads as the memory it would save, never a bare "Your edit".
+    conflicts: [
+      {
+        field: "claim",
+        label: "Memory",
+        mine: expect.stringContaining("Tone"),
+        theirs: expect.any(String),
+      },
+    ],
+  });
+});
+
+it("rebases_a_typed_value_and_its_type_as_one_field", () => {
+  const typed = (type: string, value: string | number | boolean): KnowledgeRecord["content"] =>
+    ({
+      kind: "fact",
+      value: { subject: "owner", predicate: "home", value: { type, value } },
+    }) as KnowledgeRecord["content"];
+  // The other client turned "yes" into a boolean; the person typed "no". Neither half of the
+  // pair may come from the other side, or "no" would read as the boolean true.
+  const mine = { ...fieldDraft(typed("string", "yes")), value: "no" };
+  const boolean = rebaseClaim(typed("string", "yes"), typed("boolean", true), {
+    kind: "fact",
+    fields: mine,
+  });
+  expect(boolean.fields).toEqual(mine);
+  expect(boolean.conflicts).toEqual([
+    {
+      field: "value",
+      label: "Value",
+      mine: "no (String)",
+      theirs: "true (Boolean)",
+      fields: { valueType: "boolean", value: "true" },
+    },
+  ]);
+  // The other client changed only the type; the person changed only the value.
+  const six = { ...fieldDraft(typed("integer", 5)), value: "6" };
+  const retyped = rebaseClaim(typed("integer", 5), typed("string", "5"), {
+    kind: "fact",
+    fields: six,
+  });
+  expect(retyped.fields).toEqual(six);
+  expect(retyped.conflicts).toMatchObject([{ field: "value", mine: "6 (Integer)" }]);
+  // An untouched pair still takes the newer revision whole.
+  const untouched = rebaseClaim(typed("string", "yes"), typed("boolean", true), {
+    kind: "fact",
+    fields: fieldDraft(typed("string", "yes")),
+  });
+  expect(untouched).toEqual({
+    kind: "fact",
+    fields: fieldDraft(typed("boolean", true)),
+    conflicts: [],
   });
 });

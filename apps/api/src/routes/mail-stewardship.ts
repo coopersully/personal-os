@@ -10,6 +10,7 @@ import {
   updateMailObligationInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
+import type { KnowledgeWorkflowMemory } from "../knowledge/workflow-memory.js";
 import type { MailMaintenanceService } from "../mail-maintenance-service.js";
 import type { MailStewardshipService } from "../mail-stewardship-service.js";
 import type { AppEnv, Principal } from "../types.js";
@@ -23,6 +24,8 @@ type MailStewardshipRouteOptions = {
   maintenance: MailMaintenanceService;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
   stewardship: MailStewardshipService;
+  /** Loads Mail memory into maintenance responses; absent, the section reads as null. */
+  workflowMemory?: KnowledgeWorkflowMemory;
 };
 
 /** Register Mail's server-owned stewardship intents and surgical operations. */
@@ -32,6 +35,7 @@ export function registerMailStewardshipRoutes({
   db,
   mutationContext,
   stewardship,
+  workflowMemory,
 }: MailStewardshipRouteOptions) {
   const requireMailAccess = requireFeatureAccess("mail");
   app.use("/v1/mail/status", requireMailAccess);
@@ -58,14 +62,23 @@ export function registerMailStewardshipRoutes({
   app.get("/v1/mail/status", async (context) =>
     context.json({ status: await stewardship.getStatus(context.get("principal").userId) }),
   );
-  app.post("/v1/mail/maintenance", async (context) =>
-    context.json(
-      await maintenance.maintain(
-        context.get("principal").userId,
-        await parseOptionalBody(context, maintenanceRequestSchema),
-      ),
-    ),
-  );
+  // Mail has no start/resume split: every request begins or resumes one turn, so every
+  // response carries the memory section.
+  app.post("/v1/mail/maintenance", async (context) => {
+    const principal = context.get("principal");
+    const result = await maintenance.maintain(
+      principal.userId,
+      await parseOptionalBody(context, maintenanceRequestSchema),
+    );
+    const memory =
+      (await workflowMemory?.(principal, "mail", {
+        requestId: context.get("requestId"),
+        method: context.req.method,
+        path: context.req.path,
+        status: 200,
+      })) ?? null;
+    return context.json({ ...result, memory });
+  });
   app.get("/v1/mail/maintenance/:id", async (context) =>
     context.json({
       run: await maintenance.getRun(

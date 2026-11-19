@@ -97,6 +97,15 @@ import { createFinanceSmsAcknowledgementDispatcher } from "./finance-sms-acknowl
 import { createFinanceStatusService } from "./finance-status-service.js";
 import { createGoalsService } from "./goals-service.js";
 import { createGooglePubSubAuth, GooglePubSubAuthError } from "./google-pubsub-auth.js";
+import { createKnowledgeContextService } from "./knowledge/context-service.js";
+import { createKnowledgeCoreService } from "./knowledge/core-service.js";
+import { createKnowledgeExportService } from "./knowledge/export-service.js";
+import { createKnowledgeLifecycleService } from "./knowledge/lifecycle-service.js";
+import { createKnowledgePurgeService } from "./knowledge/purge-service.js";
+import { createKnowledgeRecordService } from "./knowledge/record-service.js";
+import { createKnowledgeSearchService } from "./knowledge/search-service.js";
+import { createKnowledgeTagService } from "./knowledge/tag-service.js";
+import { createKnowledgeWorkflowMemory } from "./knowledge/workflow-memory.js";
 import { createMailMaintenanceService } from "./mail-maintenance-service.js";
 import { createMailService } from "./mail-service.js";
 import { createMailStewardshipService } from "./mail-stewardship-service.js";
@@ -125,6 +134,7 @@ import { registerFinanceMaintenanceExecutionRoutes } from "./routes/finance-main
 import { registerFinanceOnboardingRoutes } from "./routes/finance-onboarding.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
+import { registerKnowledgeRoutes } from "./routes/knowledge.js";
 import { registerMailRoutes } from "./routes/mail.js";
 import { registerMailStewardshipRoutes } from "./routes/mail-stewardship.js";
 import { registerNativePushRoutes } from "./routes/native-push.js";
@@ -194,6 +204,7 @@ export type PersonalOsApp = Hono<AppEnv> & {
   dispatchDueFinanceMaintenance: () => Promise<void>;
   runTextingRecovery: () => Promise<void> | null;
   runFinanceNotifications: () => Promise<void> | null;
+  runKnowledgePurge: () => Promise<void>;
   dispatchNativePush: () => Promise<void> | null;
   quiesceTextingRecovery: () => void;
   superviseICloudMail: () => Promise<void>;
@@ -213,6 +224,9 @@ export type PersonalOsApp = Hono<AppEnv> & {
   }>;
 };
 
+// The purge runs well inside the daily guarantee for Trash retention.
+const knowledgePurgeIntervalMs = 6 * 60 * 60 * 1000;
+const knowledgePurgeBatchSize = 100;
 const auditQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) });
 const googleCallbackSchema = z.object({
   code: z.string().min(1).optional(),
@@ -537,9 +551,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
   });
   const financePlaybook = createFinancePlaybookService({ finances, now });
+  const knowledgeTags = createKnowledgeTagService({ db: dependencies.db, now });
   const assistant = createAssistantService({
     appBaseUrl: dependencies.config.appBaseUrl,
     db: dependencies.db,
+    knowledgeCore: createKnowledgeCoreService({ db: dependencies.db, now, tags: knowledgeTags }),
+    log: dependencies.log,
     now,
     profileRequiresApproval: (domain) => domain === "finances",
     validateProfileSources: async (
@@ -614,6 +631,15 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
     now,
   });
+  const knowledgePersistence = { db: dependencies.db, now };
+  const knowledgeRetrieval = {
+    db: dependencies.db,
+    now,
+    encryptionKey: dependencies.config.encryptionKey,
+  };
+  const knowledgePurge = createKnowledgePurgeService(knowledgePersistence);
+  let knowledgePurgedAt = Number.NEGATIVE_INFINITY;
+  let knowledgePurgeRunning = false;
   const goalService = createGoalsService({ db: dependencies.db, now });
   const maintenance = createWorkspaceMaintenanceService({ db: dependencies.db, now });
   const mailMaintenance = createMailMaintenanceService({
@@ -921,6 +947,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       allowHeaders: ["Content-Type", "Authorization", "X-Request-Id"],
       allowMethods: ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"],
       credentials: true,
+      exposeHeaders: ["X-Knowledge-Receipt-Version"],
       origin: dependencies.config.allowedOrigins,
     }),
   );
@@ -1264,6 +1291,13 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/mail/*", authenticate);
   app.use("/v1/goals/*", authenticate);
   app.use("/v1/goals", authenticate);
+  const authenticateKnowledge: MiddlewareHandler<AppEnv> = async (context, next) => {
+    context.header("Cache-Control", "no-store");
+    return authenticate(context, next);
+  };
+  // Hono's `/v1/knowledge/*` also matches the collection itself; one registration authenticates
+  // each request once.
+  app.use("/v1/knowledge/*", authenticateKnowledge);
   app.use("/v1/rituals", authenticate);
   app.use("/v1/rituals/*", authenticate);
   app.use("/v1/motives/*", authenticate);
@@ -1563,6 +1597,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     mutationContext,
     workItems: agentAccessWorkItems,
   });
+  const knowledgeContext = createKnowledgeContextService(knowledgeRetrieval);
+  // A memory failure never fails maintenance: the section reads as null and is logged.
+  const workflowMemory = createKnowledgeWorkflowMemory({
+    context: knowledgeContext,
+    log: dependencies.log,
+  });
   registerMailRoutes({ app, db: dependencies.db, mail, mutationContext });
   registerMailStewardshipRoutes({
     app,
@@ -1570,6 +1610,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     maintenance: mailMaintenance,
     mutationContext,
     stewardship: mailStewardship,
+    workflowMemory,
   });
 
   registerAssistantRoutes({
@@ -1581,6 +1622,15 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     mutationContext,
   });
 
+  registerKnowledgeRoutes({
+    app,
+    knowledge: createKnowledgeRecordService(knowledgePersistence),
+    lifecycle: createKnowledgeLifecycleService(knowledgePersistence),
+    search: createKnowledgeSearchService(knowledgeRetrieval),
+    context: knowledgeContext,
+    export: createKnowledgeExportService(knowledgeRetrieval),
+    tags: knowledgeTags,
+  });
   registerGoalsRoutes({ app, goals: goalService, mutationContext });
   registerRitualRoutes({
     app,
@@ -1613,6 +1663,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     financeStatus,
     finances,
     mutationContext,
+    workflowMemory,
   });
 
   registerFinanceConversationRoutes({ app, conversation: financeConversation });
@@ -1672,7 +1723,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
 
   app.get("/v1/audit", async (context) => {
     const query = auditQuerySchema.parse(context.req.query());
-    return context.json({ events: await audit.list(context.get("principal").userId, query.limit) });
+    return context.json({ events: await audit.list(context.get("principal"), query.limit) });
   });
 
   async function sendEmailVerification(emailAddress: string, userId: string): Promise<void> {
@@ -1702,6 +1753,30 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     },
     runFinanceNotifications() {
       return financeNotificationRuntime.run();
+    },
+    /** Purges memory past its Trash retention at most every six hours. A failed pass retries
+     * on the next scheduler tick. */
+    async runKnowledgePurge() {
+      const startedAt = now().getTime();
+      // One pass at a time: a tick that arrives while the previous pass runs leaves it alone.
+      if (knowledgePurgeRunning || startedAt - knowledgePurgedAt < knowledgePurgeIntervalMs) return;
+      knowledgePurgeRunning = true;
+      try {
+        const signal = dependencies.runtimeLifecycle?.signal;
+        for (let batch = 0; batch < 10 && !signal?.aborted; batch++) {
+          const { selected } = await knowledgePurge.purgeExpired({
+            limit: knowledgePurgeBatchSize,
+            ...(signal ? { signal } : {}),
+          });
+          // A short selection means nothing past retention remained when this batch began.
+          if (selected < knowledgePurgeBatchSize && !signal?.aborted) {
+            knowledgePurgedAt = startedAt;
+            break;
+          }
+        }
+      } finally {
+        knowledgePurgeRunning = false;
+      }
     },
     dispatchNativePush() {
       return nativePushRuntime.run();
@@ -1877,6 +1952,8 @@ function escapeHtml(value: string): string {
 }
 
 const oauthScopeLabels: Record<string, string> = {
+  "knowledge:read": "Read memory",
+  "knowledge:write": "Save memory",
   "mail:execute":
     "With review bypass enabled, send exact saved drafts, activate reviewed rules, reconcile delivery, and manage Mail stewardship and preferences. Combined Mail, Calendar, and Tasks execution grants also permit source sync and disconnection. Sending cannot be undone.",
   "finances:execute":
@@ -1910,6 +1987,17 @@ const oauthScopeLabels: Record<string, string> = {
   "tasks:read": "Read tasks",
   "tasks:write": "Create and manage tasks",
 };
+
+/** One consent line per scope, except that both memory scopes share one line. */
+function oauthConsentLines(scopes: string[]): string[] {
+  const bothMemory = scopes.includes("knowledge:read") && scopes.includes("knowledge:write");
+  return scopes.flatMap((scope) => {
+    if (bothMemory && scope === "knowledge:write") return [];
+    if (bothMemory && scope === "knowledge:read")
+      return ["Memory: read and save what nohmi knows about you"];
+    return [oauthScopeLabels[scope] ?? scope];
+  });
+}
 
 function oauthConsentPage({
   clientName,
@@ -2135,7 +2223,9 @@ function oauthConsentPage({
       </header>
       <section aria-labelledby="permissions-title" class="oauth-permissions">
         <h2 id="permissions-title">Requested access</h2>
-        <ul>${scopes.map((scope) => `<li>${escapeHtml(oauthScopeLabels[scope] ?? scope)}</li>`).join("")}</ul>
+        <ul>${oauthConsentLines(scopes)
+          .map((line) => `<li>${escapeHtml(line)}</li>`)
+          .join("")}</ul>
       </section>
       <form class="oauth-actions" method="post">
         ${Object.entries(fields)

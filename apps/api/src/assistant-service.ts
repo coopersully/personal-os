@@ -20,6 +20,8 @@ import {
   type CreateAttentionItemInput,
   type DomainProfile,
   featureAccessPolicies,
+  type KnowledgeCore,
+  knowledgeMemoryUnavailable,
   type PersonalOsAgentContext,
   type UpdateAttentionItemInput,
   type UpsertDomainProfileInput,
@@ -30,12 +32,16 @@ import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
 import {
+  type KnowledgeWorkflowRequest,
+  knowledgeFailureFields,
+} from "./knowledge/workflow-memory.js";
+import {
   auditAttentionItemMetadata,
   auditDomainProfileMetadata,
   domainProfileChangedFields,
   serializeAttentionItem,
 } from "./serialization.js";
-import type { Principal } from "./types.js";
+import type { Principal, RequestLog } from "./types.js";
 import { requireWorkspaceExecution } from "./workspace-execution.js";
 
 type MutationContext = { principal: Principal; requestId: string };
@@ -148,12 +154,17 @@ const setupRecipes: Record<AssistantDomain, SetupRecipe> = {
 export function createAssistantService({
   appBaseUrl = "http://localhost",
   db,
+  knowledgeCore,
+  log,
   now,
   profileRequiresApproval,
   validateProfileSources,
 }: {
   appBaseUrl?: string;
   db: Database;
+  /** Builds the session-start memory section for callers holding `knowledge:read`. */
+  knowledgeCore: { build(principal: Principal): Promise<KnowledgeCore> };
+  log?: ((entry: RequestLog) => void) | undefined;
   now: () => Date;
   profileRequiresApproval: (domain: AssistantDomain) => boolean;
   validateProfileSources: (
@@ -273,9 +284,33 @@ export function createAssistantService({
     };
   }
 
+  /**
+   * Memory is optional at session start: a failed core read is logged without its message and
+   * the context goes out with identity and readiness and memory marked `unavailable`. Without
+   * `knowledge:read` the section is omitted.
+   */
+  async function sessionMemory(principal: Principal, request: KnowledgeWorkflowRequest) {
+    if (!principal.scopes.has("knowledge:read")) return undefined;
+    const startedAt = performance.now();
+    try {
+      return await knowledgeCore.build(principal);
+    } catch (error) {
+      log?.({
+        event: "knowledge_core_failed",
+        ...knowledgeFailureFields(error),
+        durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
+        ...request,
+      });
+      return knowledgeMemoryUnavailable;
+    }
+  }
+
   return {
-    async getContext(principal: Principal): Promise<PersonalOsAgentContext> {
-      const [user, readiness] = await Promise.all([
+    async getContext(
+      principal: Principal,
+      request: KnowledgeWorkflowRequest,
+    ): Promise<PersonalOsAgentContext> {
+      const [user, readiness, memory] = await Promise.all([
         db
           .select({ displayName: users.displayName, planningTimezone: users.planningTimezone })
           .from(users)
@@ -283,6 +318,7 @@ export function createAssistantService({
           .limit(1)
           .then(([record]) => record),
         getSetupStatus(principal),
+        sessionMemory(principal, request),
       ]);
       if (!user) throw new AppError("not_found", "The nohmi account was not found.");
       const link = (path: string) => new URL(path, appBaseUrl).href;
@@ -306,6 +342,7 @@ export function createAssistantService({
           recovery: link("/settings?section=connections"),
           today: link("/today"),
         },
+        ...(memory ? { memory } : {}),
         readiness,
         time: { timestamp, timezone: user.planningTimezone },
       };

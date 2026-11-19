@@ -6,6 +6,7 @@ import { localDateAt, localDateToIso } from "@personal-os/domain";
 import { createApp, type PersonalOsApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { financeReconciliationDiagnostic } from "./finance-reconciliation-errors.js";
+import { knowledgePurgeFailureLine } from "./knowledge/purge-service.js";
 import { qaFixtureClockEnabled, refreshQaFinanceFixtures } from "./qa-fixture-clock.js";
 import {
   closeNodeHttpServer,
@@ -55,6 +56,7 @@ runtimeLifecycle.startBackgroundTask("startup-native-push", async () => {
 });
 const scheduler = setInterval(() => {
   runtimeLifecycle.startBackgroundTask("local-demo-fixtures", refreshLocalDemo);
+  runtimeLifecycle.startBackgroundTask("knowledge-purge", dispatchKnowledgePurge);
   runtimeLifecycle.startBackgroundTask("scheduled-connector-sync", async () => {
     await app.syncDueConnectors().catch(() => {
       process.stderr.write("[personal-os] scheduled connector sync failed\n");
@@ -107,6 +109,7 @@ runtimeLifecycle.startBackgroundTask("startup-finance-maintenance", dispatchFina
 runtimeLifecycle.startBackgroundTask("startup-finance-backfill", dispatchFinanceBackfill);
 runtimeLifecycle.startBackgroundTask("startup-texting-recovery", dispatchTextingRecovery);
 runtimeLifecycle.startBackgroundTask("startup-finance-notifications", dispatchFinanceNotifications);
+runtimeLifecycle.startBackgroundTask("knowledge-purge", dispatchKnowledgePurge);
 runtimeLifecycle.startBackgroundTask(
   "startup-finance-setup-integrity",
   dispatchFinanceSetupIntegrity,
@@ -171,6 +174,13 @@ async function dispatchTextingRecovery(): Promise<void> {
       process.stderr.write(`[personal-os] Texting recovery failed: ${String(error)}\n`);
       throw error;
     });
+}
+
+async function dispatchKnowledgePurge(): Promise<void> {
+  await app.runKnowledgePurge().catch((error: unknown) => {
+    process.stderr.write(knowledgePurgeFailureLine(error));
+    throw new Error("Memory Trash purge pass failed.");
+  });
 }
 
 async function dispatchFinanceSetupIntegrity(): Promise<void> {

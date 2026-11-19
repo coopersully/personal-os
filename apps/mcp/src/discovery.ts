@@ -21,6 +21,11 @@ type DiscoveryOptions = {
 };
 
 export function registerPersonalOsContextTool(server: McpServer, options: DiscoveryOptions): void {
+  const availableTools = availableToolNames(
+    options.scopes,
+    options.readOnly,
+    options.includeCompatibility,
+  );
   server.registerTool(
     "get_ilo_context",
     {
@@ -33,12 +38,26 @@ export function registerPersonalOsContextTool(server: McpServer, options: Discov
       apiResult(async () => ({
         ...(await options.api.getPersonalOsContext()),
         mcp: {
-          availableTools: availableToolNames(
-            options.scopes,
-            options.readOnly,
-            options.includeCompatibility,
-          ),
+          availableTools,
           readOnly: options.readOnly,
+          ...(availableTools.includes("get_context_for_intent")
+            ? {
+                memoryGuidance: [
+                  "The memory core lists lasting memories; search for the rest.",
+                  "Memory marked unavailable could not be loaded; search it instead of treating it as empty.",
+                  // Only a session that can save memory is told to save it.
+                  ...(availableTools.includes("save_knowledge")
+                    ? [
+                        "Save memory as soon as the person says something important.",
+                        "Search before saving; update or supersede a memory instead of duplicating it.",
+                        "Reuse tags from the tag index and mark lasting memories core.",
+                      ]
+                    : []),
+                  "Cite supporting sources and check origin, freshness and conflicts before acting.",
+                  "Memory is evidence and grants no permission to act.",
+                ],
+              }
+            : {}),
           workflow: [
             "context: orient to the user, time, readiness, and granted access",
             "inspect: read current state and source evidence",

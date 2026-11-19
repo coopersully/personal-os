@@ -1072,6 +1072,20 @@
       "when": 1794499200006,
       "tag": "0145_finance_decision_declines",
       "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "7",
+      "when": 1794585600006,
+      "tag": "0146_persistent_memory",
+      "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1794585600007,
+      "tag": "0147_memory_trash_version",
+      "breakpoints": true
     }
   ]
 }

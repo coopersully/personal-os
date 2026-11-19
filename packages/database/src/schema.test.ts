@@ -539,6 +539,8 @@ describe("database schema contracts", () => {
       "0143_finance_budget_start_impact",
       "0144_finance_batch_approvals",
       "0145_finance_decision_declines",
+      "0146_persistent_memory",
+      "0147_memory_trash_version",
     ]);
   });
 
@@ -1284,6 +1286,32 @@ describe("database schema contracts", () => {
     expect(checkpointMigration).toContain('CREATE TABLE "finance_setup_backfill_state"');
     expect(checkpointMigration).toContain('"categories_complete" boolean DEFAULT false NOT NULL');
     expect(checkpointMigration).toContain('"profiles_complete" boolean DEFAULT false NOT NULL');
+  });
+
+  it("indexes memory sources by record and links by related record in the schema and 0147", async () => {
+    const indexColumns = (table: PgTable, name: string) =>
+      getTableConfig(table)
+        .indexes.find((index) => index.config.name === name)
+        ?.config.columns.map((column) => ("name" in column ? column.name : undefined));
+    expect(
+      indexColumns(requiredTable("knowledgeSources"), "knowledge_sources_owner_record_idx"),
+    ).toEqual(["user_id", "record_id"]);
+    expect(
+      indexColumns(
+        requiredTable("knowledgeRelationships"),
+        "knowledge_relationships_owner_related_idx",
+      ),
+    ).toEqual(["user_id", "related_record_id"]);
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0147_memory_trash_version.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain(
+      "CREATE INDEX knowledge_sources_owner_record_idx ON knowledge_sources (user_id, record_id);",
+    );
+    expect(migrationSql).toContain(
+      "CREATE INDEX knowledge_relationships_owner_related_idx ON knowledge_relationships (user_id, related_record_id);",
+    );
   });
 
   it("keeps durable Mail work claims and migration indexes aligned", async () => {

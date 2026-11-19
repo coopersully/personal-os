@@ -1395,6 +1395,15 @@ describe("domain schemas", () => {
         scopes: ["finances:maintain"],
       }).scopes,
     ).toEqual(["finances:maintain"]);
+    expect(() =>
+      createAccessTokenInputSchema.parse({ name: "Memory writer", scopes: ["knowledge:write"] }),
+    ).toThrow("knowledge:read");
+    expect(
+      createAccessTokenInputSchema.parse({
+        name: "Memory agent",
+        scopes: ["knowledge:read", "knowledge:write"],
+      }).scopes,
+    ).toEqual(["knowledge:read", "knowledge:write"]);
     const brief = dailyBriefSchema.parse({
       allDay: [],
       anytime: [],

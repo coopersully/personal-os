@@ -641,8 +641,11 @@ describe("Agent access", () => {
       expect.arrayContaining(["Mail permissions", "Finances permissions", "Tasks permissions"]),
     );
     const switches = screen.getAllByRole("switch").map((item) => item.getAttribute("aria-label"));
-    expect(switches).toHaveLength(24);
+    expect(switches).toHaveLength(26);
     expect(switches).toEqual(expect.arrayContaining(["Read mail", "Manage mail", "Read tasks"]));
+    expect(headings()).toContain("Memory permissions");
+    expect(switches).toEqual(expect.arrayContaining(["Read memory", "Save memory"]));
+    inGroup("Memory: read and save what nohmi knows about you");
     expect(switches.filter((label) => label?.includes(":read"))).toEqual([]);
     // No switch name runs to a paragraph; conditions sit under the name instead.
     expect(Math.max(...switches.map((label) => label?.length ?? 0))).toBeLessThan(60);

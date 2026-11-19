@@ -7037,3 +7037,329 @@ export const financeDecisionDeclines = pgTable(
     check("finance_decision_decline_owner", sql`${table.declinedBy} = ${table.userId}`),
   ],
 );
+
+/** Stable account-owned knowledge identity; content lives in immutable revisions. */
+export const knowledgeRecords = pgTable(
+  "knowledge_records",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** When the current revision was written; record-state changes (tags, trash) leave it. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Trash is a record state, not a revision status; all three columns move together. */
+    trashedAt: timestamp("trashed_at", { withTimezone: true }),
+    trashGroupId: uuid("trash_group_id"),
+    statusBeforeTrash: text("status_before_trash"),
+    /** Counts every Trash and restore transition, so Delete now confirms one exact Trash state. */
+    trashVersion: integer("trash_version").notNull().default(0),
+    /** The latest content revision was written by the person, or the person confirmed it. */
+    ownerHeld: boolean("owner_held").notNull().default(false),
+    /** Person-only override; `blocked` hides the record from every agent read. */
+    agentAccess: text("agent_access").$type<"allowed" | "blocked">().notNull().default("allowed"),
+    core: boolean("core").notNull().default(false),
+    lastConfirmedAt: timestamp("last_confirmed_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("knowledge_records_owner_id_idx").on(table.userId, table.id),
+    check("knowledge_records_agent_access", sql`${table.agentAccess} IN ('allowed', 'blocked')`),
+    check("knowledge_records_trash_version", sql`${table.trashVersion} >= 0`),
+    check(
+      "knowledge_records_status_before_trash",
+      sql`${table.statusBeforeTrash} IN ('proposed', 'active', 'disputed', 'superseded', 'archived', 'expired')`,
+    ),
+    index("knowledge_records_trashed_idx")
+      .on(table.trashedAt)
+      .where(sql`${table.trashedAt} IS NOT NULL`),
+    check(
+      "knowledge_records_trash_state",
+      sql`(${table.trashedAt} IS NULL) = (${table.trashGroupId} IS NULL) AND (${table.trashedAt} IS NULL) = (${table.statusBeforeTrash} IS NULL)`,
+    ),
+  ],
+);
+export const knowledgeRevisions = pgTable(
+  "knowledge_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    revision: integer("revision").notNull(),
+    snapshot: jsonb("snapshot")
+      .$type<import("@personal-os/domain").KnowledgeRecordSnapshot>()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("knowledge_revisions_owner_record_revision_idx").on(
+      table.userId,
+      table.recordId,
+      table.revision,
+    ),
+    foreignKey({
+      columns: [table.userId, table.recordId],
+      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
+    }).onDelete("cascade"),
+  ],
+);
+export const knowledgeSources = pgTable(
+  "knowledge_sources",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    source: jsonb("source").$type<import("@personal-os/domain").KnowledgeSource>().notNull(),
+  },
+  (table) => [
+    index("knowledge_sources_owner_record_idx").on(table.userId, table.recordId),
+    foreignKey({
+      columns: [table.userId, table.recordId],
+      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
+    }).onDelete("cascade"),
+  ],
+);
+export const knowledgeRelationships = pgTable(
+  "knowledge_relationships",
+  {
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    relatedRecordId: uuid("related_record_id").notNull(),
+  },
+  (table) => [
+    uniqueIndex("knowledge_relationships_pair_idx").on(
+      table.userId,
+      table.recordId,
+      table.relatedRecordId,
+    ),
+    index("knowledge_relationships_owner_related_idx").on(table.userId, table.relatedRecordId),
+    foreignKey({
+      columns: [table.userId, table.recordId],
+      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId, table.relatedRecordId],
+      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
+    }).onDelete("cascade"),
+  ],
+);
+/** Owner-scoped canonical memory tags. A merged tag keeps its row so undo can restore it. */
+export const knowledgeTags = pgTable(
+  "knowledge_tags",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("knowledge_tags_owner_name_idx").on(table.userId, table.name),
+    uniqueIndex("knowledge_tags_owner_id_idx").on(table.userId, table.id),
+  ],
+);
+/** Record tags are record state, not revision content; purge removes them with the record. */
+export const knowledgeRecordTags = pgTable(
+  "knowledge_record_tags",
+  {
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    tagId: uuid("tag_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.recordId, table.tagId] }),
+    foreignKey({
+      columns: [table.userId, table.recordId],
+      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId, table.tagId],
+      foreignColumns: [knowledgeTags.userId, knowledgeTags.id],
+    }).onDelete("cascade"),
+    index("knowledge_record_tags_owner_tag_idx").on(table.userId, table.tagId),
+  ],
+);
+/**
+ * One merge of tag `from_name` into a canonical tag. `record_ids` carried `from` at merge time;
+ * `kept_into_record_ids` already carried the target too, so undo leaves the target on them.
+ * `carried_aliases` resolved to `from` before the merge and are restored to it on undo.
+ */
+export const knowledgeTagMerges = pgTable(
+  "knowledge_tag_merges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    fromName: text("from_name").notNull(),
+    intoTagId: uuid("into_tag_id").notNull(),
+    actorType: text("actor_type").$type<"user" | "agent">().notNull(),
+    actorId: uuid("actor_id").notNull(),
+    recordIds: uuid("record_ids").array().notNull(),
+    keptIntoRecordIds: uuid("kept_into_record_ids").array().notNull(),
+    /** Aliases of `from` this merge re-pointed to the target; undo points them back. */
+    carriedAliases: text("carried_aliases").array().notNull(),
+    mutationKey: uuid("mutation_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    undoMutationKey: uuid("undo_mutation_key"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    undoneAt: timestamp("undone_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("knowledge_tag_merges_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("knowledge_tag_merges_owner_key_idx").on(table.userId, table.mutationKey),
+    uniqueIndex("knowledge_tag_merges_owner_undo_key_idx").on(table.userId, table.undoMutationKey),
+    foreignKey({
+      columns: [table.userId, table.intoTagId],
+      foreignColumns: [knowledgeTags.userId, knowledgeTags.id],
+    }).onDelete("cascade"),
+    check("knowledge_tag_merges_actor_check", sql`${table.actorType} IN ('user', 'agent')`),
+    check(
+      "knowledge_tag_merges_undo_state",
+      sql`(${table.undoneAt} IS NULL) = (${table.undoMutationKey} IS NULL)`,
+    ),
+  ],
+);
+/** A merged tag name resolving to its canonical tag; never across owners. */
+export const knowledgeTagAliases = pgTable(
+  "knowledge_tag_aliases",
+  {
+    userId: uuid("user_id").notNull(),
+    alias: text("alias").notNull(),
+    tagId: uuid("tag_id").notNull(),
+    mergeId: uuid("merge_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.alias] }),
+    foreignKey({
+      columns: [table.userId, table.tagId],
+      foreignColumns: [knowledgeTags.userId, knowledgeTags.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId, table.mergeId],
+      foreignColumns: [knowledgeTagMerges.userId, knowledgeTagMerges.id],
+    }).onDelete("cascade"),
+  ],
+);
+/** Operational receipts retain hashes and references, never knowledge values. They outlive
+ * a purged record so a retried mutation stays content-free. */
+export const knowledgeReceipts = pgTable(
+  "knowledge_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    recordId: uuid("record_id").notNull(),
+    mutationKey: uuid("mutation_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    actorId: uuid("actor_id").notNull(),
+  },
+  (table) => [uniqueIndex("knowledge_receipts_owner_key_idx").on(table.userId, table.mutationKey)],
+);
+
+/** Content-free remains of a purged record, so references read as forgotten. */
+export const knowledgeTombstones = pgTable(
+  "knowledge_tombstones",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    recordId: uuid("record_id").notNull(),
+    trashedAt: timestamp("trashed_at", { withTimezone: true }).notNull(),
+    purgedAt: timestamp("purged_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.recordId] })],
+);
+
+/** Revision-keyed provenance projects legacy snapshots without altering their content. */
+export const knowledgeRevisionMetadata = pgTable(
+  "knowledge_revision_metadata",
+  {
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    revision: integer("revision").notNull(),
+    claimKey: text("claim_key"),
+    metadata: jsonb("metadata")
+      .$type<import("@personal-os/domain").KnowledgeRevisionMetadata>()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.recordId, table.revision] }),
+    foreignKey({
+      name: "knowledge_revision_metadata_revision_fk",
+      columns: [table.userId, table.recordId, table.revision],
+      foreignColumns: [
+        knowledgeRevisions.userId,
+        knowledgeRevisions.recordId,
+        knowledgeRevisions.revision,
+      ],
+    }).onDelete("cascade"),
+    index("knowledge_revision_metadata_owner_claim_idx").on(
+      table.userId,
+      sql`md5(${table.claimKey})`,
+    ),
+  ],
+);
+
+export const knowledgeOwnerEpochs = pgTable(
+  "knowledge_owner_epochs",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    epoch: bigint("epoch", { mode: "number" }).notNull(),
+  },
+  (table) => [check("knowledge_owner_epochs_positive", sql`${table.epoch} > 0`)],
+);
+
+/** A source can be a copied dependency of many revisions. Ordinary links are kept separately. */
+export const knowledgeDerivations = pgTable(
+  "knowledge_derivations",
+  {
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    revision: integer("revision").notNull(),
+    sourceRecordId: uuid("source_record_id").notNull(),
+    sourceRevision: integer("source_revision").notNull(),
+    kind: text("kind").$type<import("@personal-os/domain").KnowledgeDerivationKind>().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.userId,
+        table.recordId,
+        table.revision,
+        table.sourceRecordId,
+        table.sourceRevision,
+        table.kind,
+      ],
+    }),
+    foreignKey({
+      name: "knowledge_derivations_revision_fk",
+      columns: [table.userId, table.recordId, table.revision],
+      foreignColumns: [
+        knowledgeRevisions.userId,
+        knowledgeRevisions.recordId,
+        knowledgeRevisions.revision,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "knowledge_derivations_source_revision_fk",
+      columns: [table.userId, table.sourceRecordId, table.sourceRevision],
+      foreignColumns: [
+        knowledgeRevisions.userId,
+        knowledgeRevisions.recordId,
+        knowledgeRevisions.revision,
+      ],
+    }).onDelete("cascade"),
+    index("knowledge_derivations_owner_source_idx").on(table.userId, table.sourceRecordId),
+    check(
+      "knowledge_derivations_kind_check",
+      sql`${table.kind} IN ('source_record', 'entity_meaning', 'content_evidence', 'revision_proposal')`,
+    ),
+    check("knowledge_derivations_no_self", sql`${table.recordId} <> ${table.sourceRecordId}`),
+  ],
+);

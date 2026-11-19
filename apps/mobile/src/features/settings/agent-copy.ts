@@ -24,6 +24,8 @@ export const scopeLabels: Record<AccessScope, string> = {
   "finances:read": "Read sensitive financial accounts and activity",
   "finances:write": "Manage financial records, plans, and reviews",
   "finances:maintain": "Maintain Finances",
+  "knowledge:read": "Read memory",
+  "knowledge:write": "Save memory",
   "goals:read": "Read goals & motives",
   "goals:write": "Manage goals & motives",
   "tracking:read": "Read private ritual responses",
@@ -37,6 +39,12 @@ export const scopeLabels: Record<AccessScope, string> = {
   "texting:read": "Read text conversation",
   "texting:write": "Send text messages",
 };
+
+/** Spec §5.11 names the memory pair with one line; each switch keeps its short verb name. */
+export const memoryScopesSummary = "Memory: read and save what nohmi knows about you";
+export const memoryScopes: AccessScope[] = ["knowledge:read", "knowledge:write"];
+/** A line that explains a whole permission group, shown under its heading. */
+export const areaNotes: Partial<Record<string, string>> = { knowledge: memoryScopesSummary };
 
 const whenPolicyAllows = "Only when your review policy lets eligible work skip Reviews.";
 const sharedSources = "it can also sync or disconnect shared sources";
@@ -90,6 +98,7 @@ const areaLabels: Record<string, string> = {
   calendar: "Calendar",
   finances: "Finances",
   goals: "Goals & motives",
+  knowledge: "Memory",
   mail: "Mail",
   reminders: "Reminders",
   tasks: "Tasks",
@@ -107,6 +116,7 @@ const verbOrder = Object.keys(verbLabels);
 /** Permissions whose verb alone would overstate or misname what they allow. */
 const summaryOverrides: Record<string, string> = {
   "automations:write": "legacy access (inactive)",
+  "knowledge:write": "save",
   "texting:write": "send",
 };
 

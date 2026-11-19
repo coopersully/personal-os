@@ -8617,6 +8617,29 @@ describe.sequential("ilo API", () => {
     expect(consentPage).toContain('class="oauth-card"');
     expect(consentPage).toContain("Requested access");
     expect(consentPage).toContain('class="oauth-cancel"');
+    expect(consentPage).not.toContain("Memory:");
+    const defaultAuthorize = new URL(authorize);
+    defaultAuthorize.searchParams.delete("scope");
+    const defaultConsentPage = await (
+      await app.request(defaultAuthorize.pathname + defaultAuthorize.search, {
+        headers: { authorization: `Session ${oauthSessionToken}` },
+      })
+    ).text();
+    expect(
+      defaultConsentPage.match(/<li>Memory: read and save what nohmi knows about you<\/li>/g),
+    ).toHaveLength(1);
+    expect(defaultConsentPage).not.toContain("<li>Read memory</li>");
+    expect(defaultConsentPage).not.toContain("<li>Save memory</li>");
+    expect(defaultConsentPage).toMatch(/name="scope" value="[^"]*knowledge:read knowledge:write/);
+    const readOnlyMemory = new URL(authorize);
+    readOnlyMemory.searchParams.set("scope", "tasks:read knowledge:read");
+    const readOnlyMemoryPage = await (
+      await app.request(readOnlyMemory.pathname + readOnlyMemory.search, {
+        headers: { authorization: `Session ${oauthSessionToken}` },
+      })
+    ).text();
+    expect(readOnlyMemoryPage).toContain("<li>Read memory</li>");
+    expect(readOnlyMemoryPage).not.toContain("Memory: read and save");
     const approved = await app.request("/oauth/authorize", {
       body: new URLSearchParams(Object.fromEntries(authorize.searchParams)).toString(),
       headers: {

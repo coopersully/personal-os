@@ -2506,6 +2506,37 @@ describe("Personal OS MCP server", () => {
     }
   });
 
+  it("teaches saving memory only to sessions that can save it", async () => {
+    async function guidance(scopes: AccessScope[], readOnly = false) {
+      const server = createPersonalOsMcpServer({
+        api: mockApi() as unknown as PersonalOsApiClient,
+        readOnly,
+        scopes: new Set(scopes),
+        timeZone: "UTC",
+      });
+      const client = new Client({ name: "test", version: "1.0.0" });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      const context = await client.callTool({ arguments: {}, name: "get_ilo_context" });
+      await client.close();
+      await server.close();
+      return (context.structuredContent as { result: { mcp: { memoryGuidance?: string[] } } })
+        .result.mcp.memoryGuidance;
+    }
+    const saving = /save|saving|mark lasting/iu;
+
+    const writer = await guidance(["knowledge:read", "knowledge:write"]);
+    expect(writer).toEqual(expect.arrayContaining([expect.stringMatching(/^Save memory/u)]));
+    for (const reader of [
+      await guidance(["knowledge:read"]),
+      await guidance(["knowledge:read", "knowledge:write"], true),
+    ]) {
+      expect(reader).toEqual(expect.arrayContaining([expect.stringMatching(/memory core/u)]));
+      expect(reader?.filter((line) => saving.test(line))).toEqual([]);
+    }
+    expect(await guidance(["tasks:read"])).toBeUndefined();
+  });
+
   it("filters task discovery by scopes and read-only posture while keeping typed nohmi metadata", async () => {
     const api = mockApi();
     const server = createPersonalOsMcpServer({
@@ -2885,7 +2916,10 @@ describe("Personal OS MCP server", () => {
         readOnlyHint: true,
       },
     });
-    expect(tools.tools.find((tool) => tool.name === "maintain_mail")).toMatchObject({
+    const maintainMail = tools.tools.find((tool) => tool.name === "maintain_mail");
+    expect(maintainMail?.description).toMatch(/memory section/);
+    expect(maintainMail?.description).not.toMatch(/has no memory/);
+    expect(maintainMail).toMatchObject({
       _meta: {
         "ilo/domain": "mail",
         "ilo/policy": "approved_rule",

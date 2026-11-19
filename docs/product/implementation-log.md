@@ -1,5 +1,48 @@
 # nohmi — Implementation Log
 
+## 2026-11-18 — Agent-managed memory foundation (PR #419, not merged)
+
+- COO-166, COO-167 — Agents manage memory and the person is the override, per the
+  [November 15 design](../superpowers/specs/2026-11-15-persistent-memory-design.md). Agent saves
+  are active at once with 1-8 tags; inferences stay labeled `inferred`. Agents can revise,
+  supersede, dispute, archive, unarchive, restrict, raise sensitivity and merge tags. An agent
+  change to a memory the person holds becomes a linked proposal and a visible conflict.
+- Memory is stored per owner with immutable revisions, source attribution, links, exact-retry
+  receipts and audit rows that carry no memory values. Workspace and source grants are checked
+  again on every read and retry, so a narrowed or revoked credential loses access at once.
+- `get_ilo_context` carries a session-start memory core of up to 4 KiB: `core` memories, the tag
+  index and counts, with truncation reported. `maintain_finances` starts and every `maintain_mail`
+  response carry a memory section of up to 16 KiB for that workspace. Sensitive memory is left out
+  of both but is returned by search and reads, labeled sensitive. Memory the person blocks is
+  invisible to agents on every path.
+- Purposes are optional ranking hints. A memory derived from others takes the narrowest workspace
+  and highest sensitivity of its live sources at read time; the person is never denied their own
+  memory.
+- Forgetting is now Trash: a memory and its derived copies leave every agent path at once, can be
+  restored for 30 days, and are then purged, or purged at once with Delete now, to a content-free
+  tombstone. A purge pass runs every six hours.
+- `knowledge:read` and `knowledge:write` are default scopes for new OAuth consents and personal
+  access tokens. Migrations `0146_persistent_memory` and `0147_memory_trash_version` create the
+  storage (0147 adds the Trash version column, its check and two lookup indexes), and 0146
+  backfills both scopes onto every live agent credential holding a workspace scope, with an
+  audit row each. A credential the previous API process issues during the release, after the
+  migration, has no memory until the person re-authorizes that connection. Consent and Agents
+  settings on web and iPhone show the memory line.
+- MCP tool descriptions teach agents to save as soon as something important is said, search
+  before saving, reuse tags, mark lasting memories `core`, update instead of duplicating, and check
+  origin, freshness and conflicts before acting. Memory grants no permission.
+- Removed: the three-selection learning rule and its routes, full-erasure forgetting with its
+  deletion-ledger dependency, and `explain_context`.
+- Not shipped: the web and iPhone Memory screens (PR 2 and PR 3, COO-168); removing only the
+  memory scopes from a connection (today the person revokes and reissues it); vector search;
+  automatic learning; `explain_context` and context-use records; an external deletion record that
+  survives a backup restore.
+- Verified: real PostgreSQL integration tests for the migration and backfill, trash and purge,
+  tags, the core, workflow sections and owner isolation, and a registered MCP, client and API test
+  in which one agent saves a core memory, a second agent with its own token finds it in the core
+  and by tag, and the person's Trash removes it from the second agent's next search. Not merged,
+  deployed or observed in production.
+
 ## 2026-11-18 — iPhone refinement of the remaining slices (local candidate)
 
 Corrections to the iPhone work in the entry below, on the same branch.

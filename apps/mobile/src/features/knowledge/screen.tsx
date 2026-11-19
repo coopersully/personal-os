@@ -199,7 +199,6 @@ function PrivateMemory({ api, access, initial, list, setList, revalidate, retain
   const [destination, setDestination] = useState<Destination>(initial);
   const [dirty, setDirty] = useState(false);
   const commands = useMemoryCommands(access.capture, access.recover);
-  const mutationKey = useMutationKey();
   const back: BackHandler = useRef(undefined);
   const close = () => {
     setDirty(false);
@@ -248,34 +247,7 @@ function PrivateMemory({ api, access, initial, list, setList, revalidate, retain
             ...editorDismissOptions({ label: dirty ? "Cancel" : "Close", onPress: closeAdd }),
           }}
         />
-        <MemoryEditor
-          mode="add"
-          disabled={commands.busy}
-          onDirty={() => setDirty(true)}
-          onInvalid={() => toast.error("Check the memory fields and try again.")}
-          onSave={(input) => {
-            if ("action" in input) return;
-            const { mutationKey: _key, ...body } = input;
-            void commands.run({
-              loading: "Saving memory…",
-              failure: "Couldn’t confirm this memory was saved. You can retry the same entry.",
-              request: () => api.saveKnowledge({ ...input, mutationKey: mutationKey(body) }),
-              complete: (value) => {
-                revalidate(
-                  value.outcome === "readable"
-                    ? { kind: "detail", id: value.record.id }
-                    : listDestination,
-                );
-                return {
-                  message:
-                    value.outcome === "readable" ? "Memory saved." : "This memory is unavailable.",
-                };
-              },
-              retain,
-            });
-          }}
-          layout={(fields, save) => <MemoryBody save={save}>{fields}</MemoryBody>}
-        />
+        <AddMemory {...{ api, commands, revalidate, retain }} onDirty={() => setDirty(true)} />
       </>
     );
   }
@@ -289,6 +261,50 @@ function PrivateMemory({ api, access, initial, list, setList, revalidate, retain
         onTags={() => setDestination({ kind: "tags" })}
       />
     </>
+  );
+}
+
+/** One Add session. It owns the mutation keys, so leaving the editor starts the next one fresh. */
+function AddMemory({
+  api,
+  commands,
+  revalidate,
+  retain,
+  onDirty,
+}: Pick<PrivateProps, "api" | "revalidate" | "retain"> & {
+  commands: ReturnType<typeof useMemoryCommands>;
+  onDirty: () => void;
+}) {
+  const mutationKey = useMutationKey();
+  return (
+    <MemoryEditor
+      mode="add"
+      disabled={commands.busy}
+      onDirty={onDirty}
+      onInvalid={() => toast.error("Check the memory fields and try again.")}
+      onSave={(input) => {
+        if ("action" in input) return;
+        const { mutationKey: _key, ...body } = input;
+        void commands.run({
+          loading: "Saving memory…",
+          failure: "Couldn’t confirm this memory was saved. You can retry the same entry.",
+          request: () => api.saveKnowledge({ ...input, mutationKey: mutationKey(body) }),
+          complete: (value) => {
+            revalidate(
+              value.outcome === "readable"
+                ? { kind: "detail", id: value.record.id }
+                : listDestination,
+            );
+            return {
+              message:
+                value.outcome === "readable" ? "Memory saved." : "This memory is unavailable.",
+            };
+          },
+          retain,
+        });
+      }}
+      layout={(fields, save) => <MemoryBody save={save}>{fields}</MemoryBody>}
+    />
   );
 }
 
@@ -503,6 +519,7 @@ function MemoryList({ api, access, list, setList, open, onAdd, onTags }: ListPro
   );
 }
 
+const partialText = "Some memories couldn’t be shown right now.";
 const emptyText: Record<ViewMode, string> = {
   all: "No memories yet. Agents save what you tell them, and you can add your own.",
   conflicts: "No conflicts. When an agent proposes a change to a memory you hold, it shows here.",
@@ -587,14 +604,14 @@ function MemoryListResults({
             {initial.state === "unavailable"
               ? "Memory is unavailable right now."
               : initial.state === "partial"
-                ? "Some memories couldn’t be shown right now."
+                ? partialText
                 : filtered
                   ? "No memories match."
                   : emptyText[view]}
           </MemoryText>
         ))}
       {records.length > 0 && pages.some((result) => result.state === "partial") && (
-        <MemoryText>Some memories couldn’t be shown right now.</MemoryText>
+        <MemoryText>{partialText}</MemoryText>
       )}
       {cursor && (
         <SettingsActionRow

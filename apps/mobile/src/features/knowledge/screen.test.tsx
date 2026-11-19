@@ -1095,6 +1095,16 @@ it("returning_to_an_unconfirmed_entry_reuses_its_key", async () => {
   const [a, b, again] = h.api.saveKnowledge.mock.calls.map(([input]) => input.mutationKey);
   expect(b).not.toBe(a);
   expect(again).toBe(a);
+
+  // The keys belong to this Add session: a new one starts with none.
+  nativeBack();
+  pressAlert("Discard");
+  fireEvent.click(await screen.findByRole("button", { name: "Add memory" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Fact" }), { target: { value: "x" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Value" }), { target: { value: "A" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Tags" }), { target: { value: "z" } });
+  await save(4);
+  expect(h.api.saveKnowledge.mock.calls[3]?.[0].mutationKey).not.toBe(a);
 });
 
 it("merge_and_undo_tag", async () => {

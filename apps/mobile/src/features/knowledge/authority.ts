@@ -144,9 +144,10 @@ export function useMemoryCommands(capture: () => Current, recover?: MemoryAccess
 }
 
 /**
- * A new memory keeps one key per body it submitted, so an uncertain save never duplicates it:
- * returning to an earlier entry after trying another replays the earlier one's receipt, and a
- * different body always gets a different key.
+ * A new memory keeps one key per body it submitted, for as long as the component that calls
+ * this stays mounted (one Add session), so an uncertain save never duplicates it: returning to
+ * an earlier entry after trying another replays the earlier one's receipt, and a different body
+ * always gets a different key.
  */
 export function useMutationKey() {
   const keys = useRef(new Map<string, string>());

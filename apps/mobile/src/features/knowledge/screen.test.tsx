@@ -774,6 +774,43 @@ it("native_owner_reviews_and_corrects", async () => {
   expect(screen.queryByText("Revision 2")).toBeNull();
 });
 
+it("a_tag_only_edit_keeps_the_agents_sources", async () => {
+  records.set(
+    id,
+    memory({
+      ownerHeld: false,
+      author: { actorId: otherId, actorType: "agent" },
+      origin: "inferred",
+    }),
+  );
+  setup();
+  await openMemory();
+  menu("Edit memory");
+  fireEvent.change(screen.getByRole("textbox", { name: "Tags" }), {
+    target: { value: "communication, writing" },
+  });
+  press("Save changes");
+  await waitFor(() =>
+    expect(lastUpdate()).toMatchObject({ action: "revise", tags: ["communication", "writing"] }),
+  );
+  // No evidence: the API keeps the agent's wording and session references.
+  expect(lastUpdate()).not.toHaveProperty("evidence");
+  await expectToast("Saving memory…", "success", "Memory saved.");
+
+  // Changing the claim itself states it in the person's words.
+  await screen.findByRole("button", { name: "Revision history" });
+  menu("Edit memory");
+  fireEvent.change(screen.getByRole("textbox", { name: "Value" }), { target: { value: "prose" } });
+  press("Save changes");
+  await waitFor(() =>
+    expect(lastUpdate()).toMatchObject({
+      action: "revise",
+      evidence: [{ type: "statement", wording: expect.stringContaining("prose") }],
+    }),
+  );
+  expect(lastUpdate()).not.toHaveProperty("tags");
+});
+
 it("a_stale_edit_keeps_the_draft_and_reviews_the_latest_revision", async () => {
   setup();
   await openMemory();

@@ -159,11 +159,8 @@ export function MemoryEditor({
   const [invalid, setInvalid] = useState(false);
   const parsed = contentDraft(kind, draft, original);
   const tags = tagsDraft(tagText, record);
-  const unchanged =
-    mode === "edit" &&
-    parsed.success &&
-    JSON.stringify(parsed.data) === JSON.stringify(original) &&
-    !tags.changed;
+  const claimUnchanged = parsed.success && JSON.stringify(parsed.data) === JSON.stringify(original);
+  const unchanged = mode === "edit" && claimUnchanged && !tags.changed;
 
   function change(apply: () => void) {
     if (disabled) return;
@@ -186,7 +183,7 @@ export function MemoryEditor({
             replacementId: replacementId.trim(),
           })
         : parsed.success && tags.tags
-          ? claimInput(parsed.data, permissions, tags, mutationKey, identity)
+          ? claimInput(parsed.data, permissions, tags, mutationKey, identity, !claimUnchanged)
           : undefined;
     if (!input?.success) {
       setInvalid(true);
@@ -309,6 +306,9 @@ function claimInput(
   { tags, changed }: ReturnType<typeof tagsDraft>,
   mutationKey: string,
   identity: { recordId: string; expectedRevision: number; mutationKey: string } | null,
+  /** The person changed the claim itself. Evidence replaces a record's sources, so an edit
+   * that leaves the claim as it was (tags only) sends none and keeps the original sources. */
+  claimEdited: boolean,
 ) {
   const summary = memorySummary(content);
   const wording = `${summary.title}. ${summary.text}`;
@@ -321,7 +321,7 @@ function claimInput(
         ...identity,
         action: "revise",
         content,
-        ...(evidence.length ? { evidence } : {}),
+        ...(claimEdited && evidence.length ? { evidence } : {}),
         ...(changed ? { tags } : {}),
       })
     : knowledgeMutationInputSchema.safeParse({

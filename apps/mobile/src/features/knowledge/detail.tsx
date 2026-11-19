@@ -638,7 +638,7 @@ function RecordSession({
                         : "Kept your version.",
                     next: (result) => {
                       const target = kept(result);
-                      changed(target, target && memoryContent(baseline));
+                      changed(target, target ? memoryContent(baseline) : undefined);
                     },
                   },
                 )

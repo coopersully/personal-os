@@ -12,7 +12,7 @@ export async function shareMemoryPage(data: KnowledgePage, page: number, current
   if (!current()) return false;
   const file = new File(Paths.cache, `nohmi-memory-${page}-${randomUUID()}.json`);
   try {
-    file.write(JSON.stringify(data, null, 2));
+    await file.write(JSON.stringify(data, null, 2));
     if (!current()) return false;
     const result = await Share.share({ title: "nohmi memory export", url: file.uri });
     return current() && result.action === Share.sharedAction;

@@ -5,6 +5,8 @@ const h = vi.hoisted(() => ({
   platform: { OS: "ios" },
   share: vi.fn(),
   files: [] as { name: string; text?: string; exists: boolean; uri: string }[],
+  /** Each write settles when the test says so, as Expo's asynchronous File.write does. */
+  write: undefined as Promise<void> | undefined,
 }));
 vi.mock("expo-crypto", () => ({ randomUUID: () => "uuid" }));
 vi.mock("expo-file-system", () => ({
@@ -19,9 +21,10 @@ vi.mock("expo-file-system", () => ({
       this.uri = `file:///cache/${name}`;
       h.files.push(this);
     }
-    write(text: string) {
-      this.text = text;
+    async write(text: string) {
       this.exists = true;
+      await h.write;
+      this.text = text;
     }
     delete() {
       this.exists = false;
@@ -46,6 +49,7 @@ beforeEach(() => {
   h.platform.OS = "ios";
   h.files = [];
   h.share.mockReset();
+  h.write = undefined;
 });
 
 it("shares_one_export_page_as_a_file_and_removes_it", async () => {
@@ -72,4 +76,24 @@ it("a_dismissed_or_abandoned_share_reports_nothing_shared", async () => {
 it("sharing_is_unavailable_off_ios", () => {
   h.platform.OS = "android";
   expect(memoryShareAvailable()).toBe(false);
+});
+
+it("shares_only_after_the_file_is_written", async () => {
+  let written!: () => void;
+  h.write = new Promise((done) => (written = done));
+  h.share.mockResolvedValue({ action: "sharedAction" });
+  const shared = shareMemoryPage(data, 1, () => true);
+  await Promise.resolve();
+  expect(h.share).not.toHaveBeenCalled();
+  written();
+  await expect(shared).resolves.toBe(true);
+  expect(JSON.parse(h.files[0]?.text ?? "")).toEqual(data);
+});
+
+it("a_failed_write_rejects_without_opening_the_share_sheet", async () => {
+  h.write = Promise.reject(new Error("disk full"));
+  h.write.catch(() => {});
+  await expect(shareMemoryPage(data, 1, () => true)).rejects.toThrow("disk full");
+  expect(h.share).not.toHaveBeenCalled();
+  expect(h.files[0]?.exists).toBe(false);
 });

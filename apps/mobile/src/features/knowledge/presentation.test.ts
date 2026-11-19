@@ -124,6 +124,18 @@ it("lists_linked_memories_once_and_never_itself", () => {
     relatedRecordIds: [other],
   });
   expect(linkedMemoryIds(relationship)).toEqual([other]);
+  // An agent's inferred relationship names its ends inside the inference it carries.
+  const third = "3f4e5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a03";
+  const ends: KnowledgeRecord["content"] = {
+    kind: "relationship",
+    value: { subjectId: other, objectId: third, relationship: "sibling", direction: "directed" },
+  };
+  const inferred = record({
+    origin: "inferred",
+    content: inference(JSON.stringify(ends)),
+    claimKey: knowledgeClaimKey(null, ends),
+  });
+  expect(linkedMemoryIds(inferred)).toEqual([other, third]);
 });
 
 it("drafts_and_reads_typed_values", () => {

@@ -89,8 +89,9 @@ export function memoryDate(date: string) {
 /** Memories this one names, other than itself: its related records and relationship ends. */
 export function linkedMemoryIds(record: KnowledgeRecord) {
   const ids = [...record.relatedRecordIds];
-  if (record.content.kind === "relationship")
-    ids.push(record.content.value.subjectId, record.content.value.objectId);
+  // An agent's inferred relationship carries its ends inside the inference.
+  const content = memoryContent(record);
+  if (content.kind === "relationship") ids.push(content.value.subjectId, content.value.objectId);
   return [...new Set(ids.map((id) => id.toLowerCase()))].filter(
     (id) => id !== record.id.toLowerCase(),
   );

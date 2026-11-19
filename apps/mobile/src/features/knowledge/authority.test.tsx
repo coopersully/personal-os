@@ -38,3 +38,23 @@ it("a_refresh_replaced_by_a_newer_read_fails_silently", async () => {
   });
   expect(result.current.value).toBe("newer");
 });
+
+it("a_refresh_that_replaces_the_first_load_and_fails_offers_a_retry", async () => {
+  let fail!: (error: Error) => void;
+  const load = vi
+    .fn<(signal: AbortSignal) => Promise<string | undefined>>()
+    .mockReturnValueOnce(new Promise(() => {}))
+    .mockReturnValueOnce(new Promise((_, reject) => (fail = reject)));
+  const { result } = renderHook(() => useMemoryResource(load));
+  expect(result.current.loading).toBe(true);
+  let refreshed!: Promise<unknown>;
+  act(() => {
+    refreshed = result.current.refresh();
+  });
+  await act(async () => {
+    fail(new Error("offline"));
+    await expect(refreshed).rejects.toThrow("offline");
+  });
+  // Nothing was ever shown, so the failure leaves Retry rather than a spinner.
+  expect(result.current).toMatchObject({ loading: false, failed: true });
+});

@@ -73,9 +73,11 @@ export function MemoryTags({ api, access, retain, changed }: Props) {
       rejected: (error) => {
         if (statusOf(error) !== 409) return;
         const blocking = detailsOf(error).blockingMergeIds;
-        const later = aliases.find(
-          (entry) => Array.isArray(blocking) && blocking.includes(entry.mergeId),
-        );
+        // Only a later merge's refusal names blocking merges; an undo already done (or a reused
+        // key) is a 409 too, and undoing anything else would not help.
+        if (!Array.isArray(blocking))
+          return "This merge is no longer active. Refresh the tags to see its current state.";
+        const later = aliases.find((entry) => blocking.includes(entry.mergeId));
         return later
           ? `Undo the merge of #${later.alias} into #${later.name} first.`
           : "Undo the later merge of this tag first.";

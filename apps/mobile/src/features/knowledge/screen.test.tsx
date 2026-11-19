@@ -1120,12 +1120,23 @@ it("merge_and_undo_tag", async () => {
       expect.anything(),
     ),
   );
-  h.api.unmergeKnowledgeTags.mockRejectedValueOnce(conflict());
+  // A later merge this screen does not list is named generally.
+  h.api.unmergeKnowledgeTags.mockRejectedValueOnce(conflict({ blockingMergeIds: [otherId] }));
   await screen.findByRole("button", { name: "Undo merge of #relatives into #family" });
   press("Undo merge of #relatives into #family");
   await waitFor(() =>
     expect(h.toast.error).toHaveBeenCalledWith(
       "Undo the later merge of this tag first.",
+      expect.anything(),
+    ),
+  );
+  // A 409 without blocking merges (already undone, or a reused key) is not a later merge.
+  h.api.unmergeKnowledgeTags.mockRejectedValueOnce(conflict());
+  await screen.findByRole("button", { name: "Undo merge of #relatives into #family" });
+  press("Undo merge of #relatives into #family");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledWith(
+      "This merge is no longer active. Refresh the tags to see its current state.",
       expect.anything(),
     ),
   );

@@ -218,6 +218,11 @@ export function useMemoryResource<T>(load: (signal: AbortSignal) => Promise<T | 
       } catch (error) {
         // A newer read replaced this one, so its failure is not the person's to hear about.
         if (controller.signal.aborted) return;
+        // A refresh that replaced the first load leaves nothing on screen: offer Retry, not a
+        // spinner. Rows already shown stay.
+        setState((current) =>
+          current.value === undefined ? { loading: false, failed: true } : current,
+        );
         throw error;
       }
     },

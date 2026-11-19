@@ -10,18 +10,22 @@ import {
 } from "@personal-os/domain";
 import { randomUUID } from "expo-crypto";
 import { useState } from "react";
+import { View } from "react-native";
 import { FormSave } from "../../components/forms/form-save";
 import { Field, Section, ToggleRow } from "../goals/controls";
-import { MemoryChoice, MemoryText } from "./controls";
+import { SettingsActionRow } from "../settings/settings-row";
+import { MemoryChoice, MemoryNote, MemoryText } from "./controls";
 import {
   contentDraft,
   contentFields,
+  type DraftConflict,
   fieldDraft,
   type Kind,
   memoryContent,
   memoryKinds,
   memoryLabel,
   memorySummary,
+  rebaseClaim,
   valueTypes,
 } from "./presentation";
 
@@ -157,6 +161,30 @@ export function MemoryEditor({
   const [tagText, setTagText] = useState(record?.tags.join(", ") ?? "");
   const [dirty, setDirty] = useState(Boolean(initial));
   const [invalid, setInvalid] = useState(false);
+  // The revision the draft is based on, and the fields it and a newer one both changed.
+  const [base, setBase] = useState(record);
+  const [choices, setChoices] = useState<DraftConflict[]>([]);
+  if (record && base && record !== base) {
+    // The person accepted a newer revision while editing: carry the draft onto it.
+    if (mode !== "supersede") {
+      const claim = rebaseClaim(memoryContent(base), memoryContent(record), {
+        kind,
+        fields: draft,
+      });
+      const mine = tagsDraft(tagText, base);
+      const theirs = record.tags.join(", ");
+      const tagConflict =
+        mine.changed && tagsDraft(theirs, base).changed && tagsDraft(tagText, record).changed;
+      setKind(claim.kind);
+      setDraft(claim.fields);
+      if (!mine.changed) setTagText(theirs);
+      setChoices([
+        ...claim.conflicts,
+        ...(tagConflict ? [{ field: "tags", label: "Tags", mine: tagText, theirs }] : []),
+      ]);
+    }
+    setBase(record);
+  }
   const parsed = contentDraft(kind, draft, original);
   const tags = tagsDraft(tagText, record);
   const claimUnchanged = parsed.success && JSON.stringify(parsed.data) === JSON.stringify(original);
@@ -169,8 +197,22 @@ export function MemoryEditor({
     apply();
   }
 
+  /** Settles a field both versions changed: the person's value, or the newer revision's. */
+  function choose(conflict: DraftConflict, theirs: boolean) {
+    change(() => {
+      setChoices((current) => current.filter((entry) => entry.field !== conflict.field));
+      if (!theirs || !record) return;
+      if (conflict.field === "tags") setTagText(conflict.theirs);
+      else if (conflict.field === "claim") {
+        const content = memoryContent(record);
+        setKind(content.kind);
+        setDraft(fieldDraft(content));
+      } else setDraft((fields) => ({ ...fields, [conflict.field]: conflict.theirs }));
+    });
+  }
+
   function submit() {
-    if (disabled || !dirty || unchanged) return;
+    if (disabled || !dirty || unchanged || choices.length) return;
     const mutationKey = randomUUID();
     const identity = record
       ? { recordId: record.id, expectedRevision: record.revision, mutationKey }
@@ -197,6 +239,30 @@ export function MemoryEditor({
   const typed = kind === "fact" || kind === "preference";
   return layout(
     <>
+      {choices.length > 0 && record && (
+        <Section title="Choose what to keep">
+          {choices.map((conflict) => {
+            const label = conflict.label.toLowerCase();
+            return (
+              <View key={conflict.field}>
+                <MemoryNote>
+                  {`${conflict.label}\nYours: ${conflict.mine}\nRevision ${record.revision}: ${conflict.theirs}`}
+                </MemoryNote>
+                <SettingsActionRow
+                  label={`Keep my ${label}`}
+                  onPress={() => choose(conflict, false)}
+                  disabled={disabled}
+                />
+                <SettingsActionRow
+                  label={`Use the current ${label}`}
+                  onPress={() => choose(conflict, true)}
+                  disabled={disabled}
+                />
+              </View>
+            );
+          })}
+        </Section>
+      )}
       {mode === "supersede" ? (
         <Section title="Replacement">
           <Field
@@ -296,7 +362,7 @@ export function MemoryEditor({
         <MemoryText>Enter 1 to 8 tags, separated by commas.</MemoryText>
       )}
     </>,
-    <FormSave disabled={disabled || !dirty || unchanged} onPress={submit} />,
+    <FormSave disabled={disabled || !dirty || unchanged || choices.length > 0} onPress={submit} />,
   );
 }
 

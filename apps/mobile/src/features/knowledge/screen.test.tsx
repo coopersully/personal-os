@@ -832,6 +832,80 @@ it("a_stale_edit_keeps_the_draft_and_reviews_the_latest_revision", async () => {
   await waitFor(() => expect(lastUpdate()).toMatchObject({ expectedRevision: 3 }));
 });
 
+it("a_newer_revision_replaces_what_the_person_left_untouched", async () => {
+  setup();
+  await openMemory();
+  menu("Edit memory");
+  fireEvent.change(screen.getByRole("textbox", { name: "Tags" }), {
+    target: { value: "communication, writing" },
+  });
+  h.api.updateKnowledge.mockRejectedValueOnce(conflict({ current: base }));
+  press("Save changes");
+  await screen.findByText("You edited revision 1.");
+  // Another device changed the value; the person changed only the tags.
+  const preference = (value: string): KnowledgeRecord["content"] => ({
+    kind: "preference",
+    value: { subject: "owner", key: "communication_style", value: { type: "string", value } },
+  });
+  records.set(id, memory({ revision: 3, content: preference("numbered") }));
+  press("Load current revision");
+  await screen.findByText("Current revision 3");
+  press("Use this revision");
+  expect(screen.getByRole("textbox", { name: "Value" })).toHaveProperty("value", "numbered");
+  expect(screen.getByRole("textbox", { name: "Tags" })).toHaveProperty(
+    "value",
+    "communication, writing",
+  );
+  press("Save changes");
+  await waitFor(() =>
+    expect(lastUpdate()).toMatchObject({
+      expectedRevision: 3,
+      content: preference("numbered"),
+      tags: ["communication", "writing"],
+    }),
+  );
+});
+
+it("a_field_both_versions_changed_waits_for_the_persons_choice", async () => {
+  setup();
+  await openMemory();
+  menu("Edit memory");
+  fireEvent.change(screen.getByRole("textbox", { name: "Value" }), { target: { value: "prose" } });
+  h.api.updateKnowledge.mockRejectedValueOnce(conflict({ current: base }));
+  press("Save changes");
+  await screen.findByText("You edited revision 1.");
+  records.set(
+    id,
+    memory({
+      revision: 3,
+      content: {
+        kind: "preference",
+        value: {
+          subject: "owner",
+          key: "communication_style",
+          value: { type: "string", value: "numbered" },
+        },
+      },
+    }),
+  );
+  press("Load current revision");
+  await screen.findByText("Current revision 3");
+  press("Use this revision");
+  // The editor stays open with the person's value until they choose.
+  expect(screen.getByRole("textbox", { name: "Value" })).toHaveProperty("value", "prose");
+  expect(screen.getByText(/Yours: prose/)).toBeTruthy();
+  expect(button("Save changes")).toHaveProperty("disabled", true);
+  press("Keep my value");
+  expect(button("Save changes")).toHaveProperty("disabled", false);
+  press("Save changes");
+  await waitFor(() =>
+    expect(lastUpdate()).toMatchObject({
+      expectedRevision: 3,
+      content: { value: { value: { value: "prose" } } },
+    }),
+  );
+});
+
 it("invalid_or_unchanged_edits_do_not_save", async () => {
   setup();
   await openMemory();

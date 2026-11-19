@@ -9,6 +9,7 @@ import {
   memoryFreshness,
   memoryLabels,
   memoryStatus,
+  rebaseClaim,
 } from "./presentation";
 
 const id = "7d175d08-e235-49e9-900a-8b103bb68f9c";
@@ -154,4 +155,51 @@ it("drafts_and_reads_typed_values", () => {
   expect(fresh.success && fresh.data.kind === "decision" && fresh.data.value.evidenceIds).toEqual(
     [],
   );
+});
+
+it("rebases_untouched_fields_and_keeps_the_persons_changes", () => {
+  const lisbon = claim;
+  const porto: KnowledgeRecord["content"] = {
+    kind: "fact",
+    value: { subject: "owner", predicate: "home", value: { type: "string", value: "Porto" } },
+  };
+  // The person touched nothing in the claim: the newer revision's value comes through.
+  expect(rebaseClaim(lisbon, porto, { kind: "fact", fields: fieldDraft(lisbon) })).toEqual({
+    kind: "fact",
+    fields: fieldDraft(porto),
+    conflicts: [],
+  });
+  // The person changed the fact's name, the other revision its value: both survive.
+  const mine = { ...fieldDraft(lisbon), predicate: "residence" };
+  expect(rebaseClaim(lisbon, porto, { kind: "fact", fields: mine })).toEqual({
+    kind: "fact",
+    fields: { ...fieldDraft(porto), predicate: "residence" },
+    conflicts: [],
+  });
+  // Both changed the value differently: the person's stays until they choose.
+  const madrid = { ...fieldDraft(lisbon), value: "Madrid" };
+  expect(rebaseClaim(lisbon, porto, { kind: "fact", fields: madrid })).toEqual({
+    kind: "fact",
+    fields: madrid,
+    conflicts: [{ field: "value", label: "Value", mine: "Madrid", theirs: "Porto" }],
+  });
+  // Both made the same change: nothing to choose.
+  const same = { ...fieldDraft(lisbon), value: "Porto" };
+  expect(rebaseClaim(lisbon, porto, { kind: "fact", fields: same }).conflicts).toEqual([]);
+});
+
+it("rebases_a_change_of_kind_as_one_claim", () => {
+  const goal: KnowledgeRecord["content"] = { kind: "goal", value: { goalId: other } };
+  const untouched = { kind: "fact" as const, fields: fieldDraft(claim) };
+  expect(rebaseClaim(claim, goal, untouched)).toEqual({
+    kind: "goal",
+    fields: fieldDraft(goal),
+    conflicts: [],
+  });
+  const changed = { kind: "preference" as const, fields: { subject: "owner", key: "tone" } };
+  expect(rebaseClaim(claim, claim, changed)).toEqual({ ...changed, conflicts: [] });
+  expect(rebaseClaim(claim, goal, changed)).toEqual({
+    ...changed,
+    conflicts: [{ field: "claim", label: "Memory", mine: "Your edit", theirs: expect.any(String) }],
+  });
 });

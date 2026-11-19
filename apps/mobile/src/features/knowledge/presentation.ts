@@ -203,3 +203,65 @@ export function contentDraft(kind: Kind, draft: Record<string, string>, original
     value.evidenceIds = original?.kind === kind ? original.value.evidenceIds : [];
   return knowledgeWriteContentSchema.safeParse({ kind, value });
 }
+
+/** A field both the person and a newer revision changed, differently. */
+export type DraftConflict = { field: string; label: string; mine: string; theirs: string };
+type ClaimDraft = { kind: Kind; fields: Record<string, string> };
+
+function draftFieldLabels(kind: Kind): Array<[string, string]> {
+  return [
+    ...contentFields[kind].map(({ name, label }): [string, string] => [name, label]),
+    ...(kind === "fact" || kind === "preference"
+      ? ([
+          ["valueType", "Value type"],
+          ["value", "Value"],
+        ] as Array<[string, string]>)
+      : []),
+  ];
+}
+
+/**
+ * Moves an editor's claim from the revision it started on (`base`) to a newer one (`theirs`).
+ * A field the person left untouched takes the newer value; a field only the person changed
+ * keeps theirs. A field both changed differently stays as the person has it and is returned as
+ * a conflict to choose. A change of kind on either side compares the claim as a whole.
+ */
+export function rebaseClaim(
+  base: MemoryContent,
+  theirs: MemoryContent,
+  mine: ClaimDraft,
+): ClaimDraft & { conflicts: DraftConflict[] } {
+  const was = fieldDraft(base);
+  const now = fieldDraft(theirs);
+  if (base.kind !== theirs.kind || mine.kind !== base.kind) {
+    const mineChanged =
+      mine.kind !== base.kind ||
+      draftFieldLabels(base.kind).some(([name]) => (mine.fields[name] ?? "") !== (was[name] ?? ""));
+    const theirsChanged = JSON.stringify(base) !== JSON.stringify(theirs);
+    if (!mineChanged) return { kind: theirs.kind, fields: now, conflicts: [] };
+    if (!theirsChanged) return { ...mine, conflicts: [] };
+    const summary = memorySummary(theirs);
+    return {
+      ...mine,
+      conflicts: [
+        {
+          field: "claim",
+          label: "Memory",
+          mine: "Your edit",
+          theirs: `${summary.title}: ${summary.text}`,
+        },
+      ],
+    };
+  }
+  const fields = { ...mine.fields };
+  const conflicts: DraftConflict[] = [];
+  for (const [name, label] of draftFieldLabels(base.kind)) {
+    const before = was[name] ?? "";
+    const after = now[name] ?? "";
+    const current = mine.fields[name] ?? "";
+    if (current === before) fields[name] = after;
+    else if (after !== before && after !== current)
+      conflicts.push({ field: name, label, mine: current, theirs: after });
+  }
+  return { kind: base.kind, fields, conflicts };
+}

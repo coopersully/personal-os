@@ -531,7 +531,10 @@ it("restore_and_delete_now_from_trash", async () => {
   await waitFor(() => expect(lastQuery()).toEqual({ status: "trashed" }));
   await screen.findByText(/In Trash/);
   await openMemory();
-  expect(screen.getByText(/It will be deleted for good/)).toBeTruthy();
+  // The date is the end of the restore period; the purge follows it, not on it.
+  expect(
+    screen.getByText(/You can restore it until .*; after that it’s deleted for good\./),
+  ).toBeTruthy();
   expect(headerActions()).toEqual([]);
 
   press("Restore");
@@ -548,6 +551,10 @@ it("restore_and_delete_now_from_trash", async () => {
   press("Delete now");
   expect(h.alerts.at(-1)?.message).toContain(
     "Older backups may still contain this until they're deleted",
+  );
+  // Delete now also erases memories derived from this one that went to Trash on their own.
+  expect(h.alerts.at(-1)?.message).toContain(
+    "memories derived from it that you moved to Trash separately",
   );
   pressAlert("Delete now");
   await waitFor(() =>

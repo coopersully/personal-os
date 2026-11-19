@@ -12,7 +12,7 @@ export const trashLimits =
 /** The Trash confirmation names the linked memories it leaves behind, so they can go too. */
 export function trashMessage(linked: readonly string[]) {
   const derived =
-    "This memory and any memory derived from it move to Trash. You can restore them for 30 days; then they're deleted for good.";
+    "This memory and any memory derived from it move to Trash. You can restore them for 30 days; after that they're deleted for good.";
   const kept = linked.length
     ? `\n\nMemories this one links to stay where they are:\n${linked.map((title) => `• ${title}`).join("\n")}`
     : "";
@@ -29,7 +29,9 @@ export function confirmTrash(title: string, linked: readonly string[], trash: ()
 export function confirmDeleteNow(title: string, remove: () => void) {
   Alert.alert(
     `Delete “${title}” now?`,
-    `This erases it, and every memory trashed with it, right away. This can't be undone.\n\n${trashLimits}`,
+    // Purging a memory also purges what was derived from it, even memories the person trashed
+    // on their own earlier, which sit in Trash groups of their own.
+    `This erases it and every memory trashed with it right away, along with any memories derived from it that you moved to Trash separately. This can't be undone.\n\n${trashLimits}`,
     [
       { text: "Cancel", style: "cancel" },
       { text: "Delete now", style: "destructive", onPress: remove },
@@ -59,12 +61,13 @@ export function TrashedMemory({
   restore: () => void;
   deleteNow: () => void;
 }) {
+  // The end of the restore period: the purge runs after it, not exactly then.
   const purgeAt = new Date(Date.parse(trashedAt) + knowledgeTrashRetentionMs).toISOString();
   const root = groupId === record.id;
   return (
     <Section title="Trash">
       <MemoryNote>
-        {`Moved to Trash ${memoryDate(trashedAt)}. It will be deleted for good ${memoryDate(purgeAt)}.`}
+        {`Moved to Trash ${memoryDate(trashedAt)}. You can restore it until ${memoryDate(purgeAt)}; after that it’s deleted for good.`}
       </MemoryNote>
       {root ? (
         <>

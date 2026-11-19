@@ -1,6 +1,7 @@
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import type { ComponentType } from "react";
 import { GoalsSettingsScreen } from "../goals/settings";
+import { MemoryScreen } from "../knowledge/screen";
 import { RitualsSettingsScreen } from "../rituals/settings";
 import { ActivitySettingsScreen } from "./activity";
 import { AgentsSettingsScreen } from "./agents";
@@ -26,6 +27,7 @@ export const settingsScreens: Partial<Record<SettingsDestinationId, ComponentTyp
   activity: ActivitySettingsScreen,
   appearance: AppearanceSettingsScreen,
   goals: GoalsSettingsScreen,
+  memory: MemoryScreen,
   rituals: RitualsSettingsScreen,
   mail: MailSettingsScreen,
   calendar: CalendarSettingsScreen,

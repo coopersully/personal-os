@@ -169,14 +169,13 @@ judgment and terminal truth.
 
 ## Learning and promotion
 
-User-authored knowledge may become active immediately when unambiguous. Agent-inferred knowledge
-begins as a proposal and may become active through manual user promotion or through a domain-defined
-safe-promotion rule after independent reinforcement or successful reuse.
+Agents save memory as they learn it, and it is active at once. An agent's inference stays
+labeled inferred, and an agent change to a memory the person entered or confirmed becomes a
+proposal for the person to resolve. There is no automatic promotion rule: agents judge each
+memory's origin, freshness and conflicts before acting on it.
 
-Automatic promotion is limited to reversible knowledge categories and records its evidence,
-confidence, scope, and rationale. It never increases authority, activates an external action rule,
-or bypasses stricter confirmation for sensitive or high-impact claims. The complete lifecycle is
-defined in [`User Knowledge`](user-knowledge.md).
+Memory never increases authority, activates an external action rule, or bypasses a domain's
+approval flow. The complete lifecycle is defined in [`User Knowledge`](user-knowledge.md).
 
 ## Finance steward
 

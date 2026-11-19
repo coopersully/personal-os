@@ -102,7 +102,9 @@ Moving work out of the active scope never resolves it or establishes historical 
 Unknown dates and uncertain dependencies require triage rather than automatic historical placement.
 
 The active inbox counts distinct human decisions, with transaction flags, review cases, processing
-work and technical blockers reported separately. Zero human decisions does not imply budget-ready:
+work and technical blockers reported separately. Processing work counts each transaction once,
+even when it carries both a flag and a review case; the raw flag and case counts stay separately
+labelled and are never summed. Zero human decisions does not imply budget-ready:
 material evidence dependencies must be resolved and the exact current plan approved. The opening
 position requires qualified balance anchors and interval coverage; missing information is not zero.
 
@@ -123,6 +125,39 @@ grant. Every effect still checks current source revisions and the live approval,
 expiry and worker claim. Cancellation stops future effects; it does not undo applied effects.
 Unexpected failures have bounded retries and an explicit recovery state. A completed batch
 reports its actual applied/exception counts in Finance Chat with a link to the saved outcomes.
+A failure while recording an attempt's result counts toward the same bound of three, after which
+the approval is `blocked`; that path records the state without posting a chat message.
+Approved-batch execution runs after maintenance recovery and dispatch on the server tick, and its
+failure is logged without preventing them. An approval that is cancelled, expired or blocked
+never restarts: approving it again is a conflict that asks for a new preview.
+
+### Declining a published card
+
+The owner can decline a published review batch that has no approval yet, a starting-month
+preview, or a correction preview:
+
+- `POST /v1/finances/review-batches/{id}/decline`
+- `POST /v1/finances/budget-start/previews/{id}/decline`
+- `POST /v1/finances/review-batch-corrections/{id}/decline`
+
+Only the authenticated owner session can decline; an agent is refused whatever its scopes, and
+there is no MCP tool. The decline is stored with its actor and time, is audited once, and
+repeating it returns the first result. A declined card leaves active attention immediately. It
+can never be approved, applied or executed afterward: those requests return a conflict with
+`recovery: new_preview`. Batch, starting-month preview and correction reads carry `declinedAt`,
+which is `null` until the owner declines, so a client can tell declined from not yet approved. Effects already applied before the decline remain and are corrected
+through a new correction preview. A batch that already has an approval is cancelled through the
+existing approval cancellation instead, and an approved starting month is changed with a new
+preview.
+
+### Who may apply a correction
+
+Undo keeps the approval boundary of the change it reverses. Each applied effect records whose
+authority applied it. An agent can prepare a correction preview for any batch it prepared, but
+can apply it only when its own authority applied every targeted effect. When the owner executed
+or approved any of them, including every confirmed transfer pair, only the owner can apply the
+correction; the agent publishes the preview for that decision. Effects recorded before this
+rule carry no authority record and are treated as the owner's.
 
 Shared Finance Chat also permits a connected Finance reader to inspect bounded conversation
 pages, and an agent with read/write/maintain grants to publish short attributed record cards.
@@ -161,36 +196,3 @@ must not reactivate independent October work. An unqualified or relinked account
 history for triage; matching cross-boundary transfer candidates and persisted relationships keep
 potential dependencies active until resolved. Published batch and correction cards derive scope
 from their actual member transactions, with one human approval for a mixed-period batch.
-
-### Budget input freshness
-
-An approval is an immutable historical fact, not permanent proof that the plan fits current
-income and bills. `get_finance_budget` accepts a target month and returns `planningInputs`:
-the material source snapshot and its fingerprint. Preparation must read that snapshot before
-constructing resources and allocations, and send its exact `expectedInputFingerprint` on
-create/revise. Missing legacy evidence may remain a draft but cannot qualify for approval;
-changed evidence requires a new proposal. Never stamp a newly read fingerprint onto amounts
-computed from older evidence.
-
-The snapshot includes profile identity, planning timezone, active income and obligations,
-expected dates, applicable schedule semantics and canonical schedule validity. Cosmetic names
-and observation timestamps do not independently invalidate it. Approval compares this evidence
-again in the same statement that activates the version. This is an optimistic statement boundary,
-not a guarantee that sources cannot change afterward. An overlapping later update can stale an
-approval immediately; readiness is freshly projected and the approval history is retained.
-
-Current-month readiness requires both an approved plan and current inputs. Today and Finance
-surface a concise budget review action even when there are no transaction questions. The
-assistant must revise changed inputs through the existing proposal and owner-approval flow;
-it must not erase the prior approval, automatically carry money forward or claim inbox zero
-from an empty question count alone.
-
-Expected funding has a separate, explicit owner confirmation. The exact-version approval
-screen presents every resource's kind, amount and linked owned account (or manual estimate),
-plus assumptions, and asks the owner to confirm that they reasonably expect those resources
-to fund this month. `confirmExpectedResources` is accepted only from the actual owner. The
-immutable approval audit binds the month, version, resources and planning fingerprint; the
-version records the confirming owner. Agents cannot provide this attestation. Legacy or
-agent-approved versions can remain historical approvals without qualifying budget readiness.
-This supports owner-confirmed expectations, not guaranteed income, received funds, or permission
-to ignore contradictory evidence and unresolved dependencies. No old approval is backfilled.

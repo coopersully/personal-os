@@ -201,6 +201,10 @@ describe("OAuth authorized clients", () => {
   it("parses defaults, removes duplicates, and rejects empty or unsupported scopes", () => {
     const service = createOAuthService({ db: {} as Database, ...serviceOptions });
 
+    expect(service.parseScopes("knowledge:read knowledge:write knowledge:read")).toEqual([
+      "knowledge:read",
+      "knowledge:write",
+    ]);
     expect(service.parseScopes(undefined)).toContain("bookmarks:read");
     expect(service.parseScopes(undefined)).toContain("mail:write");
     expect(service.parseScopes(undefined)).not.toContain("finances:maintain");
@@ -218,6 +222,31 @@ describe("OAuth authorized clients", () => {
     expect(() => service.parseScopes("automations:write")).toThrow(
       "requested scopes are not supported",
     );
+  });
+
+  it("rejects saving memory without reading it, as personal access tokens do", () => {
+    const service = createOAuthService({ db: {} as Database, ...serviceOptions });
+
+    expect(() => service.parseScopes("tasks:read knowledge:write")).toThrow(
+      expect.objectContaining({
+        code: "invalid_request",
+        message: "The knowledge:write scope requires knowledge:read.",
+      }),
+    );
+    expect(service.parseScopes("knowledge:write knowledge:read")).toEqual([
+      "knowledge:write",
+      "knowledge:read",
+    ]);
+  });
+
+  it("default_oauth_scopes_include_memory", () => {
+    const service = createOAuthService({ db: {} as Database, ...serviceOptions });
+    const defaults = service.parseScopes(undefined);
+
+    expect(defaults).toEqual(expect.arrayContaining(["knowledge:read", "knowledge:write"]));
+    // Memory joins the defaults without widening any workspace authority.
+    expect(defaults.filter((scope) => scope.endsWith(":execute"))).toEqual([]);
+    expect(defaults).not.toContain("finances:maintain");
   });
 
   it("accepts secure and loopback redirects while rejecting fragments and insecure hosts", async () => {

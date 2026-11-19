@@ -1,4 +1,1 @@
-import { WorkspacePage } from "../../components/workspace-page";
-export default function Calendar() {
-  return <WorkspacePage title="calendar" />;
-}
+export { CalendarScreen as default } from "../../features/calendar/workspace";

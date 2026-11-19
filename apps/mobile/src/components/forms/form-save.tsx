@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { Keyboard, Pressable, useWindowDimensions, View } from "react-native";
+import { Keyboard, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useTheme } from "../../theme";
-import { GlassSurface } from "../glass-surface";
-import { Icon, type IconName } from "../icons";
+import { GlassButton } from "../glass-button";
+import type { IconName } from "../icons";
 import { useSettingsAccent } from "../settings-accent";
+/** Floating bottom-right form action; the shared glass button owns its size and contrast. */
 export function FormSave({
   disabled,
   onPress,
@@ -20,7 +20,6 @@ export function FormSave({
   workspace?: string;
   keyboardOffset?: number;
 }) {
-  const t = useTheme();
   const accent = useSettingsAccent(workspace);
   const insets = useSafeAreaInsets();
   const defaultKeyboardOffset = useFormKeyboardOffset(keyboardOffset === undefined);
@@ -29,31 +28,15 @@ export function FormSave({
       pointerEvents="box-none"
       style={{ position: "absolute", bottom: keyboardOffset ?? defaultKeyboardOffset, right: 20 }}
     >
-      <GlassSurface
-        style={{
-          width: 56,
-          height: 56,
-          borderRadius: 28,
-          overflow: "hidden",
-          marginBottom: Math.max(insets.bottom, 16),
-        }}
-      >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={label}
-          accessibilityState={{ disabled }}
-          disabled={disabled}
-          onPress={onPress}
-          style={{
-            flex: 1,
-            alignItems: "center",
-            justifyContent: "center",
-            opacity: disabled ? 0.7 : 1,
-          }}
-        >
-          <Icon name={icon} size={27} color={disabled ? t.ink : accent} />
-        </Pressable>
-      </GlassSurface>
+      <GlassButton
+        size="floating"
+        label={label}
+        icon={icon}
+        tint={accent}
+        disabled={disabled}
+        onPress={onPress}
+        style={{ marginBottom: Math.max(insets.bottom, 16) }}
+      />
     </View>
   );
 }

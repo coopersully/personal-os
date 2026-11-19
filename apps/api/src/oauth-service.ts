@@ -19,6 +19,8 @@ import { lockOAuthGrant } from "./oauth-grant-lock.js";
 import { generateToken, hashToken } from "./security.js";
 
 const allScopes = new Set<AccessScope>([
+  "knowledge:read",
+  "knowledge:write",
   "audit:read",
   "automations:read",
   "bookmarks:read",
@@ -43,6 +45,7 @@ const allScopes = new Set<AccessScope>([
   "tasks:write",
   "tasks:execute",
 ]);
+/** Memory is on by default (spec §5.11); maintenance and execution stay explicit. */
 const defaultScopes = new Set<AccessScope>(
   [...allScopes].filter((scope) => scope !== "finances:maintain" && !scope.endsWith(":execute")),
 );
@@ -359,6 +362,9 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
       const scopes = value?.split(" ").filter(Boolean) ?? [...defaultScopes];
       if (!scopes.length || scopes.some((scope) => !allScopes.has(scope as AccessScope)))
         throw new AppError("invalid_request", "One or more requested scopes are not supported.");
+      // Matches the personal access token rule: memory an agent cannot read, it cannot save.
+      if (scopes.includes("knowledge:write") && !scopes.includes("knowledge:read"))
+        throw new AppError("invalid_request", "The knowledge:write scope requires knowledge:read.");
       return [...new Set(scopes)] as AccessScope[];
     },
   };

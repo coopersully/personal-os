@@ -4,9 +4,10 @@ import { Pressable, Text, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { Icon } from "../../components/icons";
 import { spacing, useTheme, workspaceColor } from "../../theme";
-import { budgetPace, categoryIcon } from "./category-presentation";
-import { useFinance, useFinanceRead, useSpending } from "./data";
-import { financeLabel, formatMoney, periodScope } from "./presentation";
+import { budgetPace, categoryIcon, categoryLabel } from "./category-presentation";
+import { useFinance, useFinanceRead, useMonthSpending } from "./data";
+import { financeLabel, formatMoney } from "./presentation";
+import { spendingMonth } from "./spending-math";
 import { Card, Copy, ReadState } from "./ui";
 
 /** Each track compares spending with that category's own limit, not the whole plan. */
@@ -22,7 +23,7 @@ function CategoryProgress({ item }: { item: FinanceBudgetStatus }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${item.budget.category}, ${formatMoney(item.spent, "USD")} spent. View transactions and edit limit`}
+      accessibilityLabel={`${categoryLabel(item.budget.category)}, ${formatMoney(item.spent, "USD")} spent. View transactions and edit limit`}
       onPress={() =>
         router.push({
           pathname: "/finance-budget-category",
@@ -44,7 +45,7 @@ function CategoryProgress({ item }: { item: FinanceBudgetStatus }) {
         >
           <Icon name={categoryIcon(item.budget.category)} color={t.secondary} size={18} />
           <Text style={{ color: t.ink, fontSize: 16, fontWeight: "600", flexShrink: 1 }}>
-            {item.budget.category}
+            {categoryLabel(item.budget.category)}
           </Text>
         </View>
         <Text
@@ -59,7 +60,7 @@ function CategoryProgress({ item }: { item: FinanceBudgetStatus }) {
       </View>
       <View
         accessibilityRole="progressbar"
-        accessibilityLabel={`${item.budget.category} spending`}
+        accessibilityLabel={`${categoryLabel(item.budget.category)} spending`}
         accessibilityValue={{
           min: 0,
           max: 100,
@@ -90,14 +91,14 @@ function CategoryProgress({ item }: { item: FinanceBudgetStatus }) {
 export function BudgetOverview() {
   const t = useTheme();
   const { timezone } = useFinance();
-  const month = timezone ? periodScope("month", timezone).from.slice(0, 7) : undefined;
+  const month = timezone ? spendingMonth(timezone) : undefined;
   const plan = useFinanceRead(["budget"], (api) => api.getFinanceBudget());
   const limits = useFinanceRead(
     ["budget-status", month],
     (api) => api.getFinanceBudgetStatus(month),
     !!month,
   );
-  const spending = useSpending("month");
+  const spending = useMonthSpending();
   const budget = plan.data?.data;
   const baseline = spending.data?.monthlyBudget;
   const totals =

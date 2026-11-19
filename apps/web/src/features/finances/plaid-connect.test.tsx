@@ -15,8 +15,12 @@ vi.mock("react-plaid-link", () => ({
     return { open: vi.fn(), ready: false };
   },
 }));
-afterEach(() => {
-  toast.dismiss();
+afterEach(async () => {
+  // Sonner removes a dismissed toast on a 200ms timer that it never cancels, and a retry
+  // dismisses the previous attempt's toast moments before a test ends. Let every removal
+  // finish while jsdom still exists; a timer firing after teardown fails the whole run.
+  for (const { id } of toast.getToasts()) toast.dismiss(id);
+  await waitFor(() => expect(document.querySelector("[data-sonner-toast]")).toBeNull());
   vi.restoreAllMocks();
 });
 const reconnectSuccess = "Bank authorization verified; synchronization scheduled.";

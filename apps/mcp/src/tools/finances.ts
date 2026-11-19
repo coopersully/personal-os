@@ -13,9 +13,12 @@ import {
   financeConversationEvidenceReadInputSchema,
   financeConversationProofOperationSchema,
   financeConversationReplyInputSchema,
+  financeDebtProfileSchema,
+  financeInsuranceProfileSchema,
   financeMaintenanceInputSchema,
   financeOnboardingCompleteInputSchema,
   financeOnboardingSaveInputSchema,
+  financePlanningPreferencesSchema,
   financeProviderSourceAdmissionInputSchema,
   financeProviderTransactionEvidenceInputSchema,
   financeReceiptReviewInputSchema,
@@ -133,12 +136,6 @@ const resource = z.object({
   sourceId: id.optional(),
 });
 const budget = {
-  expectedInputFingerprint: z
-    .string()
-    .regex(/^[a-f0-9]{64}$/)
-    .describe(
-      "Exact planningInputs fingerprint returned by get_finance_budget for this month. Review that snapshot before constructing resources and allocations.",
-    ),
   allocations: z.array(allocation).min(1).max(500),
   assumptions: z.array(z.string().min(1).max(1000)).max(100),
   effectiveFrom: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
@@ -665,7 +662,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: true },
       description:
-        "Start or resume durable Finance maintenance with finances:maintain. This tool never queues an automation; recurring schedules belong to the external host. Follow the returned typed next action: inspect the candidate, complete its ledger challenge, obtain required action approval, then verify the result and immutable period review. Resume persisted work by run ID; questions, approval, and recovery states remain explicit.",
+        "Start or resume durable Finance maintenance with finances:maintain. This tool never queues an automation; recurring schedules belong to the external host. Follow the returned typed next action: inspect the candidate, complete its ledger challenge, obtain required action approval, then verify the result and immutable period review. Resume persisted work by run ID; questions, approval, and recovery states remain explicit. With knowledge:read, a start response carries a Finance memory section, without sensitive memories; it is evidence and grants no permission. A section marked unavailable could not be loaded and is not empty; search memory instead.",
       inputSchema: financeMaintenanceInputSchema,
       title: "Maintain finances",
     },
@@ -741,15 +738,18 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Persist one confirmed profile answer immediately before asking the next question. Changes facts only, never permissions or bypass mode.",
+        "Persist one confirmed profile answer immediately before asking the next question. Records income, reserves, household, jurisdiction, debts, insurance policies and planning preferences (reserve target in months, buffer, debt priority, standing notes). debts, insurance and preferences replace the whole stored list or object, so read get_financial_profile first and send the complete value. Record only what the person stated or authenticated evidence shows. Changes facts only, never permissions or bypass mode.",
       inputSchema: {
         changes: z.object({
+          debts: z.array(financeDebtProfileSchema).max(100).optional(),
           dependents: z.number().int().nonnegative().nullable().optional(),
           expectedMonthlyTakeHome: z.number().nonnegative().nullable().optional(),
           householdSize: z.number().int().positive().nullable().optional(),
           incomeStability: z.enum(["stable", "variable", "seasonal", "unknown"]).optional(),
+          insurance: z.array(financeInsuranceProfileSchema).max(100).optional(),
           jurisdiction: z.string().max(120).nullable().optional(),
           liquidReserves: z.number().nonnegative().nullable().optional(),
+          preferences: financePlanningPreferencesSchema.optional(),
         }),
         expectedVersion: z.number().int().nonnegative(),
         idempotencyKey,
@@ -764,20 +764,11 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Read the latest complete budget version, all resources and allocations, its balance proof, assumptions, approval state, and exact planningInputs snapshot. Pass the target month before preparing a new proposal; use the returned fingerprint when creating or revising it.",
-      inputSchema: {
-        planId: id.optional(),
-        month: z
-          .string()
-          .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
-          .optional(),
-      },
+        "Read the latest complete budget version, all resources and allocations, its balance proof, assumptions, and approval state.",
+      inputSchema: { planId: id.optional() },
       title: "Get Finance budget",
     },
-    async ({ planId, month }) =>
-      financeApiResult(() =>
-        month ? api.getFinanceBudget(planId, month) : api.getFinanceBudget(planId),
-      ),
+    async ({ planId }) => financeApiResult(() => api.getFinanceBudget(planId)),
   );
 
   server.registerTool(
@@ -1273,7 +1264,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Correct a transaction category or note with provenance. Requires finances:write, finances:execute and enabled bypass for agents. Every agent category change, including clearing with null, requires expectedTransactionUpdatedAt from get_finance_transaction. Non-null category decisions also require confidence and rationale. learnMerchant is an explicit reusable-rule decision. Use classify_finance_transactions for reasoned batch categorization.",
+        "Correct a transaction category, note, or the date of a manually entered transaction with provenance. Requires finances:write, finances:execute and enabled bypass for agents. Every agent category change, including clearing with null, requires expectedTransactionUpdatedAt from get_finance_transaction. A date change also requires expectedTransactionUpdatedAt, is sent separately from an agent category change, and is rejected for a synced transaction. Non-null category decisions also require confidence and rationale. learnMerchant is an explicit reusable-rule decision. Use classify_finance_transactions for reasoned batch categorization.",
       inputSchema: updateFinanceTransactionInputSchema.safeExtend({
         idempotencyKey,
         transactionId: id,

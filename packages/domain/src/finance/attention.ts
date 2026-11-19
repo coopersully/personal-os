@@ -50,7 +50,8 @@ export function projectFinanceAttention(input: z.input<typeof projectionInputSch
   let historicalRecordCount = 0;
   let futureRecordCount = 0;
   let triageRecordCount = 0;
-  let processingCount = 0;
+  // A flag and a review case on one transaction are the same unit of machine work.
+  const processing = new Set<string>();
   let technicalBlockerCount = 0;
   for (const record of state.records) {
     if (record.source === "transaction_flag") rawCounts.transactionFlags++;
@@ -78,8 +79,12 @@ export function projectFinanceAttention(input: z.input<typeof projectionInputSch
       // Namespace explicit shared decisions apart from unrelated individual records.
       decisions.add(record.decisionKey ? `decision:${record.decisionKey}` : `record:${record.id}`);
     } else if (record.workState === "technical_blocker") technicalBlockerCount++;
-    else processingCount++;
+    else
+      processing.add(
+        record.transactionId ? `transaction:${record.transactionId}` : `record:${record.id}`,
+      );
   }
+  const processingCount = processing.size;
   return {
     period: state.period,
     complete: state.complete,
@@ -171,7 +176,18 @@ export const financeBudgetStartPreviewSchema = z.strictObject({
   expectedPolicyRevision: z.number().int().nonnegative(),
   attention: financeAttentionSnapshotSchema,
   projectedAttention: financeAttentionSnapshotSchema.nullable(),
+  /** When the owner declined this exact item; null while it can still be approved. */
+  declinedAt: z.iso.datetime().nullable().optional(),
 });
 export type FinanceBudgetStartPreview = z.infer<typeof financeBudgetStartPreviewSchema>;
 export type PreviewFinanceBudgetStartInput = z.infer<typeof previewFinanceBudgetStartInputSchema>;
 export type ApplyFinanceBudgetStartInput = z.infer<typeof applyFinanceBudgetStartInputSchema>;
+
+/** The owner's durable refusal of one published card; only a new preview can follow. */
+export const financeDecisionDeclineSchema = z.strictObject({
+  kind: z.enum(["review_batch", "budget_start_preview", "review_batch_undo"]),
+  id: z.uuid(),
+  declinedAt: z.iso.datetime(),
+  recovery: z.literal("new_preview"),
+});
+export type FinanceDecisionDecline = z.infer<typeof financeDecisionDeclineSchema>;

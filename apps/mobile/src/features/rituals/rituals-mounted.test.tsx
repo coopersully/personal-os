@@ -186,7 +186,17 @@ it("retries failed ritual reads and navigates to configured/unconfigured kinds o
   h.definitions.mockRejectedValueOnce(new Error("Offline"));
   render(wrap(<RitualsSettingsScreen />));
   fireEvent.click(await screen.findByText("Unable to load. Retry"));
-  fireEvent.click(await screen.findByRole("button", { name: /^Morning/ }));
+  const morning = await screen.findByRole("button", { name: /^Morning/ });
+  // Ritual rows and record rows each live in their own titled group.
+  const ritualGroup = morning.closest('[data-testid="form-group"]');
+  const recordGroup = screen.getByText("History").closest('[data-testid="form-group"]');
+  expect(ritualGroup).not.toBeNull();
+  expect(recordGroup).not.toBeNull();
+  expect(ritualGroup).not.toBe(recordGroup);
+  expect(ritualGroup?.contains(screen.getByRole("button", { name: /^Evening/ }))).toBe(true);
+  expect(screen.getByRole("heading", { name: "Rituals" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Records" })).toBeVisible();
+  fireEvent.click(morning);
   expect(h.push).toHaveBeenLastCalledWith({
     pathname: "/settings/rituals/edit",
     params: { kind: "morning" },
@@ -233,7 +243,12 @@ it("history retries failed reads and preserves server filtering and refresh sema
   h.history.mockRejectedValueOnce(new Error("Offline"));
   render(wrap(<RitualHistoryScreen />));
   fireEvent.click(await screen.findByText("Unable to load. Retry"));
-  await screen.findByText("No matching history.");
+  const empty = await screen.findByText("No matching history.");
+  // With no rows there is no History group; the note stands in an untitled group.
+  expect(screen.queryByRole("heading", { name: "History" })).toBeNull();
+  expect(empty.closest('[data-testid="form-group"]')).not.toBeNull();
+  expect(screen.queryByTestId("section-item")).toBeNull();
+  expect(screen.getByRole("heading", { name: "Filters" })).toBeVisible();
   fireEvent.click(screen.getByText("Oldest First"));
   await waitFor(() =>
     expect(h.history).toHaveBeenLastCalledWith(
@@ -269,7 +284,12 @@ it("announces one failed ritual-history refresh without dropping cached history 
     nextCursor: null,
   });
   render(wrap(<RitualHistoryScreen />));
-  await screen.findByText(/Evening record/);
+  const occurrence = await screen.findByText(/Evening record/);
+  expect(screen.getByRole("heading", { name: "History" })).toBeVisible();
+  expect(
+    occurrence.closest('[data-testid="section-item"]')?.closest('[data-testid="form-group"]'),
+  ).toBeTruthy();
+  expect(screen.queryByText("No matching history.")).toBeNull();
   h.history.mockRejectedValueOnce(new Error("History offline"));
   fireEvent.click(screen.getByText("Refresh records"));
   await waitFor(() =>

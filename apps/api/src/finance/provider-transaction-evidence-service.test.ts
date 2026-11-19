@@ -146,6 +146,43 @@ describe("historical provider reader", () => {
     ).rejects.toMatchObject({ code: "conflict" });
     expect(f.writes).not.toHaveBeenCalled();
   });
+  it("limits one read to a single connection and a window shorter than 366 days", async () => {
+    const second = { ...row, transactionId: accountId, providerTransactionId: "second-tx" };
+    const twoConnections = fixture(row, [row, { ...second, itemRecordId: accountId }]);
+    await expect(
+      twoConnections.service.read(principal, { transactionIds: [id, accountId] }, "session-hash"),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      message: expect.stringContaining("one Finance connection"),
+    });
+    const longWindow = fixture(row, [row, { ...second, date: "2025-10-01" }]);
+    await expect(
+      longWindow.service.read(principal, { transactionIds: [id, accountId] }, "session-hash"),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      message: expect.stringContaining("shorter than 366 days"),
+    });
+    for (const f of [twoConnections, longWindow]) {
+      expect(f.readTransactionHistory).not.toHaveBeenCalled();
+      expect(f.writes).not.toHaveBeenCalled();
+    }
+  });
+  it.each([
+    ["expired", { expiresAt: new Date("2026-01-01"), authorizationConnectionId: accountId }],
+    ["revoked", { revokedAt: date, authorizationConnectionId: accountId }],
+    ["issued to another connection", { authorizationConnectionId: id }],
+    ["without Finance read access", { scopes: [], authorizationConnectionId: accountId }],
+  ])("denies an agent whose grant is %s before any provider access", async (_case, grant) => {
+    const f = fixture();
+    f.queue[1] = [{ revokedAt: null, expiresAt: null, scopes: ["finances:read"], ...grant }];
+    await expect(
+      f.service.read(
+        { ...principal, actorType: "agent", authorizationConnectionId: accountId },
+        { transactionIds: [id] },
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect(f.readTransactionHistory).not.toHaveBeenCalled();
+  });
   it("rejects a relinked account after the external read", async () => {
     const f = fixture({ ...row, itemRecordId: accountId });
     await expect(

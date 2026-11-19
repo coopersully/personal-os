@@ -87,6 +87,10 @@ describe("Mail stewardship through MCP", () => {
         accountIds: ["00000000-0000-4000-8000-000000000099"],
       }),
     ).toMatchObject({ all: 0, unread: 0, starred: 0, snoozed: 0, sent: 0 });
+    expect(await call("unsnooze_mail", { id: thread.id })).toEqual({ snoozed: false });
+    expect(await call("get_mail_navigation_counts", { accountIds: [account.id] })).toMatchObject({
+      snoozed: 0,
+    });
     const other = await f.connectAgent(["mail:read"], { ownerId: f.otherOwner.id });
     const isolated = await other.client.callTool({
       name: "get_mail_navigation_counts",

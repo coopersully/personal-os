@@ -1,0 +1,21 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["7J7HDVDCKQ.app.personal-os.mobile"],
+        "components": [
+          { "/": "/tasks", "?": { "task": "?*" }, "comment": "A task" },
+          { "/": "/reminders", "?": { "reminder": "?*" }, "comment": "A reminder" },
+          {
+            "/": "/finances/transactions",
+            "?": { "transactionId": "?*" },
+            "comment": "A transaction"
+          },
+          { "/": "/calendar", "?": { "event": "?*" }, "comment": "A calendar event" },
+          { "/": "/mail", "?": { "thread": "?*" }, "comment": "A mail conversation" },
+          { "/": "/plaid/return", "comment": "Bank sign-in returning to the app" }
+        ]
+      }
+    ]
+  }
+}

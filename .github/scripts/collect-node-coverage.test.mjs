@@ -700,7 +700,11 @@ test("repository verification registers fixtures and preserves Node failure gati
   const hook = readFileSync(join(root, ".codex/scripts/check.sh"), "utf8");
   assert.match(hook, /node --test .*collect-node-coverage\.test\.mjs/);
   const quality = workflow.split("  quality:\n")[1].split("  browser:\n")[0];
-  assert.match(quality, /- id: node\n\s+run: pnpm test:coverage\n\s+timeout-minutes: 30/);
+  // Node quality merges every shard's raw coverage and enforces the thresholds.
+  assert.match(
+    quality,
+    /- id: node\n\s+env:\n\s+NOHMI_COVERAGE_SHARD_DIR: [^\n]+\n\s+run: pnpm test:coverage:merge\n\s+timeout-minutes: 10/,
+  );
   assert.doesNotMatch(quality, /continue-on-error|\|\| true/);
   assert.match(quality, /if: always\(\)/);
   assert.match(quality, /steps\.coverage\.outputs\.artifact_ready == 'true'/);

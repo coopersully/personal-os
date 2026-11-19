@@ -21,6 +21,11 @@ vi.mock("../components/editor-header", () => ({
     navigation.dismiss = onPress;
     return {};
   },
+  stackChromeOptions: () => ({}),
+}));
+// The Finance layout badges its Assistant tab; that read is covered with the Finance screens.
+vi.mock("../features/finances/conversation-unread", () => ({
+  useAssistantBadge: () => undefined,
 }));
 vi.mock("../theme", () => ({ useTheme: () => ({ ink: "black", canvas: "white" }) }));
 vi.mock("expo-router", () => {

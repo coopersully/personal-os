@@ -3184,6 +3184,188 @@ describe.sequential("finance service", () => {
     ).toBe(false);
   });
 
+  it("corrects the date of a manual transaction only, against its current revision", async () => {
+    const { service, context, agentContext, userId, account, shopping } =
+      await manualFinanceFixture("date");
+    const manual = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 9,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Dated Shop",
+        notes: null,
+      },
+      context,
+    );
+    const storedDate = async (id: string) =>
+      (
+        await database.db
+          .select({ transactionDate: financeTransactions.transactionDate })
+          .from(financeTransactions)
+          .where(eq(financeTransactions.id, id))
+      )[0]?.transactionDate;
+    const revision = async (id: string) => {
+      const [row] = await database.db
+        .select({ updatedAt: financeTransactions.updatedAt })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, id));
+      if (!row) throw new Error("Transaction revision was not found.");
+      return row.updatedAt.toISOString();
+    };
+
+    await expect(
+      service.updateTransaction(
+        manual.id,
+        { date: "2026-07-02", expectedTransactionUpdatedAt: "2020-01-01T00:00:00.000Z" },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      message: "The transaction changed; reload it before editing.",
+      status: 409,
+    });
+    await expect(
+      service.updateTransaction(manual.id, { date: "2026-07-02" }, context),
+    ).rejects.toMatchObject({ code: "invalid_request", status: 400 });
+    await expect(storedDate(manual.id)).resolves.toBe("2026-07-19");
+
+    const dateContext = { ...context, requestId: "manual-finance-date-change" };
+    const redated = await service.updateTransaction(
+      manual.id,
+      { date: "2026-07-02", expectedTransactionUpdatedAt: manual.updatedAt },
+      dateContext,
+    );
+    expect(redated).toMatchObject({ date: "2026-07-02", id: manual.id, notes: null });
+    await expect(storedDate(manual.id)).resolves.toBe("2026-07-02");
+    await expect(
+      database.db
+        .select({
+          action: auditEvents.action,
+          after: auditEvents.after,
+          before: auditEvents.before,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, dateContext.requestId)),
+    ).resolves.toEqual([
+      {
+        action: "finance.transaction_updated",
+        after: { changedFields: ["date"], date: "2026-07-02" },
+        before: { date: "2026-07-19" },
+      },
+    ]);
+
+    await expect(
+      service.updateTransaction(
+        manual.id,
+        {
+          category: "Shopping",
+          confidence: 0.99,
+          date: "2026-07-03",
+          expectedTransactionUpdatedAt: await revision(manual.id),
+          rationale: "Agent evidence.",
+        },
+        { ...agentContext, financePreparedAction: true },
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      message: "Change a transaction's date separately from an agent categorization.",
+    });
+    const combinedContext = { ...context, requestId: "manual-finance-date-and-category" };
+    const recategorized = await service.updateTransaction(
+      manual.id,
+      {
+        category: "Shopping",
+        date: "2026-07-03",
+        expectedTransactionUpdatedAt: await revision(manual.id),
+        notes: "Receipt dated the third",
+      },
+      combinedContext,
+    );
+    expect(recategorized).toMatchObject({
+      category: "Shopping",
+      date: "2026-07-03",
+      notes: "Receipt dated the third",
+    });
+    await expect(
+      database.db
+        .select({
+          action: auditEvents.action,
+          after: auditEvents.after,
+          before: auditEvents.before,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, combinedContext.requestId)),
+    ).resolves.toEqual([
+      {
+        action: "finance.transaction_categorized",
+        after: expect.objectContaining({ categoryId: shopping.id, date: "2026-07-03" }),
+        before: expect.objectContaining({ categoryId: null, date: "2026-07-02" }),
+      },
+    ]);
+    // A save that leaves the date as it was records only the fields that changed.
+    const unchangedContext = { ...context, requestId: "manual-finance-date-unchanged" };
+    await service.updateTransaction(
+      manual.id,
+      {
+        date: "2026-07-03",
+        expectedTransactionUpdatedAt: await revision(manual.id),
+        notes: "Kept",
+      },
+      unchangedContext,
+    );
+    await expect(
+      database.db
+        .select({ after: auditEvents.after, before: auditEvents.before })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, unchangedContext.requestId)),
+    ).resolves.toEqual([{ after: { changedFields: ["notes"] }, before: null }]);
+
+    const [plaidAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Synced Bank",
+        name: "Synced checking",
+        provider: "plaid",
+        status: "connected",
+        userId,
+      })
+      .returning();
+    if (!plaidAccount) throw new Error("Synced account was not created.");
+    const [synced] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: plaidAccount.id,
+        amount: 1_200,
+        direction: "expense",
+        merchant: "Synced Shop",
+        transactionDate: "2026-07-19",
+        userId,
+      })
+      .returning();
+    if (!synced) throw new Error("Synced transaction was not created.");
+    await expect(
+      service.updateTransaction(
+        synced.id,
+        { date: "2026-07-02", expectedTransactionUpdatedAt: synced.updatedAt.toISOString() },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      message: "Dates on synced transactions can't be changed.",
+      status: 400,
+    });
+    await expect(storedDate(synced.id)).resolves.toBe("2026-07-19");
+    await expect(
+      database.db
+        .select({ updatedAt: financeTransactions.updatedAt })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, synced.id)),
+    ).resolves.toEqual([{ updatedAt: synced.updatedAt }]);
+  });
+
   it("preserves the manual ledger through learning, import, budgets and guidance-fenced deletion", async () => {
     const { service, context, userId, account, shopping } = await manualFinanceFixture("ledger");
     const review = await service.createTransaction(
@@ -3524,25 +3706,26 @@ describe.sequential("finance service", () => {
         officialName: null,
       },
     ]);
+    const plaid = {
+      createLinkToken,
+      validateCredentials: async () => undefined,
+      exchangePublicToken,
+      getItem,
+      getAccounts,
+      syncTransactions: async () => ({
+        added: [],
+        modified: [],
+        removed: [],
+        hasMore: false,
+        nextCursor: "unused",
+        transactionsUpdateStatus: null,
+      }),
+    };
     const service = createFinanceService({
       db: database.db,
       encryptionKey: key,
       now: () => now,
-      plaid: {
-        createLinkToken,
-        validateCredentials: async () => undefined,
-        exchangePublicToken,
-        getItem,
-        getAccounts,
-        syncTransactions: async () => ({
-          added: [],
-          modified: [],
-          removed: [],
-          hasMore: false,
-          nextCursor: "unused",
-          transactionsUpdateStatus: null,
-        }),
-      },
+      plaid,
     });
     const context = { principal: financePrincipal(userId), requestId: "update-mode" };
     const [account] = await service.exchangePlaidToken(
@@ -3572,6 +3755,33 @@ describe.sequential("finance service", () => {
     expect(createLinkToken).toHaveBeenCalledWith(
       expect.objectContaining({ accessToken: "existing-access" }),
     );
+    // Without the iPhone redirect setting, naming the iPhone app changes nothing in the request.
+    const unset = createLinkToken.mock.calls.at(-1)?.[0];
+    await service.createPlaidLinkToken(userId, account.id, "ios");
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual(unset);
+    await service.createPlaidLinkToken(userId);
+    const unsetConnect = createLinkToken.mock.calls.at(-1)?.[0];
+    await service.createPlaidLinkToken(userId, undefined, "ios");
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual(unsetConnect);
+    expect(unset).not.toHaveProperty("redirectUri");
+    expect(unsetConnect).not.toHaveProperty("redirectUri");
+    // With it, only the iPhone app's tokens carry the redirect, in connect and update mode.
+    const redirectUri = "https://app.example.com/plaid/return";
+    const configured = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid,
+      plaidIosRedirectUri: redirectUri,
+    });
+    await configured.createPlaidLinkToken(userId, account.id);
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual(unset);
+    await configured.createPlaidLinkToken(userId);
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual(unsetConnect);
+    await configured.createPlaidLinkToken(userId, account.id, "ios");
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual({ ...unset, redirectUri });
+    await configured.createPlaidLinkToken(userId, undefined, "ios");
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual({ ...unsetConnect, redirectUri });
     await expect(
       service.createPlaidLinkToken(crypto.randomUUID(), account.id),
     ).rejects.toMatchObject({ code: "not_found" });
@@ -5713,6 +5923,96 @@ describe.sequential("finance service", () => {
       unrelatedTransactionLock.release();
       if (reconciliation) await Promise.allSettled([reconciliation]);
     }
+  });
+
+  it("leaves a card payment out of spending and refunds only when a connected card received it", async () => {
+    const [cardUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Card payer",
+        email: "card-payer@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!cardUser) throw new Error("Card user was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(cardUser.id), requestId: "card-payment" };
+    const checking = await service.createAccount(
+      { balance: 5000, institution: "Test bank", name: "Checking", provider: "manual" },
+      context,
+    );
+    const card = await service.createAccount(
+      { balance: 300, institution: "Test bank", name: "Card", provider: "manual" },
+      context,
+    );
+    const observe = (status: "connected" | "needs_reauth") =>
+      database.db
+        .update(financeAccounts)
+        .set({ kind: "debt", providerType: "credit", status })
+        .where(eq(financeAccounts.id, card.id));
+    await observe("connected");
+    const add = async (
+      accountId: string,
+      amount: number,
+      direction: "expense" | "income",
+      category: string,
+      date: string,
+      cardPayment: boolean,
+    ) => {
+      const created = await service.createTransaction(
+        {
+          accountId,
+          amount,
+          category,
+          categoryConfidence: null,
+          date,
+          direction,
+          merchant: `${category} ${amount}`,
+          notes: null,
+        },
+        context,
+      );
+      if (cardPayment)
+        await database.db
+          .update(financeTransactions)
+          .set({ providerCategoryDetailed: "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT" })
+          .where(eq(financeTransactions.id, created.id));
+    };
+    await add(card.id, 40, "expense", "Shopping", "2026-07-08", false);
+    await add(checking.id, 300, "expense", "LOAN_PAYMENTS", "2026-07-10", true);
+    await add(card.id, 300, "income", "LOAN_PAYMENTS", "2026-07-11", true);
+    // No observed card received this one: it paid a card nohmi cannot see.
+    await add(checking.id, 77, "expense", "LOAN_PAYMENTS", "2026-07-12", true);
+    await reviewedCreateBudget(
+      service,
+      { category: "LOAN_PAYMENTS", limit: 500, month: "2026-07" },
+      context,
+    );
+
+    await expect(service.listOverview(cardUser.id, "2026-07")).resolves.toMatchObject({
+      refundCreditsThisMonth: 0,
+      spendingThisMonth: 117,
+    });
+    await expect(service.getBudgetStatus(cardUser.id, "2026-07")).resolves.toEqual([
+      expect.objectContaining({ spent: 77 }),
+    ]);
+    await expect(service.getBudgetPace(cardUser.id, "month")).resolves.toMatchObject({
+      cells: expect.arrayContaining([
+        // Cumulative: the settled payment and its receipt add nothing on the 10th and 11th.
+        expect.objectContaining({ date: "2026-07-11", spent: 40 }),
+        expect.objectContaining({ date: "2026-07-12", spent: 117 }),
+      ]),
+    });
+
+    // A card awaiting re-authentication observes no purchases, so nothing is left out.
+    await observe("needs_reauth");
+    await expect(service.listOverview(cardUser.id, "2026-07")).resolves.toMatchObject({
+      refundCreditsThisMonth: 300,
+    });
+    await expect(service.getBudgetStatus(cardUser.id, "2026-07")).resolves.toEqual([
+      expect.objectContaining({ spent: 77 }),
+    ]);
   });
 
   it("uses posted net spending, preserves refunds, and exposes complete ledger health and export data", async () => {

@@ -261,8 +261,8 @@ class EvaluateReadinessTest(unittest.TestCase):
     def test_hosted_shards_require_all_browser_members_and_node_quality(self):
         coverage = {"repository": "Repository contracts", "lint": "Lint and format",
                     "types-tests-coverage-builds": "Node quality",
-                    "browser": [f"Browser acceptance ({project}, {i}/4)"
-                                for project in ("desktop-chromium", "mobile-chromium") for i in range(1, 5)]}
+                    "browser": [f"Browser acceptance ({project}, {i}/6)"
+                                for project in ("desktop-chromium", "mobile-chromium") for i in range(1, 7)]}
         state = ready_state(verification={"mode": "hosted", "pnpmVerify": "NOT_RUN",
             "equivalenceVerified": True, "localOnlyComplete": True, "equivalentChecks": coverage})
         names = FULL_SOURCE_JOBS
@@ -375,6 +375,25 @@ class EvaluateReadinessTest(unittest.TestCase):
         self.assertEqual(evaluate(state)["decision"], "WAIT")
         latest.update(event="push", status="COMPLETED", conclusion="SUCCESS")
         self.assertNotEqual(evaluate(state)["decision"], "MERGE")
+
+    def test_required_context_from_two_proven_workflows_must_all_succeed(self):
+        # ci.yml and pr-metadata.yml both report the protected `CI required` context.
+        state = ready_state()
+        source = state["ci"]["checks"][0]
+        source.update(workflowId=12, runId=23, runAttempt=1, event="pull_request")
+        metadata = dict(source, workflowId=34, runId=45)
+        state["ci"]["checks"].append(metadata)
+        self.assertEqual(evaluate(state)["decision"], "MERGE")
+        metadata.update(status="IN_PROGRESS", conclusion="")
+        self.assertEqual(evaluate(state)["decision"], "WAIT")
+        metadata.update(status="COMPLETED", conclusion="FAILURE")
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+        metadata.update(conclusion="SUCCESS", workflowId=12, runId=99)
+        result = evaluate(state)
+        self.assertIn("required_checks_missing", result["reasonCodes"])
+        metadata.update(workflowId=34)
+        del metadata["runId"]
+        self.assertIn("required_checks_missing", evaluate(state)["reasonCodes"])
 
     def test_blocks_when_squash_or_every_merge_path_is_unavailable(self):
         for merge in (

@@ -158,6 +158,119 @@ describe.sequential("durable Finance evidence refresh", () => {
       sources: [{ freshness: "current", coverage: "complete", reason: "none" }],
     });
   });
+  async function synced(period = "2026-11") {
+    const f = await connected();
+    const request = await service().prepareEvidenceRefresh(f.context, { ...f.input, period });
+    // The sync must be observed strictly after the request it answers.
+    clock = new Date(clock.getTime() + 60_000);
+    await database.db
+      .update(financeProviderItems)
+      .set({ syncState: "current", lastSyncedAt: clock })
+      .where(eq(financeProviderItems.id, f.item.id));
+    const owner = await database.db.query.users.findFirst({
+      where: eq(users.id, f.context.principal.userId),
+    });
+    if (!owner) throw new Error("Missing owner");
+    const cover = (fromDate: string, throughDate: string, overrides = {}) =>
+      database.db.insert(financeTransactionCoverage).values({
+        userId: f.context.principal.userId,
+        accountId: f.account.id,
+        fromDate,
+        throughDate,
+        timezone: owner.planningTimezone,
+        currencyCode: "USD",
+        evidenceRef: "synthetic-source",
+        recordedAt: clock,
+        ...overrides,
+      });
+    const read = async () => {
+      await service().reconcilePending();
+      return service().getEvidenceRefresh(f.context, request.id);
+    };
+    return { ...f, cover, read };
+  }
+  it("requires a finished month to be covered through its last day, not through today", async () => {
+    const october = await synced("2026-10");
+    await october.cover("2026-10-01", "2026-10-30");
+    expect(await october.read()).toMatchObject({
+      status: "blocked",
+      sources: [{ coverage: "missing", reason: "coverage_missing" }],
+    });
+    const whole = await synced("2026-10");
+    await whole.cover("2026-10-01", "2026-10-31");
+    expect(await whole.read()).toMatchObject({
+      status: "completed",
+      sources: [{ coverage: "complete", reason: "none" }],
+    });
+  });
+  it("does not count gapped or not-yet-recorded coverage as complete", async () => {
+    const gapped = await synced();
+    await gapped.cover("2026-11-01", "2026-11-05");
+    await gapped.cover("2026-11-08", "2026-11-12");
+    expect(await gapped.read()).toMatchObject({
+      status: "blocked",
+      sources: [{ freshness: "current", coverage: "missing", reason: "coverage_missing" }],
+    });
+    const future = await synced();
+    await future.cover("2026-11-01", "2026-11-12", {
+      recordedAt: new Date(clock.getTime() + 3_600_000),
+    });
+    expect(await future.read()).toMatchObject({
+      sources: [{ coverage: "missing", reason: "coverage_missing" }],
+    });
+    // Two adjoining intervals together are complete evidence.
+    const adjoining = await synced();
+    await adjoining.cover("2026-11-01", "2026-11-05");
+    await adjoining.cover("2026-11-06", "2026-11-12");
+    expect(await adjoining.read()).toMatchObject({
+      status: "completed",
+      sources: [{ coverage: "complete" }],
+    });
+  });
+  it("blocks a request whose account was relinked or whose agent grant expired meanwhile", async () => {
+    const relinked = await synced();
+    await relinked.cover("2026-11-01", "2026-11-12");
+    await database.db
+      .update(financeAccounts)
+      .set({ providerAccountId: crypto.randomUUID() })
+      .where(eq(financeAccounts.id, relinked.account.id));
+    expect(await relinked.read()).toMatchObject({
+      status: "blocked",
+      sources: [{ freshness: "blocked", reason: "source_changed" }],
+    });
+    const f = await connected();
+    const [token] = await database.db
+      .insert(accessTokens)
+      .values({
+        userId: f.context.principal.userId,
+        name: "Synthetic refresh agent",
+        tokenHash: crypto.randomUUID(),
+        scopes: ["finances:read", "finances:write", "finances:maintain"],
+      })
+      .returning();
+    if (!token) throw new Error("Missing token");
+    const request = await service().prepareEvidenceRefresh(
+      {
+        ...f.context,
+        principal: {
+          ...f.context.principal,
+          actorType: "agent" as const,
+          actorId: token.id,
+          authorizationConnectionId: token.authorizationConnectionId,
+        },
+      },
+      f.input,
+    );
+    await database.db
+      .update(accessTokens)
+      .set({ expiresAt: clock })
+      .where(eq(accessTokens.id, token.id));
+    await service().reconcilePending();
+    expect(await service().getEvidenceRefresh(f.context, request.id)).toMatchObject({
+      status: "blocked",
+      sources: [{ reason: "authorization_revoked" }],
+    });
+  });
   it("preserves provider retry backoff and reports reconnect instead of resetting it", async () => {
     const f = await connected();
     const retry = new Date("2026-11-12T17:00:00Z");
@@ -314,6 +427,58 @@ describe.sequential("durable Finance evidence refresh", () => {
     });
     expect(await service().getEvidenceRefresh(f.context, result.id)).toEqual(result);
     expect(await service().prepareEvidenceRefresh(f.context, f.input)).toEqual(result);
+  });
+  it("refuses another owner's account, a borrowed identity and an expired agent grant", async () => {
+    const f = await fixture();
+    const other = await fixture();
+    // Naming an account the caller does not own reveals nothing about it.
+    await expect(
+      service().prepareEvidenceRefresh(f.context, {
+        ...f.input,
+        idempotencyKey: crypto.randomUUID(),
+        sourceRefs: other.input.sourceRefs,
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service().prepareEvidenceRefresh(
+        { ...f.context, principal: { ...f.context.principal, actorId: crypto.randomUUID() } },
+        f.input,
+      ),
+    ).rejects.toMatchObject({
+      code: "forbidden",
+      message: expect.stringContaining("ownership"),
+    });
+    const actorId = crypto.randomUUID();
+    const [token] = await database.db
+      .insert(accessTokens)
+      .values({
+        id: actorId,
+        userId: f.context.principal.userId,
+        name: "Synthetic assistant",
+        tokenHash: crypto.randomUUID(),
+        scopes: ["finances:read", "finances:write", "finances:maintain"],
+        expiresAt: new Date(clock.getTime() - 1),
+      })
+      .returning();
+    if (!token) throw new Error("Missing token");
+    const agent = {
+      ...f.context,
+      principal: {
+        ...f.context.principal,
+        actorType: "agent" as const,
+        actorId,
+        authorizationConnectionId: token.authorizationConnectionId,
+      },
+    };
+    await expect(service().prepareEvidenceRefresh(agent, f.input)).rejects.toMatchObject({
+      code: "forbidden",
+      message: expect.stringContaining("no longer active"),
+    });
+    const accepted = await service().prepareEvidenceRefresh(f.context, f.input);
+    expect(await service().prepareEvidenceRefresh(f.context, f.input)).toEqual(accepted);
+    expect(await service().getEvidenceRefresh(f.context, accepted.id)).toMatchObject({
+      id: accepted.id,
+    });
   });
   it("rejects changed requests, wrong revisions, other owners and missing authority", async () => {
     const f = await fixture();

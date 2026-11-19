@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
-import { Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { Modal, Pressable, ScrollView, View } from "react-native";
+import { formRow, Group } from "../../components/forms/form-rows";
 import { Icon } from "../../components/icons";
 import { SettingLabel, SettingValue } from "../../components/settings-row-content";
 import { SheetHeader } from "../../components/sheet-header";
-import { useTheme } from "../../theme";
+import { spacing, useTheme } from "../../theme";
 
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 export function DaySelection({
@@ -32,7 +33,7 @@ export function DaySelection({
         onPress={() => {
           if (!disabledRef.current) setExpanded(!expanded);
         }}
-        style={{ minHeight: 56, padding: 16, flexDirection: "row", alignItems: "center", gap: 12 }}
+        style={({ pressed }) => [formRow, { opacity: disabled ? 0.4 : pressed ? 0.6 : 1 }]}
       >
         <SettingLabel>{label}</SettingLabel>
         <SettingValue>
@@ -50,40 +51,36 @@ export function DaySelection({
         animationType="slide"
         onRequestClose={() => setExpanded(false)}
       >
-        <View accessibilityViewIsModal style={{ flex: 1, backgroundColor: t.canvas, padding: 20 }}>
+        <View accessibilityViewIsModal style={{ flex: 1, backgroundColor: t.canvas }}>
           <SheetHeader
             title={label}
             label="Done"
+            dismiss="trailing"
             onClose={() => setExpanded(false)}
-            inset={false}
           />
-          <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ paddingBottom: 20 }}>
-            {days.map((day, index) => (
-              <Pressable
-                key={day}
-                accessibilityRole="checkbox"
-                accessibilityLabel={`${label}, ${day}`}
-                disabled={disabled}
-                accessibilityState={{ checked: selected.includes(index), disabled }}
-                onPress={() => {
-                  if (disabledRef.current) return;
-                  const next = selected.includes(index)
-                    ? selected.filter((v) => v !== index)
-                    : [...selected, index].sort();
-                  onChange(next.length === 7 ? undefined : next);
-                }}
-                style={{
-                  minHeight: 44,
-                  paddingHorizontal: 16,
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                }}
-              >
-                <Text style={{ color: t.ink }}>{day}</Text>
-                <Text style={{ color: t.ink }}>{selected.includes(index) ? "✓" : ""}</Text>
-              </Pressable>
-            ))}
+          <ScrollView contentContainerStyle={{ padding: spacing.page }}>
+            <Group>
+              {days.map((day, index) => (
+                <Pressable
+                  key={day}
+                  accessibilityRole="checkbox"
+                  accessibilityLabel={`${label}, ${day}`}
+                  disabled={disabled}
+                  accessibilityState={{ checked: selected.includes(index), disabled }}
+                  onPress={() => {
+                    if (disabledRef.current) return;
+                    const next = selected.includes(index)
+                      ? selected.filter((v) => v !== index)
+                      : [...selected, index].sort();
+                    onChange(next.length === 7 ? undefined : next);
+                  }}
+                  style={formRow}
+                >
+                  <SettingLabel>{day}</SettingLabel>
+                  {selected.includes(index) && <Icon name="save" color={t.ink} size={22} />}
+                </Pressable>
+              ))}
+            </Group>
           </ScrollView>
         </View>
       </Modal>

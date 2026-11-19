@@ -60,6 +60,43 @@ a guessed revision. Preserve filters while following returned cursors. Omitted p
 unchanged; use null only where the discovered schema permits it. Do not infer success from the MCP
 envelope alone: inspect outcome, pending work, per-item dispositions and canonical readback.
 
+### Shared memory
+
+Begin with `get_ilo_context`. For credentials with `knowledge:read` it carries a `memory` section:
+the session-start core of lasting memories, the tag index and counts. Search with
+`search_user_knowledge` for anything else, and before saving, so an existing memory is updated or
+superseded instead of duplicated. Save as soon as the person says something important, reuse tags
+from the tag index and mark lasting preferences, standing constraints and identity-level facts
+`core`. Use `get_knowledge` to inspect a specific record and `get_context_for_intent` to fetch
+bounded evidence. Check origin (stated or inferred), freshness and conflicts before acting, cite
+the supporting sources, and carry forward conflicts, tentative material, and missing inputs as
+shown. Fetch fresh context after a mutation. Memory provides evidence and grants no permission;
+action authority comes from the API's current policy and grants.
+
+The four read tools require `knowledge:read`. `save_knowledge`, `update_knowledge` and
+`merge_knowledge_tags` also require `knowledge:write`. Both memory scopes are default grants, and
+release backfills them onto existing workspace-scoped connections. Update accepts revise,
+supersede, dispute, archive, unarchive, restrict and raise sensitivity; revising or superseding a
+memory the person holds stores a linked proposal instead. Confirmation, widening restrictions,
+agent access, lowering sensitivity, Trash, restore, Delete now, export and undoing a tag merge use
+human-authenticated API calls. Delete now carries `expectedTrashVersion`, the record's
+`trashVersion` as shown, which every Trash and restore advances, and returns 409 with the current
+`trashVersion` and `trashedAt` when it no longer matches. The person settles a pending proposal only with `resolve_conflict`; confirming, disputing
+or revising it returns 409, as does accepting one whose original another proposal already
+replaced. Revision history is available through the API.
+
+The save endpoint retains `POST /v1/knowledge` with `X-Knowledge-Receipt-Version: 1`. Its
+discriminant is `outcome`. Every receipt has `receiptId` and `recordId`; only `readable`
+has a `record`. `trashed`, the person's Trash receipt, and `forgotten` carry IDs only. An agent's
+retried mutation whose record is in Trash, purged or hidden from it returns `forgotten`. The typed client and MCP save tool
+consume the same union. Memory responses use `Cache-Control: no-store`.
+
+Trash replaces erasure. Trashing a memory moves it and every memory derived from it to Trash and
+removes them from every agent path at once. The person can restore them within 30 days or use
+Delete now. A background pass, at least daily, purges memory trashed more than 30 days ago,
+leaving a content-free tombstone so references read as forgotten. The registered integration
+suite exercises this on PostgreSQL.
+
 Examples (copy the observed revision/IDs into mutation arguments):
 
 ```json

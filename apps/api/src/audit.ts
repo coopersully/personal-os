@@ -1,6 +1,6 @@
 import { auditEvents, type Database } from "@personal-os/database";
 import type { ActorType } from "@personal-os/domain";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, notLike } from "drizzle-orm";
 
 type AuditPrincipal = {
   actorId: string;
@@ -34,11 +34,20 @@ export function auditValues(input: AuditMutation): typeof auditEvents.$inferInse
 
 export function createAuditService(db: Database) {
   return {
-    async list(userId: string, limit: number) {
+    /**
+     * The owner's activity history. Agents never see memory activity: a row about blocked,
+     * restricted or trashed memory would reveal what every memory read hides from them.
+     */
+    async list(principal: Pick<AuditPrincipal, "actorType" | "userId">, limit: number) {
       const records = await db
         .select()
         .from(auditEvents)
-        .where(eq(auditEvents.userId, userId))
+        .where(
+          and(
+            eq(auditEvents.userId, principal.userId),
+            principal.actorType === "user" ? undefined : notLike(auditEvents.action, "knowledge.%"),
+          ),
+        )
         .orderBy(desc(auditEvents.createdAt))
         .limit(limit);
       return records.map((record) => ({

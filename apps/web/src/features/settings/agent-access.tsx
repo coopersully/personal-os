@@ -99,7 +99,12 @@ import {
 } from "../finances/agent-access.js";
 import { mailAgentAccessCapability, mailAgentAccessReadiness } from "../mail/agent-access.js";
 import { taskAgentAccessCapability, taskAgentAccessReadiness } from "../tasks/agent-access.js";
-import { scopeLabels, selectableScopes } from "./access-scopes.js";
+import {
+  memoryScopes,
+  memoryScopesSummary,
+  scopeLabels,
+  selectableScopes,
+} from "./access-scopes.js";
 import { AgentAccountsSettings } from "./agent-accounts";
 import { ExecutionPolicySettingsCard } from "./execution-policy.js";
 import { MailConfiguration } from "./mail-configuration.js";
@@ -107,7 +112,8 @@ import { RelatedSettings } from "./related-settings.js";
 import { connectedAgentCount as countConnectedAgents } from "./sidebar-counts.js";
 import { WorkspaceGuidance } from "./workspace-guidance.js";
 
-const defaultTokenScopes: AccessScope[] = ["mail:read", "mail:write"];
+/** Memory is on by default for new tokens (spec §5.11); the person can still untick it. */
+const defaultTokenScopes: AccessScope[] = ["mail:read", "mail:write", ...memoryScopes];
 
 const tokenPresets: Array<{ description: string; name: string; scopes: AccessScope[] }> = [
   {
@@ -126,12 +132,14 @@ const tokenPresets: Array<{ description: string; name: string; scopes: AccessSco
       "tasks:read",
       "tasks:write",
       "automations:read",
+      ...memoryScopes,
     ],
   },
   {
     description: "Read your agenda, mail, and generated daily brief without changing them.",
     name: "Daily brief",
-    scopes: ["calendar:read", "reminders:read", "mail:read", "automations:read"],
+    // Read-only preset: it may read memory but never saves it.
+    scopes: ["calendar:read", "reminders:read", "mail:read", "automations:read", "knowledge:read"],
   },
   {
     description: "Create, manage, and audit all supported nohmi material.",
@@ -156,6 +164,7 @@ const tokenPresets: Array<{ description: string; name: string; scopes: AccessSco
       "bookmarks:read",
       "texting:read",
       "texting:write",
+      ...memoryScopes,
     ],
   },
 ];
@@ -1045,6 +1054,22 @@ function TokenAccess({
         preset.scopes.length === scopes.length &&
         preset.scopes.every((scope) => scopes.includes(scope)),
     )?.name ?? "";
+  const scopeSwitch = (scope: AccessScope) => (
+    <Field key={scope} orientation="horizontal">
+      <Switch
+        checked={scopes.includes(scope)}
+        id={`scope-${scope}`}
+        onCheckedChange={(checked) =>
+          setScopes((current) =>
+            checked
+              ? [...new Set([...current, scope])]
+              : current.filter((selectedScope) => selectedScope !== scope),
+          )
+        }
+      />
+      <FieldLabel htmlFor={`scope-${scope}`}>{scopeLabels[scope]}</FieldLabel>
+    </Field>
+  );
 
   return (
     <Card className="settings-section" size="sm">
@@ -1133,23 +1158,17 @@ function TokenAccess({
                       <FieldLegend className="sr-only" variant="label">
                         Fine-tune permissions
                       </FieldLegend>
+                      <FieldSet>
+                        <FieldLegend variant="label">Memory</FieldLegend>
+                        <FieldDescription>{memoryScopesSummary}</FieldDescription>
+                        <FieldGroup className="token-permissions">
+                          {memoryScopes.map(scopeSwitch)}
+                        </FieldGroup>
+                      </FieldSet>
                       <FieldGroup className="token-permissions">
-                        {selectableScopes.map((scope) => (
-                          <Field key={scope} orientation="horizontal">
-                            <Switch
-                              checked={scopes.includes(scope)}
-                              id={`scope-${scope}`}
-                              onCheckedChange={(checked) =>
-                                setScopes((current) =>
-                                  checked
-                                    ? [...new Set([...current, scope])]
-                                    : current.filter((selectedScope) => selectedScope !== scope),
-                                )
-                              }
-                            />
-                            <FieldLabel htmlFor={`scope-${scope}`}>{scopeLabels[scope]}</FieldLabel>
-                          </Field>
-                        ))}
+                        {selectableScopes
+                          .filter((scope) => !memoryScopes.includes(scope))
+                          .map(scopeSwitch)}
                       </FieldGroup>
                     </FieldSet>
                   </CollapsibleContent>

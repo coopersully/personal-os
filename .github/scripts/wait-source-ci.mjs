@@ -1,5 +1,61 @@
 import { pathToFileURL } from "node:url";
-import { SourceClient, stableObservation } from "./source-observation.mjs";
+import { classifyGitChanges, sourceLane } from "./ci-scope.mjs";
+import {
+  ObservationChanged,
+  observeMetadata,
+  SourceClient,
+  SourceSettling,
+  stableObservation,
+} from "./source-observation.mjs";
+
+const shaPattern = /^[0-9a-f]{40}$/u;
+
+export function candidateIdentity(env) {
+  const number = Number(env.PR_NUMBER);
+  if (
+    !Number.isSafeInteger(number) ||
+    number < 1 ||
+    !env.GH_REPO ||
+    !shaPattern.test(env.PR_HEAD_SHA ?? "") ||
+    !shaPattern.test(env.PR_BASE_SHA ?? "")
+  )
+    throw new Error("Missing candidate identity");
+  return {
+    repository: env.GH_REPO,
+    number,
+    expected: {
+      headSha: env.PR_HEAD_SHA,
+      baseSha: env.PR_BASE_SHA,
+      baseRef: env.PR_BASE_REF,
+      retargeted: env.PR_RETARGETED === "true",
+    },
+  };
+}
+
+// The gate job at the end of a source run. It must fail, never skip, whenever the
+// run did not verify the candidate: branch protection treats a skipped required
+// job as passing. The aggregate's result comes from the same run and attempt.
+export function gateDecision(env) {
+  if (env.SOURCE_LANE === "fast") return draftRemedy;
+  if (env.SOURCE_RESULT !== "success")
+    return "Source verification did not succeed in this run; inspect its jobs";
+  if (env.SOURCE_LANE !== "full") return "Source lane is unknown; the run cannot be accepted";
+  return undefined;
+}
+
+// A draft's fast-lane run never reports Source verification, so waiting on it
+// would hold a runner for a result that cannot arrive. Source CI makes the same
+// lane decision from the same classifier, including its fail-closed full scope.
+export function deferredDraft(env, classify = classifyGitChanges) {
+  if (env.PR_DRAFT !== "true" || env.PR_FULL === "true") return false;
+  return sourceLane(classify(env.PR_BASE_SHA, env.PR_HEAD_SHA), { draft: true }) === "fast";
+}
+
+export const settleBudget = 120000;
+export const readySettle = 30000;
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+export const draftRemedy =
+  "Draft candidates run the fast lane only. Mark the pull request ready for review, or add the ci:full label and push, to obtain source verification.";
 
 export function sourceDecision(runs, head, base, number) {
   const applicable = runs
@@ -39,27 +95,20 @@ export async function readRuns(
 }
 
 async function main() {
-  const {
-    GH_REPO: repository,
-    PR_HEAD_SHA: head,
-    PR_BASE_SHA: base,
-    PR_NUMBER: numberText,
-  } = process.env;
-  const number = Number(numberText);
-  if (
-    !Number.isSafeInteger(number) ||
-    number < 1 ||
-    !repository ||
-    !/^[0-9a-f]{40}$/.test(head ?? "") ||
-    !/^[0-9a-f]{40}$/.test(base ?? "")
-  )
-    throw new Error("Missing candidate identity");
-  const expected = {
-    headSha: head,
-    baseSha: base,
-    baseRef: process.env.PR_BASE_REF,
-    retargeted: process.env.PR_RETARGETED === "true",
-  };
+  const { repository, number, expected } = candidateIdentity(process.env);
+  if (process.argv.includes("--gate")) {
+    const rejection = gateDecision(process.env);
+    if (rejection) throw new Error(rejection);
+    if (!expected.baseRef) throw new Error("Missing candidate identity");
+    for (let attempt = 0; ; attempt++) {
+      try {
+        observeMetadata(new SourceClient(repository, number), expected);
+        return;
+      } catch (error) {
+        if (!(error instanceof ObservationChanged) || attempt === 1) throw error;
+      }
+    }
+  }
   // Collector snapshots use this same observer, without publishing a check or changing polling.
   if (process.argv.includes("--collect")) {
     process.stdout.write(
@@ -67,15 +116,36 @@ async function main() {
     );
     return;
   }
-  const deadline = Date.now() + 55 * 60 * 1000;
+  const draft = deferredDraft(process.env);
+  // Marking a draft ready starts a full source run from the same event. Give it time
+  // to register so the draft's fast-lane run is not mistaken for the latest one.
+  if (process.env.PR_EVENT_ACTION === "ready_for_review") await pause(readySettle);
+  const started = Date.now();
+  let settling;
+  const deadline = started + 55 * 60 * 1000;
   while (Date.now() < deadline) {
-    const observation = stableObservation(
-      new SourceClient(repository, number, Math.min(120000, deadline - Date.now())),
-      expected,
-    );
-    if (observation.state === "success") return;
+    let observation;
+    try {
+      observation = stableObservation(
+        new SourceClient(repository, number, Math.min(120000, deadline - Date.now())),
+        expected,
+      );
+    } catch (error) {
+      // A dispatched gate reads the run seconds after it completes. Give the job
+      // inventory a bounded time to agree before treating the gap as a failure.
+      // The window opens at the first disagreement, not when polling began.
+      settling ??= Date.now();
+      if (!(error instanceof SourceSettling) || Date.now() - settling >= settleBudget) {
+        if (draft) console.error(draftRemedy);
+        throw error;
+      }
+    }
+    if (observation?.state === "success") return;
+    if (draft) throw new Error(draftRemedy);
+    // A dispatched gate starts seconds before its source run is marked complete.
+    const interval = Date.now() - started < 120000 ? 10000 : 30000;
     await new Promise((resolve) =>
-      setTimeout(resolve, Math.min(30000, Math.max(0, deadline - Date.now()))),
+      setTimeout(resolve, Math.min(interval, Math.max(0, deadline - Date.now()))),
     );
   }
   throw new Error("Source CI did not finish within the metadata gate deadline");

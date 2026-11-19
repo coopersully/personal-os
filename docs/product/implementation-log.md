@@ -1,5 +1,143 @@
 # nohmi — Implementation Log
 
+## 2026-11-18 — Agent-managed memory foundation (PR #419, not merged)
+
+- COO-166, COO-167 — Agents manage memory and the person is the override, per the
+  [November 15 design](../superpowers/specs/2026-11-15-persistent-memory-design.md). Agent saves
+  are active at once with 1-8 tags; inferences stay labeled `inferred`. Agents can revise,
+  supersede, dispute, archive, unarchive, restrict, raise sensitivity and merge tags. An agent
+  change to a memory the person holds becomes a linked proposal and a visible conflict.
+- Memory is stored per owner with immutable revisions, source attribution, links, exact-retry
+  receipts and audit rows that carry no memory values. Workspace and source grants are checked
+  again on every read and retry, so a narrowed or revoked credential loses access at once.
+- `get_ilo_context` carries a session-start memory core of up to 4 KiB: `core` memories, the tag
+  index and counts, with truncation reported. `maintain_finances` starts and every `maintain_mail`
+  response carry a memory section of up to 16 KiB for that workspace. Sensitive memory is left out
+  of both but is returned by search and reads, labeled sensitive. Memory the person blocks is
+  invisible to agents on every path.
+- Purposes are optional ranking hints. A memory derived from others takes the narrowest workspace
+  and highest sensitivity of its live sources at read time; the person is never denied their own
+  memory.
+- Forgetting is now Trash: a memory and its derived copies leave every agent path at once, can be
+  restored for 30 days, and are then purged, or purged at once with Delete now, to a content-free
+  tombstone. A purge pass runs every six hours.
+- `knowledge:read` and `knowledge:write` are default scopes for new OAuth consents and personal
+  access tokens. Migrations `0146_persistent_memory` and `0147_memory_trash_version` create the
+  storage (0147 adds the Trash version column, its check and two lookup indexes), and 0146
+  backfills both scopes onto every live agent credential holding a workspace scope, with an
+  audit row each. A credential the previous API process issues during the release, after the
+  migration, has no memory until the person re-authorizes that connection. Consent and Agents
+  settings on web and iPhone show the memory line.
+- MCP tool descriptions teach agents to save as soon as something important is said, search
+  before saving, reuse tags, mark lasting memories `core`, update instead of duplicating, and check
+  origin, freshness and conflicts before acting. Memory grants no permission.
+- Removed: the three-selection learning rule and its routes, full-erasure forgetting with its
+  deletion-ledger dependency, and `explain_context`.
+- Not shipped: the web and iPhone Memory screens (PR 2 and PR 3, COO-168); removing only the
+  memory scopes from a connection (today the person revokes and reissues it); vector search;
+  automatic learning; `explain_context` and context-use records; an external deletion record that
+  survives a backup restore.
+- Verified: real PostgreSQL integration tests for the migration and backfill, trash and purge,
+  tags, the core, workflow sections and owner isolation, and a registered MCP, client and API test
+  in which one agent saves a core memory, a second agent with its own token finds it in the core
+  and by tag, and the person's Trash removes it from the second agent's next search. Not merged,
+  deployed or observed in production.
+
+## 2026-11-18 — iPhone refinement of the remaining slices (local candidate)
+
+Corrections to the iPhone work in the entry below, on the same branch.
+
+- Spending — Summary opens on the saved Spending view; a saved bubbles view opens as List. A
+  custom range that cannot be read keeps the Transactions list on the last usable range and says
+  which dates are shown. Overview, Budget and Spending share one period calculation.
+- Finance conversation — showing the transcript at its latest message records it as read through
+  that message, however many earlier messages are unloaded.
+- Transaction editor — the accounts read's loading or failed state is shown where the Date field
+  goes.
+- Finance maintenance and automations — after an unknown outcome the latest run, or the
+  registrations, are read again before Start or Register is allowed again; a registration that
+  did arrive is reported as registered. The maintenance card shows the newer of the last response
+  and the run read. A confirmed automation write is reported when the server answers, with the
+  list read behind it.
+- Mail snooze — times are worked out in the planning time zone when a row is pressed, and a time
+  that is not ahead is refused before anything is sent. Snoozed rows show when each conversation
+  returns. End snooze removes the snooze and offers Undo back to the earlier time while it is
+  still ahead. Undoing an archive of a snoozed conversation no longer lists it in the inbox.
+- Mail selection — holds up to 100 conversations, cannot be changed or cancelled while its action
+  runs, and offers no Undo for read or unread.
+- Mail rules — Disable reports a timeout or server fault as not confirmed and reads the rules
+  again; a 409 says the rule changed elsewhere.
+- Settings — the "Calendar layout" and "Finance layout" groups say that week start (Calendar week
+  strip and the Spending week) and the Spending view apply on iPhone.
+- Two API additions, no schema change: `DELETE /v1/mail/threads/:id/snooze` ends a snooze (204,
+  repeatable, 404 for a conversation the person does not have), with `unsnoozeMailThread` in the
+  API client; and Mail threads carry an optional `snoozedUntil` when the snoozed list is read.
+- Tests were added or changed with each fix: mobile unit and screen tests, the Mail route and
+  service integration tests and the API client test.
+- Not verified: none of this has been run on a simulator or a device, there is no CI run, and
+  nothing is merged, deployed or verified in production. This is not a release.
+
+## 2026-11-18 — iPhone completion: remaining slices (local candidate)
+
+- COO-229 — Spending reads on the account's saved Spending defaults and a saved default period, and
+  the Assistant tab and its conversation show unread counts.
+- COO-241 — Mail conversations can be snoozed, and a long press starts a selection that marks
+  read or unread, archives or snoozes up to 100 conversations, one guarded write at a time.
+- COO-254 — A manual transaction's date can be corrected from the iPhone edit form and from the web
+  transaction dialog. A synced transaction's date still cannot be changed.
+- COO-228 — Finance setup (onboarding review, first budget draft and record maintenance, reached
+  from a Finish Finance setup row on Overview) and Finance automations (list, register, rename,
+  enter a host automation ID, cancel setup and remove). Fire tokens, host prompts and run recovery
+  remain on the web.
+- COO-238 — Mail shows what needs attention above the inbox, the steward's findings in a
+  conversation and an answer to its questions, and Mail rules can be inspected, created off,
+  previewed and turned on from the preview.
+- COO-265 — A tracked audit exception for the unpatched picomatch advisory; its terms are in
+  `docs/engineering/code-standards.md`.
+- The API addition in this entry is an optional `date` on the transaction update (the refinement
+  entry above adds two Mail ones). It is accepted only for a
+  manual account's transaction, requires the revision the caller read (409 when it no longer
+  matches), is refused for an agent that also sends a category, and is recorded in the audit event.
+  The MCP `update_finance_transaction` tool accepts it under the same rules.
+- Verified: unit and screen tests for each slice under jsdom, API integration tests for the date
+  change against PostgreSQL, domain and MCP tests for the new field, and `pnpm lint`.
+- Not verified: no simulator or device check of any of the new work on this branch, no CI run, and
+  nothing is merged, deployed or observed in production. Nothing here depends on a bank
+  connection. The `apps/mcp` and `apps/web` type checks reported errors in files this work did not
+  touch (a zod version mismatch and a library lag) that were not checked on a clean tree. This is
+  not a release.
+
+## 2026-11-13 — Finished projects on the iPhone Projects tab (local implementation)
+
+- COO-217 — The native Projects tab has Active, Completed, Cancelled and All status chips with
+  counts. Completed and cancelled projects that are not archived are reachable there and open with
+  all of their tasks, including finished ones; their rows and pinned cards name the status, also
+  to assistive technology. Finished and archived projects, and projects in an archived list, offer no Add. Counts appear only once
+  lists and projects have loaded. Previously Projects
+  listed only open projects and Archive only archived ones, so these had no entry point.
+- Lists, Projects and Archive search also matches list descriptions and project why and notes.
+  Directory filtering, search and ordering live in a pure module with unit tests.
+- Focused Tasks tests, mobile type checking and changed-file lint passed; the chips were observed
+  in the iPhone simulator against the demo fixture. This is not a production or TestFlight release.
+
+## 2026-11-13 — Finance playbook 1.1.0 and profile facts (source change)
+
+- The Finance playbook is version 1.1.0: it adds a scored stewardship rubric, ledger rules, alert
+  tiers and dated reference limits with primary sources. The assessment returns one result per
+  check with its arithmetic; checks without facts are `not_assessed`. Retirement saving rate and
+  employer match are not assessable because those facts have no storage yet.
+- `update_financial_profile` over MCP now accepts debts, insurance policies and planning
+  preferences in addition to the six scalar facts. Storage and the HTTP route already accepted them.
+- Scheduled-run instructions (version 3) load the profile, goals and playbook before financial
+  work and record durable stated facts.
+- A payment the provider labels as a credit card payment no longer counts toward spending,
+  refunds or budget pace when a connected, planning-included credit card received that amount
+  within five days; a payment to a card nohmi cannot see still counts. It is not linked
+  or resolved by this rule.
+- Focused unit tests and typechecks pass. This is not yet merged, deployed or observed in
+  production; the provider's detailed label on existing production rows is unverified because no
+  read exposes it. User Knowledge (Memory) remains unimplemented.
+
 ## 2026-11-06 — Native Tasks source acceptance
 
 - [Native Tasks iPhone workflows](https://github.com/coopersully/personal-os/pull/367) merged with
@@ -1299,3 +1437,258 @@ coarsened for weather requests, and never tracked in the background. Saved-locat
 honest time-only sky cover denied permissions, unavailable fixes, stale observations and outages.
 See `docs/engineering/mobile-today-sky.md` for lifecycle, privacy and verification boundaries.
 This is a local candidate, not a production or TestFlight release.
+
+## 2026-11-13 — Native Finance account management (local implementation)
+
+COO-221 — Manage Finance accounts on iPhone. Accounts opens a manual account form; account details
+offer Edit account, Sync account, Review duplicate and Stop tracking account, and duplicate review
+runs in the app instead of handing off to the browser. Every action uses existing Finance
+endpoints, one toast from loading to the confirmed result, and a native confirmation before
+tracking stops. Unknown outcomes never claim success: edits, stop tracking and duplicate
+resolution retry under the same idempotency key, and an unconfirmed add looks for the earlier
+attempt before writing again. Connecting a bank is not part of this change.
+
+Focused Finance tests, mobile types and lint passed. This is a local candidate: it was not run on
+a simulator or device, and it does not establish production or TestFlight acceptance.
+
+## 2026-11-13 — Native Mail reading candidate
+
+COO-230 — Read and search Mail threads on iPhone replaces the title-only Inbox and Mailboxes
+screens with a unified inbox, a per-account mailbox list, an in-memory conversation reader and
+server search.
+
+- `GET /v1/mail/thread-summaries` returns thread rows without body text, recipient lists or the
+  provider thread identifier, is `no-store`, requires `mail:read`, and pages after the last row's
+  `(receivedAt, id)`. `GET /v1/mail/threads` and the web client are unchanged.
+- The native lists cache summaries only. Message bodies are detail reads held while the reader is
+  open and dropped when it closes.
+- Search is typed in the shared workspace header, which writes the `mailSearch` route parameter
+  on Mail and shows no sample results there; the list reads that parameter and searches the server.
+- Further pages load as the list reaches its end. "Load more messages" appears only after a page
+  fails to load.
+- Triage, compose, reply, attachments downloads and rules are not included. This is a local
+  candidate covered by focused tests; it is not a production or TestFlight release.
+
+## 2026-11-15 — Native Mail read state and archive (local candidate)
+
+COO-236 — Mark read or unread and archive Mail on iPhone adds those actions to each conversation
+row and to the open conversation, through the existing `PATCH /v1/mail/threads/:id`. No route or
+server code changed.
+
+- Archive sends the conversation's mailboxes without its inboxes, as web does, and is offered only
+  for a conversation in an inbox. Each write sends the displayed `updatedAt` as
+  `expectedUpdatedAt`, which web does not.
+- The change shows at once as an overlay and reaches cached summaries only after the API confirms
+  it. A rejection or an unconfirmed outcome drops the overlay, raises one Sonner error and re-reads
+  Mail. A response carrying `partialEffect`, a timeout, a lost connection and a 5xx are all
+  unconfirmed.
+- A confirmed Archive of a Gmail conversation offers a ten-second Undo that restores the previous
+  mailboxes. iCloud offers none: the thread update moves the message to Archive but keeps the
+  thread's provider identifier pointing at the inbox, so a restore returns success without moving
+  anything. Restoring an archived iCloud conversation needs an API change and is not in this work.
+- A confirmed Undo puts the conversation back in the loaded inbox without waiting for the read
+  that follows, and an outcome is dropped if the session changes while pending reads are cancelled.
+- After an unconfirmed outcome Mail is read at once and again five seconds later.
+- Snooze, bulk triage, deletion, drafts and sending are not included. This is a local candidate
+  covered by focused tests; it was not run on a simulator or device or against a live Gmail or
+  iCloud mailbox, and it is not a production or TestFlight release.
+
+
+## 2026-11-16 — Native Mail drafts, reply and send (local candidate)
+
+- COO-237 — On iPhone, Mailboxes lists unsent nohmi drafts, including agent-prepared ones. A person
+  can write a new message, reply to or forward a conversation opened from Mail, edit and save a
+  draft, discard it, and send it. Only existing API routes are used; no server change.
+- Sending needs an explicit review of the saved draft (sender, recipients, subject, message) and a
+  second tap on Send message. It is reported as sent only when the API confirms it. After a failed
+  or interrupted send the draft is read again; an unconfirmed message locks and is never re-sent
+  automatically, and a draft the API marks for review can be recorded as sent or not sent.
+- An interrupted draft create is not repeated blindly: the next save looks for the draft first.
+- Not included: attachments. The draft API has no attachment field, so a file cannot be attached
+  or forwarded from iPhone until the API supports it. Reply all and rich text are also not included.
+- Focused Mail tests, mobile type checking and lint passed. Not observed in the iPhone simulator,
+  and no message was sent through a real provider. This is not a production or TestFlight release.
+
+## 2026-11-14 — Native task filters by List, Project and due shortcuts (local candidate)
+
+COO-218 — The iPhone task filter sheet narrows global views (To-do, All, Upcoming, History,
+Trash and search) by List and by Project, and adds Today, Tomorrow and Next 7 days due shortcuts
+above the date pickers. Active choices show as removable chips with the list or project name; a
+shortcut range is one chip.
+
+- The query matches the web filters: a list or project sends `listId`/`projectId` with
+  `kind: "task"`, choosing a list drops a project, and a shortcut sends whole-day `dueAfter` and
+  `dueBefore` bounds in the planning timezone in place of a `due` state. A due date picked by
+  hand also replaces the `due` state.
+- A list or project browser and the Reminders view do not offer List or Project.
+- No API, schema or shared-component change. The shortcut bounds are a mobile copy of the web
+  preset maths; moving both to the shared domain package is a follow-up.
+- A failed lists or projects read shows both rows as Unavailable with a retry, and a selected
+  list or project that is no longer offered stays in its row, named as its chip names it, so it
+  can be cleared.
+- This is a local candidate covered by focused tests. The simulator check on To-do and All is
+  outstanding, so the List and Project pickers opening over the filter sheet have not been seen
+  on a device or simulator. It is not a production or TestFlight release.
+
+## 2026-11-15 — Native header search across workspaces (local candidate)
+
+COO-232 — The iPhone header search no longer shows sample results. Outside the pages that filter
+their own list (Tasks, Mail, Finances Accounts), it lists real matches from the workspace search
+route: Today searches Tasks, Mail, Finances and Calendar, grouped by workspace; Calendar and
+Finances pages search their own workspace.
+
+- No API, schema or client change. The mobile app calls `GET /v1/workspaces/:workspace/search`
+  with `kind: "content"`, one workspace after another because the API admits one search per
+  account and replaces a queued one.
+- Failed workspaces are named in one Sonner error per search and the other groups stay; the list
+  offers a retry and carries no failure copy. Empty results name the workspaces that answered.
+- Include archive starts from each workspace's search preference and can be overridden per search.
+- Results open existing screens. Mail has no conversation route, so a conversation opens Mail
+  searched for its subject (cut to 200 characters), an archived conversation opens the mailbox
+  list, and a snoozed conversation or one only in Sent or Drafts is not reachable from its
+  result; a mailbox opens the mailbox list, not that mailbox. COO-259 tracks the conversation
+  route.
+- The sample detail route (`/detail/[id]`), the sample briefing and sample workspace screens and
+  their fixtures are removed. The unlinked preview settings and monitoring screens remain.
+- This is a local candidate covered by focused tests. It has not been run on a simulator or
+  device against a live API, and it is not a production or TestFlight release.
+
+## 2026-11-15 — Native task row details and archived search (local candidate)
+
+COO-219 — iPhone task rows show reserved time and the owning List / Project, and honor the saved
+row-detail preference for estimate, notes and tags. A task search honors "Include archived in
+search".
+
+- Row lines: title, urgency scan line (unchanged), a context line (reserved time,
+  estimate), the List / Project on its own line, up to two lines of notes, then tag chips (five, then a count). Absent values render
+  nothing. A row does not repeat a container its screen is scoped or filtered to.
+- Search: with the preference on, a search without a fixed or chosen status sends `status: "all"`
+  and, outside a list or project, a second read with `status: "archived"` whose matches are
+  listed last under their own heading. A failed search raises one Sonner error; a failed
+  archived read beside other matches offers its own retry. Cancelled tasks say Cancelled. To-do (fixed open status), History and Trash are unchanged.
+- The preference notes no longer say the row-detail toggles configure only the web app.
+- No API, schema or shared-component change.
+- Verified by presentation and screen tests only. Not checked on a simulator or device.
+
+## 2026-11-15 — Native task select-all, navigation counts and project header (local candidate)
+
+COO-220 — iPhone bulk selection can select every loaded item that can change; Browse, Lists,
+Projects and Archive show item counts; a project page shows the project's why and target date.
+
+- Select all sits in the selection bar, takes the loaded changeable items up to the existing
+  limit of 100 and drops a read-only pick. The selected count and the actions cover only
+  selected items still listed. Bulk feedback stays one Sonner toast.
+- Counts are the `total` of the query each destination opens, read with `limit: 1` through the
+  existing task workspace route: seven reads for Browse, and one per list or project row or
+  pinned card that the directory has drawn. Browse's Archive row counts containers from the
+  loaded directories. An unread or failed total shows no count; failed totals raise one Sonner
+  error. Counts re-read after a Tasks action, without holding it open, and on returning to a
+  directory.
+- The project header sits under the title, above filters and tasks.
+- No API, schema or shared-component change. The Browse rows use a Tasks-owned row because the
+  shared navigation row has no trailing value.
+- Verified by presentation and screen tests only. The simulator check of bulk complete and trash
+  after Select all is outstanding, and row virtualization bounding the count reads is a property
+  of the device list that jsdom does not exercise. Not a production or TestFlight release.
+
+## 2026-11-15 — Native Today includes Calendar and Mail (local candidate)
+
+COO-240 — The iPhone Today briefing adds Today’s events and Mail beside Needs you, Coming up
+and Handled for you.
+
+- Today’s events reads the account’s local day from `GET /v1/events` and shows up to three
+  events that are still running or ahead, then all-day events. A row opens the event detail.
+- Mail reads open Mail attention items from `GET /v1/assistant/attention` and shows the three
+  most important. A row tied to a conversation opens it in the Mail reader; other rows open Mail.
+  Unread inbox mail is not listed; its count is a chip that opens Mail.
+- Calendar and Mail join the existing refresh, focus and foreground reads and the one Today
+  refresh toast. Each section states its own loading, empty, not-set-up and unavailable state, so
+  one failed source leaves the rest of the briefing in place.
+- No API, schema or shared-component change. Coming up still combines tasks, reminders and
+  expected Finance occurrences only; events on later days are not in it.
+- This is a local candidate covered by focused tests. It is not a production or TestFlight release.
+
+## 2026-11-15 — Native Calendar event create, edit and delete (local candidate)
+
+COO-239 — On iPhone a person can create an event from the agenda, edit it and delete it from its
+details, and restore a deleted event from the delete toast's Undo.
+
+- The app calls the existing event routes (`POST /v1/events`, `PATCH /v1/events/:id`,
+  `POST /v1/events/:id/trash`, `POST /v1/events/:id/restore`). No API, schema or shared-component
+  change; the root stack registers the new `calendar-event-edit` route inside the signed-in guard.
+- Edit and Delete appear only for an event on a writable calendar that is not a mirrored busy
+  block. Edits and deletes carry the event and busy-block revisions the person reviewed.
+- Times are entered and saved in the account planning timezone. All-day events are sent as whole
+  calendar days in the form each provider reads back.
+- A write is reported as done only after the API confirms it. An unconfirmed result re-reads the
+  calendar and is never shown as saved; an unconfirmed create is not retried without the person's
+  confirmation because event creation is not yet idempotent on the server (COO-27).
+- Undo after delete is offered only when restoring returns the same event; provider events with
+  guests, a repeat rule or a meeting link are deleted without Undo and the confirmation says so.
+- Guests, reminders, repeat rules, meeting links, blocking time and conflict review (COO-242) are
+  not included. This is a local candidate covered by focused tests; the simulator check and a
+  write against a real Google or iCloud calendar are outstanding. It is not a production or
+  TestFlight release.
+
+## 2026-11-17 — nohmi web links open in the iPhone app (local candidate)
+
+COO-233 — The iPhone app can claim nohmi web links to a task, reminder, transaction, calendar
+event or mail conversation and open the matching screen (Universal Links).
+
+- The app validates a handed-over link against the configured web origin and a fixed list of
+  record links, queues it, and opens it once signed in; a conversation opens in the shared Mail
+  reader. Unknown links are rejected with one Sonner error. No API or schema change.
+- Production configuration: the web app now ships
+  `/.well-known/apple-app-site-association`, nginx serves it as JSON, and signed builds carry the
+  `applinks:` associated-domains entitlement for their HTTPS web origin.
+- `/plaid/return` is reserved in the association file as the bank sign-in return link for
+  COO-234. The app drops it without reading its parameters; nothing uses it yet.
+- Not in effect until three things happen outside the repository: the web change is deployed, a
+  new signed build is installed, and the Apple App ID has the Associated Domains capability. See
+  "iPhone Universal Links" in `docs/engineering/external-boundary-reliability.md`.
+- This is a local candidate covered by parsing, opener, nginx and build-output tests. No link has
+  been opened on a device or simulator; Apple's fetch of the file and the signed entitlement are
+  unverified. It is not a production or TestFlight release.
+
+## 2026-11-16 — Native Calendar blocks, conflicts and free-time check (local candidate)
+
+COO-242 — On iPhone a person can block an event's time on their other calendars as Busy or
+Details, change that or remove the block, see which events conflict with an event, and see
+whether a proposed time is free while creating or editing.
+
+- The app calls the existing block routes (`POST /v1/events/:id/blocks`,
+  `PATCH /v1/events/:id/blocks/:blockId`, `POST /v1/events/:id/blocks/:blockId/trash`) and
+  `GET /v1/events`. No API, schema or shared-component change; the root stack registers the new
+  `calendar-event-blocks` route inside the signed-in guard.
+- A new block starts from the saved busy-block privacy. Each change is reported as done only
+  after the API confirms it, with the event and block revisions the person saw.
+- After an unconfirmed block attempt the next one reads the event and the destination calendar
+  first, and sends nothing when the block is already there, an unlinked copy would be
+  duplicated, the calendar is hidden, or a read fails.
+- Conflicts and the free-time check are computed on the phone from shown calendars with the
+  Calendar review's overlap rule. The API has no free/busy read, so hidden calendars are not
+  counted and repeating series are not compared. The Calendar review stays read-only and is not
+  shown on iPhone.
+- This is a local candidate covered by focused tests. The simulator check and a block written to
+  a real Google or iCloud calendar are outstanding. It is not a production or TestFlight release.
+
+## 2026-11-17 — Native Mail snooze and selection (local candidate)
+
+- COO-241 — On iPhone, a conversation can be snoozed until a common time or any chosen day and
+  time, Mailboxes lists Snoozed conversations, and a snooze can be ended from there. Touching and
+  holding a conversation starts a selection of up to 50 that can be marked read or unread,
+  archived, snoozed or, under Snoozed, unsnoozed together. Only existing API routes are used.
+- A selection's action confirms each conversation separately. A partial failure says how many
+  changed, keeps the unconfirmed conversations selected and offers Undo only for confirmed changes.
+- Limits that need an API change: there is no route to end a snooze, so ending one records a
+  snooze that has already passed; thread summaries do not carry when a snooze ends, so Snoozed
+  shows no return time and an ended snooze cannot be undone.
+- Changed on 2026-11-18 (see the refinement entry at the top): a selection holds up to 100,
+  `DELETE /v1/mail/threads/:id/snooze` ends a snooze, snoozed conversations carry
+  `snoozedUntil`, Snoozed shows return times and an ended snooze offers Undo. The two limits
+  above no longer apply.
+- Focused Mail tests, mobile type checking and lint passed. Observed in the iPhone simulator on
+  the demo fixture: snooze from a row and from an open conversation, the Snoozed list, End
+  snooze, selection, and a selection snoozed and undone. The fixture mailbox refuses provider
+  writes, so a selection marked read or archived was seen only as a refusal. This is not a
+  production or TestFlight release.

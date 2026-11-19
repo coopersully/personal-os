@@ -149,6 +149,47 @@ idempotent replay. Production-equivalent evidence must separately prove runtime 
 outbound HTTPS reachability, Link configuration, callback correctness, and successful transition
 from a handoff to connected accounts. Green mock tests do not prove any of those runtime facts.
 
+### iPhone Plaid Link
+
+The iPhone app presents Plaid's native Link (`react-native-plaid-link-sdk`, which vendors
+`LinkKit.xcframework`) for a link token issued by the existing human-session routes
+`POST /v1/finances/plaid/link-token`, `/v1/finances/plaid/exchange` and
+`/v1/finances/accounts/:id/reconnect`. The app holds no Plaid client identity or secret. Bank
+credentials go from Plaid's screens to Plaid over its own HTTPS/443 transport; nohmi receives only
+the public token, institution and account names and masks. Link runs for as long as the person
+needs, so it is outside the API's 15-second request bound; each API call on either side of it is
+an ordinary bounded request.
+
+The commit point of a new connection is the exchange response. The public token is single-use and
+the exchange route takes no idempotency key, so the app never repeats an exchange whose outcome is
+unknown; an Item created by a lost response appears when accounts are next read. Reconnect
+completion is idempotent by key and may be retried. Cancel, a Plaid error and a module that cannot
+load each end in a stated "nothing connected" or "nothing changed" result.
+
+Plaid requires a `redirect_uri` on the link token for institutions that sign in through OAuth on
+iOS, in update mode too. The iPhone app names itself (`client: "ios"`) when it asks for a token,
+and the API adds the optional `PLAID_IOS_REDIRECT_URI` to that token only. The setting must be an
+HTTPS URL without credentials, query or fragment; startup fails otherwise. Unset, or for any other
+caller, the request to Plaid is byte-for-byte what it was, so web is unaffected. The intended value
+is `https://<production web origin>/plaid/return`, the path COO-233 reserves. The Mac mini stack
+forwards the variable; the retained ECS task definition does not.
+
+The setting is Declared only. Three things outside this boundary record must be true before it is
+set in production, or Plaid will reject the token or return to a page instead of the app: the same
+URI is in the Plaid dashboard's allowed redirect URIs; that origin serves an
+`apple-app-site-association` file covering `/plaid/return` for `app.personal-os.mobile`; and the
+app is built with the matching Associated Domains entitlement (the last two belong to COO-233).
+The app drops the returning link without reading or logging it (COO-233); whether Link then
+resumes by itself has not been checked on a device. Nothing serves `/plaid/return` on the web, so
+if iOS does not hand the link to the app the person lands on the web shell; that is a known gap.
+Until all of this is in place OAuth institutions are not expected to complete on iPhone. That is a
+declared gap, not a verified failure mode.
+
+Component tests replace the native module and prove the app's handling of success, cancel, provider
+error, refusal and unknown outcomes. They do not prove that the pod links, that Link presents, that
+a token issued by the deployed API is accepted by the SDK, or that any institution completes. Those
+need a native build, a sandbox institution in the simulator and a real institution on a phone.
+
 ## Ritual optional-step follow-ups
 
 The ritual API owns acceptance of optional follow-ups. A human-session completion action authorizes
@@ -352,3 +393,41 @@ verification. The owner can inspect current delivery summaries, and the original
 receipt history. Actual unattended permission, external bootstrap adoption, next scheduled
 invocation and successful causal Chat reply remain post-deploy evidence requirements. API tests and
 an issued prompt alone cannot establish them.
+
+## iPhone Universal Links
+
+iOS decides whether a nohmi web link opens the app. The app owns the claim (the
+`applinks:<web host>` associated-domains entitlement, written by `apps/mobile/app.config.ts` from
+the HTTPS `EXPO_PUBLIC_APP_URL` of the build; archives bind it to production) and the web origin
+owns the proof (`/.well-known/apple-app-site-association`, built from `apps/web/public` and served
+by `deploy/nginx.conf` as `application/json`, without a redirect). The file names the App ID
+`7J7HDVDCKQ.app.personal-os.mobile` and the record links listed in
+`docs/design/mobile-frontend.md`, plus `/plaid/return`, reserved as the bank sign-in return link
+for COO-234; the app drops that link's parameters and opens nothing. The Apple App ID needs the Associated Domains capability and a
+provisioning profile that carries it; archive builds use automatic signing with provisioning
+updates, which is expected to add it but is not proven until an archive succeeds.
+
+Apple's servers fetch the file over public HTTPS/443 through Cloudflare and the gateway, not the
+phone, and cache it; a device reads Apple's copy at install or update and periodically after. A
+changed file can therefore take a day or more to reach phones, and a bot rule or challenge at the
+edge that blocks Apple's fetcher disables the feature without any error in nohmi. There is no
+request, credential, timeout or retry in nohmi's own runtime on this path, and nothing durable is
+written: a link carries only a record id, and every read it triggers passes the normal session
+and owner checks. The link is not an authority; a signed-out or different account sees sign-in or
+"no longer available".
+
+Degraded behaviour is the browser: when the file is missing, stale, blocked, or the entitlement
+is absent, the link opens the web app as before. Rollback is removing the file or the
+entitlement; removing the file takes effect only after Apple's cache expires. The AWS web path
+(`infra/web.tf`, S3 behind CloudFront) does not set a content type for this extensionless file
+and is not covered by this change.
+
+Tests prove link parsing and rejection, that the file and the parser agree, that the file names
+this app, and that the production nginx image serves it as JSON with 200 and a missing file as
+404. A local web build was checked by hand to contain the file. None of this can prove that Apple fetched and accepted the
+file, that the signed build carries the entitlement, or that iOS opens the app. After the web
+deploy and a signed build, the deployment owner must check
+`https://<web host>/.well-known/apple-app-site-association` from outside the network (200,
+`application/json`, no redirect), Apple's copy at
+`https://app-site-association.cdn-apple.com/a/v1/<web host>`, and on a phone that a record link
+tapped in Notes or Messages opens the right screen without a prompt.

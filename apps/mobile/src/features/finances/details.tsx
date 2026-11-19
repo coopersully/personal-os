@@ -1,75 +1,42 @@
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useEffect, useRef } from "react";
-import { Linking, View } from "react-native";
-import { toast } from "sonner-native";
-import { RowActions } from "../../components/row-actions";
-import { mobileAppOrigin, useAuth } from "../auth/context";
+import { View } from "react-native";
+import { editorActionsOptions } from "../../components/editor-header";
+import { useTheme } from "../../theme";
+import { AccountActions } from "./account-actions";
 import { AccountPreferences } from "./account-preferences";
-import { categoryIcon } from "./category-presentation";
+import { ReconnectBank } from "./bank-link";
+import { categoryIcon, categoryLabel } from "./category-presentation";
+import { csvFed, csvSourceLabel } from "./csv-import";
 import { useFinanceRead } from "./data";
 import { InstitutionLogo } from "./institution-logo";
 import { financeLabel, formatLocalDate, formatMoney, recordAmount } from "./presentation";
 import { Transactions } from "./spending";
+import { activeAllocations, isSplit } from "./splits";
+import { TransactionActions } from "./transaction-actions";
 import { TransactionCategory } from "./transaction-category";
 import { TransactionNotes } from "./transaction-notes";
 import { Card, Copy, FinanceRow, FinanceScreen, Metric, ReadState, Section } from "./ui";
 
 export function FinanceAccountScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { session } = useAuth();
-  const comparisonActive = useRef(false);
-  const comparisonPending = useRef(false);
-  useEffect(() => {
-    comparisonActive.current = true;
-    return () => {
-      comparisonActive.current = false;
-    };
-  }, []);
   const query = useFinanceRead(["accounts"], (api) => api.listFinanceAccounts());
   const account = query.data?.accounts.find((item) => item.id === id);
   const duplicates = query.data?.accountSemantics?.possibleDuplicateGroups?.some((group) =>
     group.accountIds.includes(id),
   );
-  async function compareDuplicates() {
-    if (comparisonPending.current) return;
-    const epoch = session.epoch();
-    const current = () => comparisonActive.current && session.epoch() === epoch;
-    comparisonPending.current = true;
-    const feedback = toast.loading("Opening account comparison…");
-    try {
-      const fresh = await query.refetch();
-      if (!current()) {
-        toast.dismiss(feedback);
-        return;
-      }
-      if (
-        fresh.isError ||
-        !fresh.data?.accounts.some((item) => item.id === id) ||
-        !fresh.data?.accountSemantics?.possibleDuplicateGroups?.some((group) =>
-          group.accountIds.includes(id),
-        )
-      )
-        throw new Error("Account comparison unavailable");
-      const url = new URL("/finances/accounts", mobileAppOrigin);
-      url.searchParams.set("accountId", id);
-      await Linking.openURL(url.href);
-      if (current()) toast.success("Account comparison opened", { id: feedback });
-      else toast.dismiss(feedback);
-    } catch {
-      if (current()) toast.error("Could not open this account comparison.", { id: feedback });
-      else toast.dismiss(feedback);
-    } finally {
-      comparisonPending.current = false;
-    }
-  }
   return (
     <FinanceScreen title={account?.name ?? "Account"}>
       <ReadState query={query}>
         {account ? (
           <>
+            <AccountActions account={account} duplicate={!!duplicates} />
             <Metric
               label={account.institution}
-              value={formatMoney(account.balance, account.currencyCode)}
+              value={
+                csvFed(account) && account.balance == null
+                  ? "Not set"
+                  : formatMoney(account.balance, account.currencyCode)
+              }
               hint={account.accountMask ? `••${account.accountMask}` : undefined}
             >
               <InstitutionLogo account={account} />
@@ -78,43 +45,57 @@ export function FinanceAccountScreen() {
               <FinanceRow
                 centered
                 title="Source"
-                value={financeLabel(account.provider)}
+                value={
+                  csvFed(account)
+                    ? csvSourceLabel(account.provider)
+                    : financeLabel(account.provider)
+                }
                 icon="finances"
               />
-              <FinanceRow
-                centered
-                title="Status"
-                value={financeLabel(account.status)}
-                valueTone={account.status === "needs_reauth" ? "attention" : undefined}
-                accessibilityHint={
-                  account.status === "needs_reauth"
-                    ? "Reconnect this account to refresh its data."
-                    : undefined
-                }
-                icon="attention"
-              />
-              <FinanceRow
-                centered
-                title="Updated"
-                valueTone={
-                  account.status !== "manual" &&
-                  (!account.lastSyncedAt ||
-                    (account.synchronization && account.synchronization.state !== "current"))
-                    ? "attention"
-                    : undefined
-                }
-                value={
-                  account.lastSyncedAt
-                    ? new Date(account.lastSyncedAt).toLocaleString()
-                    : "Not synced"
-                }
-                icon="clock"
-              />
+              {csvFed(account) ? (
+                // Kept by hand: there is no connection whose status or sync time could be shown.
+                <FinanceRow centered title="Records" value="Added by CSV import" icon="receipt" />
+              ) : (
+                <>
+                  <FinanceRow
+                    centered
+                    title="Status"
+                    value={financeLabel(account.status)}
+                    valueTone={account.status === "needs_reauth" ? "attention" : undefined}
+                    accessibilityHint={
+                      account.status === "needs_reauth"
+                        ? "Reconnect this account to refresh its data."
+                        : undefined
+                    }
+                    icon="attention"
+                  />
+                  <ReconnectBank account={account} />
+                  <FinanceRow
+                    centered
+                    title="Updated"
+                    valueTone={
+                      account.status !== "manual" &&
+                      (!account.lastSyncedAt ||
+                        (account.synchronization && account.synchronization.state !== "current"))
+                        ? "attention"
+                        : undefined
+                    }
+                    value={
+                      account.lastSyncedAt
+                        ? new Date(account.lastSyncedAt).toLocaleString()
+                        : "Not synced"
+                    }
+                    icon="clock"
+                  />
+                </>
+              )}
               {duplicates ? (
                 <FinanceRow
-                  title="Compare duplicates in browser"
-                  subtitle="Check for unique history before excluding an account."
-                  onPress={() => void compareDuplicates()}
+                  title="Review possible duplicate"
+                  subtitle="Check for unique history before you stop tracking an account."
+                  onPress={() =>
+                    router.push({ pathname: "/finance-account-duplicate", params: { id } })
+                  }
                 />
               ) : null}
               <AccountPreferences key={account.id} account={account} />
@@ -131,41 +112,31 @@ export function FinanceAccountScreen() {
   );
 }
 export function FinanceTransactionScreen() {
+  const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const query = useFinanceRead(["transaction", id], (api) => api.getFinanceTransaction(id), !!id);
   const accounts = useFinanceRead(["accounts"], (api) => api.listFinanceAccounts());
   const reviews = useFinanceRead(["reviews"], (api) => api.getFinanceReviewQueue());
   const item = query.data?.data;
+  // One part is an ordinary categorized transaction, not a split.
+  const splits = item && isSplit(item) ? activeAllocations(item) : [];
   const categories = useFinanceRead(
     ["categories"],
     (api) => api.getFinanceCategories(),
-    !!item?.allocations?.length,
+    splits.length > 0,
   );
   const review = reviews.data?.find(
     (entry) => entry.transaction.id === id && entry.status !== "resolved",
   );
+  const account = accounts.data?.accounts.find((entry) => entry.id === item?.accountId);
   return (
     <FinanceScreen title={item?.merchant ?? "Transaction"}>
-      <Stack.Screen
-        options={{
-          headerRight: () =>
-            item ? (
-              <RowActions
-                placement="header"
-                label="Transaction actions"
-                actions={[
-                  {
-                    id: "edit",
-                    label: "Edit transaction",
-                    icon: "edit",
-                    onPress: () =>
-                      router.push({ pathname: "/finance-transaction-edit", params: { id } }),
-                  },
-                ]}
-              />
-            ) : null,
-        }}
-      />
+      {/* Without a loaded record the bar offers nothing rather than an empty control. */}
+      {item ? (
+        <TransactionActions item={item} manualAccount={account?.provider === "manual"} />
+      ) : (
+        <Stack.Screen options={editorActionsOptions("Transaction actions", [], t)} />
+      )}
       <ReadState query={query}>
         {item ? (
           <>
@@ -181,15 +152,22 @@ export function FinanceTransactionScreen() {
                 title="Date"
                 value={formatLocalDate(item.date)}
                 icon="calendar"
+                accessibilityHint={account?.provider === "manual" ? "Change the date" : undefined}
+                onPress={
+                  account?.provider === "manual"
+                    ? () =>
+                        router.push({
+                          pathname: "/finance-transaction-edit",
+                          params: { id: item.id, field: "date" },
+                        })
+                    : undefined
+                }
               />
               <ReadState query={accounts}>
                 <FinanceRow
                   centered
                   title="Account"
-                  value={
-                    accounts.data?.accounts.find((account) => account.id === item.accountId)
-                      ?.name ?? "Unavailable"
-                  }
+                  value={account?.name ?? "Unavailable"}
                   icon="finances"
                 />
               </ReadState>
@@ -214,21 +192,23 @@ export function FinanceTransactionScreen() {
               />
               <TransactionNotes key={item.id} item={item} />
             </Card>
-            {!!item.allocations?.length && (
+            {splits.length > 0 && (
               <Section title="Splits">
                 <Card rows>
-                  {item.allocations.map((allocation) => (
-                    <FinanceRow
-                      key={allocation.id}
-                      title={financeLabel(allocation.treatment)}
-                      icon={categoryIcon(
-                        categories.data?.find((category) => category.id === allocation.categoryId)
-                          ?.name ?? "Category",
-                      )}
-                      subtitle={financeLabel(allocation.state)}
-                      value={recordAmount(allocation.amount, item.currencyCode)}
-                    />
-                  ))}
+                  {splits.map((allocation) => {
+                    const name = categories.data?.find(
+                      (category) => category.id === allocation.categoryId,
+                    )?.name;
+                    return (
+                      <FinanceRow
+                        key={allocation.id}
+                        title={name ? categoryLabel(name) : "Category"}
+                        icon={categoryIcon(name ?? "Category")}
+                        subtitle={financeLabel(allocation.treatment)}
+                        value={recordAmount(allocation.amount, item.currencyCode)}
+                      />
+                    );
+                  })}
                 </Card>
               </Section>
             )}

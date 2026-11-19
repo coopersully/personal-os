@@ -5,8 +5,8 @@ packages:
 # Keep transitive runtime dependencies on patched releases until their parents
 # publish dependency ranges that include the fixes.
 overrides:
-  "@modelcontextprotocol/node@2.1.0>@hono/node-server": "2.1.3"
-  "@modelcontextprotocol/sdk@1.29.0>@hono/node-server": "2.1.3"
+  "@modelcontextprotocol/node@2.1.0>@hono/node-server": "2.1.6"
+  "@modelcontextprotocol/sdk@1.29.0>@hono/node-server": "2.1.6"
   "ajv@8.20.0>fast-uri": "3.1.4"
   "body-parser@>=2.0.0 <2.4.0": "2.4.0"
   "brace-expansion@>=4.0.0 <5.0.12": "5.0.12"
@@ -15,16 +15,21 @@ overrides:
   "js-yaml@>=4.0.0 <4.3.2": "4.3.2"
   "source-map-js@>=1.0.0 <1.2.2": "1.2.2"
   "follow-redirects@<1.16.2": "1.16.2"
-  "hono@<4.13.13": "4.13.13"
+  "hono@<4.13.16": "4.13.16"
   "html-to-text@10.0.0>deepmerge-ts": "8.0.1"
   "ip-address@>=10.0.0 <10.7.4": "10.7.4"
   "nodemailer@<10.1.4": "10.1.4"
   "postcss@8.5.17": "8.5.23"
   "proxy-addr@<2.0.8": "2.0.8"
   "qs": "6.16.1"
-  "@modelcontextprotocol/client>zod": "4.6.6"
-  "@modelcontextprotocol/core>zod": "4.6.6"
-  "@modelcontextprotocol/server>zod": "4.6.6"
+  "@modelcontextprotocol/client>zod": "4.6.7"
+  "@modelcontextprotocol/core>zod": "4.6.7"
+  "@modelcontextprotocol/server>zod": "4.6.7"
+
+# Tracked exception (COO-265): see docs/engineering/code-standards.md, Dependency audit exceptions.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-fc5q-39xc-vjpf
 
 allowBuilds:
   '@biomejs/biome': true

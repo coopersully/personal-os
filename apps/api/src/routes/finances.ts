@@ -96,6 +96,7 @@ import type { createFinancePlaybookService } from "../finance-playbook-service.j
 import { compareFinanceScenarios } from "../finance-scenario-service.js";
 import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
+import type { KnowledgeWorkflowMemory } from "../knowledge/workflow-memory.js";
 import { hashToken } from "../security.js";
 import type { AppEnv, Principal } from "../types.js";
 import { requireWorkspaceExecutionRoute } from "../workspace-execution.js";
@@ -128,6 +129,8 @@ type FinanceRouteOptions = {
   financeStatus: FinanceStatusService;
   finances: ReturnType<typeof createFinanceService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
+  /** Loads Finance memory into `start` responses; absent, the section reads as null. */
+  workflowMemory?: KnowledgeWorkflowMemory;
 };
 
 /** Register the Finance-owned HTTP surface without constructing shared services. */
@@ -149,6 +152,7 @@ export function registerFinanceRoutes({
   financeStatus,
   finances,
   mutationContext,
+  workflowMemory,
 }: FinanceRouteOptions) {
   const canonicalMaintenance = () => {
     if (!canonicalFinanceMaintenance)
@@ -455,14 +459,21 @@ export function registerFinanceRoutes({
       ),
     }),
   );
-  app.post("/v1/finances/maintenance", async (context) =>
-    context.json(
-      await canonicalMaintenance().maintainFinances(
-        await parseBody(context, financeMaintenanceInputSchema),
-        context.get("principal"),
-      ),
-    ),
-  );
+  app.post("/v1/finances/maintenance", async (context) => {
+    const input = await parseBody(context, financeMaintenanceInputSchema);
+    const principal = context.get("principal");
+    const result = await canonicalMaintenance().maintainFinances(input, principal);
+    // Only a start loads memory; resume and continue keep their established responses.
+    if (input.operation !== "start") return context.json(result);
+    const memory =
+      (await workflowMemory?.(principal, "finances", {
+        requestId: context.get("requestId"),
+        method: context.req.method,
+        path: context.req.path,
+        status: 200,
+      })) ?? null;
+    return context.json({ ...result, data: { ...result.data, memory } });
+  });
   app.get("/v1/finances/maintenance/:id", async (context) =>
     context.json(
       await canonicalMaintenance().getRun(
@@ -1343,12 +1354,16 @@ export function registerFinanceRoutes({
   );
   app.post("/v1/finances/plaid/link-token", requireHuman, async (context) => {
     const input = context.req.header("content-type")?.includes("application/json")
-      ? await parseBody(context, z.object({ accountId: idSchema.optional() }))
+      ? await parseBody(
+          context,
+          z.object({ accountId: idSchema.optional(), client: z.literal("ios").optional() }),
+        )
       : {};
     return context.json({
       linkToken: await finances.createPlaidLinkToken(
         context.get("principal").userId,
         input.accountId,
+        input.client,
       ),
     });
   });

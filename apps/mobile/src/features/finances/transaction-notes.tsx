@@ -1,10 +1,11 @@
 import type { FinanceTransaction } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Pressable, Text, TextInput, View } from "react-native";
+import { Alert, Text, TextInput } from "react-native";
 import { toast } from "sonner-native";
-import { Icon } from "../../components/icons";
-import { useTheme, workspaceColor } from "../../theme";
+import { Action, Actions } from "../../components/forms/form-rows";
+import { SettingsAccentProvider } from "../../components/settings-accent";
+import { spacing, useTheme } from "../../theme";
 import { useFinance } from "./data";
 import { appliedTransaction } from "./mutations";
 import { FinanceRow } from "./ui";
@@ -74,6 +75,8 @@ export function TransactionNotes({ item }: { item: FinanceTransaction }) {
       if (active.current === owner) setPending(false);
     }
   }
+  // Nothing to lose: the note is already submitted or matches what is saved.
+  const unchanged = submitted || (draft ? (draft.notes.trim() || null) === item.notes : true);
   return (
     <>
       <FinanceRow
@@ -93,7 +96,7 @@ export function TransactionNotes({ item }: { item: FinanceTransaction }) {
         }
       />
       {draft ? (
-        <View style={{ gap: 8 }}>
+        <SettingsAccentProvider workspace="finances">
           <TextInput
             accessibilityLabel="Transaction note"
             multiline
@@ -103,50 +106,45 @@ export function TransactionNotes({ item }: { item: FinanceTransaction }) {
             editable={!pending && !submitted}
             placeholder="Birthday gift for Maya."
             placeholderTextColor={t.secondary}
-            style={{ color: t.ink, fontSize: 16, minHeight: 88, textAlignVertical: "top" }}
+            style={{
+              color: t.ink,
+              fontSize: 17,
+              minHeight: 88,
+              padding: 0,
+              textAlignVertical: "top",
+            }}
           />
-          <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 16 }}>
-            <Pressable
-              accessibilityRole="button"
+          <Actions inset={false}>
+            <Action
+              label={unchanged ? "Close" : "Cancel"}
               disabled={pending}
               onPress={() => {
                 const close = () => {
                   setDraft(null);
                   setSubmitted(false);
                 };
-                if (!submitted && (draft.notes.trim() || null) !== item.notes)
+                if (!unchanged)
                   Alert.alert("Discard note changes?", "Your unsaved note will be lost.", [
                     { text: "Keep editing", style: "cancel" },
                     { text: "Discard", style: "destructive", onPress: close },
                   ]);
                 else close();
               }}
-              style={{ minHeight: 44, justifyContent: "center" }}
-            >
-              <Text style={{ color: t.ink }}>
-                {submitted || (draft.notes.trim() || null) === item.notes ? "Close" : "Cancel"}
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
+            />
+            <Action
+              label="Save"
               accessibilityLabel="Save note"
               disabled={pending || submitted || (draft.notes.trim() || null) === item.notes}
               onPress={() => void save()}
-              style={{
-                minHeight: 44,
-                minWidth: 44,
-                justifyContent: "center",
-                alignItems: "center",
-                opacity:
-                  pending || submitted || (draft.notes.trim() || null) === item.notes ? 0.5 : 1,
-              }}
-            >
-              <Icon name="save" color={workspaceColor(t, "finances")} />
-            </Pressable>
-          </View>
-        </View>
+            />
+          </Actions>
+        </SettingsAccentProvider>
       ) : item.notes ? (
-        <Text style={{ color: t.secondary, fontSize: 15, paddingBottom: 12 }}>{item.notes}</Text>
+        <Text
+          style={{ color: t.secondary, fontSize: 15, lineHeight: 21, paddingBottom: spacing.md }}
+        >
+          {item.notes}
+        </Text>
       ) : null}
     </>
   );

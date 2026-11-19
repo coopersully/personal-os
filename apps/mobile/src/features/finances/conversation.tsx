@@ -1,9 +1,10 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { router, useFocusEffect } from "expo-router";
 import { type ComponentRef, useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Keyboard, Platform, ScrollView, Text, View } from "react-native";
 import { radius, spacing, useTheme } from "../../theme";
 import { ConversationComposer } from "./conversation-composer";
+import { conversationUnreadKey, useConversationUnread } from "./conversation-unread";
 import { useFinance } from "./data";
 import { Copy, FinanceRow, ReadState } from "./ui";
 
@@ -45,6 +46,11 @@ export function Conversation() {
   const transcript = useRef<ComponentRef<typeof ScrollView>>(null);
   const nearBottom = useRef(true);
   const [keyboardInset, setKeyboardInset] = useState(0);
+  const client = useQueryClient();
+  const unread = useConversationUnread();
+  // Native tabs stay mounted, so a mounted transcript is not necessarily one being read.
+  const [visible, setVisible] = useState(false);
+  const marked = useRef(0n);
   const query = useInfiniteQuery({
     meta: { scopedReadFeedback: true },
     queryKey: ["finances", owner, "conversation"],
@@ -62,15 +68,18 @@ export function Conversation() {
     useCallback(() => {
       if (!owner) return;
       let active = AppState.currentState === "active";
+      setVisible(active);
       const poll = () => {
         if (active) void refresh();
       };
       const timer = setInterval(poll, 5_000);
       const listener = AppState.addEventListener("change", (state) => {
         active = state === "active";
+        setVisible(active);
         if (active) poll();
       });
       return () => {
+        setVisible(false);
         clearInterval(timer);
         listener.remove();
       };
@@ -81,6 +90,31 @@ export function Conversation() {
       .slice()
       .reverse()
       .flatMap((page) => page.messages) ?? [];
+  // A message without a usable sequence cannot be placed, so nothing is marked read around it.
+  const sequences = messages.map((message) =>
+    /^\d+$/.test(String(message.sequence)) ? BigInt(message.sequence) : null,
+  );
+  const placed = sequences.every((value) => value !== null);
+  const newest = sequences.reduce<bigint>((max, value) => (value && value > max ? value : max), 0n);
+  const readThrough = unread?.readThrough;
+  /**
+   * Records the conversation as read through its latest message. Opening the tab alone never
+   * does; showing the transcript does, however many earlier messages are still unloaded, so a
+   * read mark far behind the latest page cannot leave the unread badge standing.
+   */
+  const markSeen = useCallback(() => {
+    if (!visible || !placed || !nearBottom.current || readThrough === undefined) return;
+    if (newest <= readThrough || newest <= marked.current) return;
+    marked.current = newest;
+    void api
+      .markFinanceConversationRendered(newest.toString())
+      .then(() => client.invalidateQueries({ queryKey: conversationUnreadKey(owner) }))
+      // Unconfirmed, so the next chance to mark these messages is taken again.
+      .catch(() => {
+        if (marked.current === newest) marked.current = 0n;
+      });
+  }, [api, client, owner, visible, placed, newest, readThrough]);
+  useEffect(markSeen, [markSeen]);
   // Measure the actual composer region, accounting for the native tab bar and workspace header.
   useEffect(() => {
     let active = true;
@@ -118,6 +152,7 @@ export function Conversation() {
               onScroll={({ nativeEvent: { contentOffset, layoutMeasurement, contentSize } }) => {
                 nearBottom.current =
                   contentSize.height - layoutMeasurement.height - contentOffset.y < 80;
+                markSeen();
               }}
               onContentSizeChange={() => {
                 if (nearBottom.current) transcript.current?.scrollToEnd({ animated: false });
@@ -173,38 +208,42 @@ export function Conversation() {
                       <Text selectable style={{ color: t.ink, fontSize: 16, lineHeight: 23 }}>
                         {mine ? message.text : agentMessageText(message.text)}
                       </Text>
-                      {message.recordRefs?.map((ref) => (
-                        <FinanceRow
-                          key={`${ref.kind}:${ref.id}${ref.kind === "budget_plan" ? `:${ref.budgetVersionId}` : ""}`}
-                          title={
-                            ref.kind === "account" && ref.displayLabel
-                              ? ref.displayLabel
-                              : referenceLabels[ref.kind]
-                          }
-                          onPress={() => {
-                            if (ref.kind === "transaction" || ref.kind === "account") {
-                              router.push({
-                                pathname:
-                                  ref.kind === "transaction"
-                                    ? "/finance-transaction"
-                                    : "/finance-account",
-                                params: { id: ref.id },
-                              });
-                              return;
+                      {message.recordRefs?.map((ref) => {
+                        // Reference kinds this client cannot open yet are omitted.
+                        if (!(ref.kind in referenceLabels)) return null;
+                        return (
+                          <FinanceRow
+                            key={`${ref.kind}:${ref.id}${ref.kind === "budget_plan" ? `:${ref.budgetVersionId}` : ""}`}
+                            title={
+                              ref.kind === "account" && ref.displayLabel
+                                ? ref.displayLabel
+                                : referenceLabels[ref.kind as keyof typeof referenceLabels]
                             }
-                            router.push({
-                              pathname: "/finance-chat-reference",
-                              params: {
-                                kind: ref.kind,
-                                id: ref.id,
-                                ...(ref.kind === "budget_plan"
-                                  ? { versionId: ref.budgetVersionId }
-                                  : {}),
-                              },
-                            });
-                          }}
-                        />
-                      ))}
+                            onPress={() => {
+                              if (ref.kind === "transaction" || ref.kind === "account") {
+                                router.push({
+                                  pathname:
+                                    ref.kind === "transaction"
+                                      ? "/finance-transaction"
+                                      : "/finance-account",
+                                  params: { id: ref.id },
+                                });
+                                return;
+                              }
+                              router.push({
+                                pathname: "/finance-chat-reference",
+                                params: {
+                                  kind: ref.kind,
+                                  id: ref.id,
+                                  ...(ref.kind === "budget_plan"
+                                    ? { versionId: ref.budgetVersionId }
+                                    : {}),
+                                },
+                              });
+                            }}
+                          />
+                        );
+                      })}
                     </View>
                   </View>
                 );

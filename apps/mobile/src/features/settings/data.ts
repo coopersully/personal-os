@@ -72,6 +72,28 @@ export function useSettingsAction() {
   };
   return { pending, run };
 }
+/** Publish an accepted record without letting an older in-flight read replace it. */
+export function useSettingsListPublisher<T>(name: string) {
+  const { state, session } = useAuth();
+  const cache = useQueryClient();
+  const owner = state.user?.id;
+  const epoch = session.epoch();
+  const live = useRef({ owner, epoch });
+  live.current = { owner, epoch };
+  return async (update: (records: T[]) => T[]) => {
+    const current = () =>
+      !!owner &&
+      live.current.owner === owner &&
+      live.current.epoch === epoch &&
+      session.epoch() === epoch;
+    if (!current()) return false;
+    const queryKey = ["settings", owner, epoch, name];
+    await cache.cancelQueries({ queryKey, exact: true });
+    if (!current()) return false;
+    cache.setQueryData<T[]>(queryKey, (records) => update(records ?? []));
+    return true;
+  };
+}
 /** Own exact mounted reads through settlement. Native pull refresh uses spinner/errors only. */
 export function useSettingsRefresh(
   queryKeys: readonly QueryKey[],

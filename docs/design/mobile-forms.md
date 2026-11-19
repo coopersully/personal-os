@@ -29,9 +29,59 @@ therefore be top-aligned on a project card and vertically centered in a Project 
   the canonical entity icon, search, selection, cancellation, and a no-results state.
 - `ToggleRow` owns label/switch presentation. `DateField` owns the native date/time control.
 - `Section`/`Group` own rounded surfaces and inset seams. `FormBody` owns scroll and keyboard insets.
-- `styles.settingRow` defines the shared horizontal row geometry: minimum 56 points high,
-  16-point padding, 12-point gaps, vertically centered contents. Keep interactive targets at least
-  44 points. Use the theme's 4-point spacing scale and 16-point grouped-surface radius.
+- `formRow` (`components/forms/form-row.ts`) is the single row geometry: minimum 56 points high,
+  16-point side padding, 12-point vertical padding and gaps, vertically centered contents. Every
+  label/value, toggle, picker, navigation and action row uses it; `styles.settingRow` is an alias.
+  Keep interactive targets at least 44 points. Use the theme's 4-point spacing scale and 16-point
+  grouped-surface radius. Never give one screen's row its own padding.
+- Rows always sit inside a `Section`/`Group`. `SectionNote` owns explanatory or read-only copy in a
+  group (secondary, ink or warning), `SectionItem` gives a content row such as `RecordRow` the
+  group's side padding, and `SectionFootnote` sets copy under the group it explains.
+- `insetRow` is the same row for a surface that already pads its sides, such as a finance card.
+  When a shared row component (`EnumChoice`, `Field`, `ToggleRow`) sits in such a surface, wrap it
+  in `PaddedSurfaceRows` so it lines up with the surface's other rows instead of indenting twice.
+  `formBlock` is the padding of a stacked block: a label above its editor or chips.
+- An expanding row (date, time, tags, an inline finance editor) ends with `Actions`: one
+  right-aligned line of text `Action`s, dismissing command first and confirming command last.
+- `TitleField` owns the leading identity slot of a record title; do not position an icon beside it.
+
+### Shared chrome
+
+These live in `apps/mobile/src/components` and are the only way to build form and settings chrome:
+
+- `editorDismissOptions` declares a stack screen's leading Close, Cancel, Back or Done. On iOS it
+  is a native bar item, so UIKit owns the glass, label width and centered title. Do not pass a
+  custom view as `headerLeft`: the bar wraps it in a second, icon-sized glass capsule.
+- `editorActionsOptions` declares trailing record actions: none renders nothing (never an empty
+  glass circle), one is a native icon button, several use the shared ellipsis menu. It takes the
+  screen's theme so a destructive action stays red. Never set `headerRight: () => null`.
+- `SheetHeader` is the header of an in-content sheet. Both side slots reserve the wider side's
+  width, so the title is centered on the sheet and a long title truncates between the controls;
+  the title is hidden until both sides are measured. A sheet that can be abandoned keeps Close
+  or Cancel leading and passes its confirming control as `trailing`. A sheet that only confirms
+  puts Done on the trailing side with `dismiss="trailing"`.
+- Stack header titles are app-owned copy and follow the lowercase rule in
+  [Lowercase interface typography](system.md#lowercase-interface-typography): "account",
+  "edit transaction", "new project". A title that is user content (a rule, calendar or record
+  name) keeps its spelling. A screen has one title: the bar names the kind of screen and the
+  page heading, when there is one, shows the record's own name. Never repeat the bar title as
+  the page heading; set the bar title to `""` when the page heading already says it.
+- `stackChromeOptions` is the `screenOptions` of every native stack. It sets the bar's interface
+  style from the app theme; a stack without it draws light glass controls under the dark theme.
+- The `SheetHeader` title grows with large text no further than the glass controls (1.3 times)
+  and shrinks to fit before it truncates.
+- `BackLink` is the in-page way back to a parent list shown in place rather than pushed on a
+  stack (a mailbox's conversations over the mailbox list). It draws the registry chevron
+  mirrored beside the parent's name; never type a "‹" character. A pushed screen uses the
+  native stack back button instead.
+- Retry and other text commands in a sheet or page (Try again, Retry loading) are the shared
+  `Action`, inside a `SettingsAccentProvider` for the workspace, not a hand-built pressable.
+- Rows in a workspace sheet or list page use the same groups as forms: `Group` or `Section`
+  owns the surface and seams, a `formRow` pressable or a `SectionItem` around a `RecordRow`
+  owns the padding (Calendars sheet, Mailboxes).
+- `GlassButton` is the one Liquid Glass button: a 44-point capsule for a text label, a 44-point
+  circle for a bar icon and a 56-point circle for the floating Save/Add. Labels are primary ink in
+  both appearances; callers may place it but cannot resize or recolor its label.
 
 Icons identify meaningful concepts, not every primitive setting. Resolve entity identities from
 `src/product/entities.ts`; List and Project retain their glyph across pages, pickers and editors.
@@ -142,13 +192,31 @@ Filters to open a focused sheet with compact labeled choices, followed by dates/
 insert configuration fields into the result list. Changes preview immediately; Done dismisses
 the sheet. Preserve list/project and fixed Tasks/Reminders scope; omit inapplicable type choices.
 
+Global task views narrow by List and by Project through the searchable choice sheet used when
+moving a task. A list or project browser and the Reminders view never offer these choices, so a
+fixed scope cannot be filtered away. Choosing a list keeps only that list's projects on offer and
+drops a project from another list; either choice returns tasks only and removes the Type choice.
+A project chosen on its own stays when its own list is then chosen.
+Both rows stay disabled until lists and projects have loaded, and while Type is Reminders. If
+that read fails, both read Unavailable beside a retry. If a later refresh fails, the choices
+already loaded stay usable beside the same retry, and the failure is the one Sonner error every
+failed read raises, never copy in the sheet. A selected list or project that is no
+longer offered stays in its row under its name, or as Unavailable when it cannot be read; the row
+and its chip always show the same label. Any list and Any project take no entity icon.
+
+Due within offers Today, Tomorrow and Next 7 days above the date pickers. Each is a whole-day
+range in the planning timezone, written to the same Due after and Due before bounds as the web
+presets. A shortcut or a due date picked by hand replaces a due state such as Today & overdue,
+and choosing a due state clears the range. A range edited by hand reads Custom range.
+
 Sort by and Group by are presentation choices, separate from matching filters. On iOS use native
 menu pickers with system selection marks, not check characters prefixed to option text. Describe
 choices in user language (Open & completed, Due date, Newest first), never raw enum values. Show
 the effective sort/group summary next to the result count, including inherited defaults.
 
 Active overrides/search use removable 44-point chips with readable values and explicit accessible
-remove labels. Dates are formatted for people. Reset filters preserves presentation and search;
+remove labels. Dates are formatted for people; a List or Project chip shows its name and a
+shortcut range is one chip (Due within: Tomorrow) that removes both bounds. Reset filters preserves presentation and search;
 Reset view returns to the destination's scope and saved defaults. Saving sort/group defaults is
 a distinct explicit action with Sonner feedback and existing revision safeguards.
 
@@ -267,9 +335,17 @@ never grants access before the existing authorization flow completes.
 
 Security lists readable device summaries and opens technical metadata/revocation on a native
 child page. Mark a session current only when the authenticated server response says `isCurrent`
-is true; user-agent, IP and missing metadata cannot establish identity. Invitations have separate
-list/create pages. Agents opens concise Connected agents, Setup, Reviews, Access and Execution
-policy pages; setup material, token scopes and one-time secrets do not become a root-page wall.
+is true; user-agent, IP and missing metadata cannot establish identity. That session leads the
+page as "This iPhone" under This device; the rest follow under Other devices, most recently active
+first. The session API returns no device name or platform, so a name is only what the user agent
+supports: browser and operating system, "nohmi app" for the app's own signature, another client's
+product name, or "Unknown device". A device row stacks the name over one line of recency
+("Active 3 hours ago"); exact times, IP and the raw user agent stay on the child page. Sign out
+sits in its own group below the ordinary account actions. Invitations have separate
+list/create pages. Agents opens concise Connected agents, Setup, Reviews, Access and Review
+policy pages; setup material, token permissions and one-time secrets do not become a root-page wall.
+Agents copy says "permissions", never "scopes", and names permissions in plain language; a
+confirmation states what will happen in the same words as the screen it belongs to.
 All existing human authority, role checks, scope confirmations and secret-clearing guards remain.
 
 Notifications leads with device controls and links to separate Global and Finances text-policy
@@ -279,7 +355,9 @@ masked connection/consent state, legal material, refresh and named disconnect av
 already requested can still arrive; cancelling local setup never claims to recall it.
 
 Workspace preferences group search, behavior and shared web/desktop presentation. Name choices
-that affect other devices rather than suggesting that they change the iPhone layout. Tasks opens
+that affect other devices rather than suggesting that they change the iPhone layout. Say so when a
+shared choice does change iPhone: Tasks row details and "Include archived in search" apply to
+iPhone task rows and task search as well as the web app, and their notes say what each shows. Tasks opens
 its reviewed preferences editor directly, keeping guidance and device-notification links reachable.
 Mail rules and Calendar sources use compact record rows and native child detail pages. Accepted
 writes update the correct owner's cache; older reads cannot silently replace accepted state.

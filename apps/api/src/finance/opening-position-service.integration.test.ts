@@ -109,6 +109,92 @@ describe.sequential("Finance opening statements", () => {
       (await service().readOpeningPosition(f.context.principal.userId, "2026-11")).qualified,
     ).toBe(false);
   });
+  it("binds a statement key to its values and refuses stale account or statement revisions", async () => {
+    const f = await fixture();
+    const input = {
+      accountId: f.account.id,
+      month: "2026-11",
+      expectedAccountRevision: f.account.contextualRevision.toString(),
+      expectedStatementRevision: 0,
+      signedOpeningBalanceCents: 125000,
+      idempotencyKey: crypto.randomUUID(),
+    };
+    const first = await service().confirmOpeningStatement(f.context, input);
+    expect(first).toMatchObject({ revision: 1, signedOpeningBalanceCents: 125000 });
+    expect(await service().confirmOpeningStatement(f.context, input)).toEqual(first);
+    await expect(
+      service().confirmOpeningStatement(f.context, { ...input, signedOpeningBalanceCents: 1 }),
+    ).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("key") });
+    const fresh = () => ({ ...input, idempotencyKey: crypto.randomUUID() });
+    // A second writer still holding revision 0 cannot overwrite the saved statement.
+    await expect(service().confirmOpeningStatement(f.context, fresh())).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("opening statement changed"),
+    });
+    await expect(
+      service().confirmOpeningStatement(f.context, { ...fresh(), expectedAccountRevision: "999" }),
+    ).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("Refresh") });
+    const revised = await service().confirmOpeningStatement(f.context, {
+      ...fresh(),
+      expectedStatementRevision: 1,
+      signedOpeningBalanceCents: 130000,
+    });
+    expect(revised).toMatchObject({ revision: 2, signedOpeningBalanceCents: 130000 });
+    expect(
+      (await service().readOpeningPosition(f.context.principal.userId, "2026-11")).statements.map(
+        (statement) => statement.revision,
+      ),
+    ).toContain(2);
+    await database.db
+      .update(financeAccounts)
+      .set({ currencyCode: "EUR" })
+      .where(eq(financeAccounts.id, f.account.id));
+    await expect(
+      service().confirmOpeningStatement(f.context, {
+        ...fresh(),
+        expectedStatementRevision: 2,
+      }),
+    ).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("USD") });
+  });
+  it("reports a missing owner as not found and bounds the planning accounts it reconstructs", async () => {
+    const f = await fixture();
+    const missing = crypto.randomUUID();
+    await expect(service().readOpeningPosition(missing, "2026-11")).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(
+      service().confirmOpeningStatement(
+        {
+          ...f.context,
+          principal: { ...f.context.principal, actorId: missing, userId: missing },
+        },
+        {
+          accountId: f.account.id,
+          month: "2026-11",
+          expectedAccountRevision: "1",
+          expectedStatementRevision: 0,
+          signedOpeningBalanceCents: 1,
+          idempotencyKey: crypto.randomUUID(),
+        },
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await database.db.insert(financeAccounts).values(
+      Array.from({ length: 100 }, (_, index) => ({
+        userId: f.context.principal.userId,
+        institution: "Synthetic",
+        name: `Extra ${index}`,
+        provider: "manual" as const,
+        status: "manual" as const,
+        includeInPlanning: true,
+      })),
+    );
+    await expect(
+      service().readOpeningPosition(f.context.principal.userId, "2026-11"),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      message: expect.stringContaining("at most 100"),
+    });
+  });
   it("requires explicit opening evidence instead of assuming today's account balance", async () => {
     const f = await fixture();
     expect(

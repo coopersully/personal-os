@@ -4,7 +4,7 @@ import { Card, Copy, FinanceRow, FinanceScreen, ReadState } from "./ui";
 export function FinanceHistoricalCleanupScreen() {
   const query = useFinanceRead(["attention"], (api) => api.getFinanceAttention());
   return (
-    <FinanceScreen title="Historical cleanup" showTitle={false}>
+    <FinanceScreen title="Historical cleanup">
       <ReadState query={query}>
         {query.data ? (
           <>

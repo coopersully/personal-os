@@ -46,6 +46,7 @@ import {
 } from "./batch-approval-service.js";
 import { createFinanceBatchCorrectionService } from "./batch-correction-service.js";
 import { captureFinanceBatchEffect } from "./batch-effect-state.js";
+import { assertFinanceDecisionNotDeclined, readFinanceDeclinedAt } from "./decision-decline.js";
 import { guardFinanceExecutionTransaction } from "./execution-owner-guard.js";
 import {
   type FinanceMaintenanceWork,
@@ -89,7 +90,7 @@ function manifest(row: Row) {
 function outcomes(row: Row) {
   return row.outcomes.map((item) => financeReviewBatchOutcomeSchema.parse(item));
 }
-function present(row: Row): FinanceReviewBatchRun {
+function present(row: Row, declinedAt: string | null = null): FinanceReviewBatchRun {
   const items = manifest(row);
   const decisions = items.map(({ decision }) => decision);
   const receipts = outcomes(row);
@@ -117,7 +118,22 @@ function present(row: Row): FinanceReviewBatchRun {
           : "previewed",
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    declinedAt,
   };
+}
+/** Reads carry the owner's decline, so a declined batch is not shown as awaiting approval. */
+async function presentCurrent(tx: Transaction, userId: string, rows: Row[]) {
+  const declined = await readFinanceDeclinedAt(
+    tx,
+    userId,
+    "review_batch",
+    rows.map((row) => row.id),
+  );
+  return rows.map((row) => present(row, declined.get(row.id) ?? null));
+}
+async function presentOne(tx: Transaction, row: Row) {
+  const declined = await readFinanceDeclinedAt(tx, row.userId, "review_batch", [row.id]);
+  return present(row, declined.get(row.id) ?? null);
 }
 function binding(principal: Principal) {
   if (principal.actorType === "user") return eq(financeReviewBatchRuns.userId, principal.userId);
@@ -699,7 +715,7 @@ export function createFinanceReviewBatchService({
                 "conflict",
                 "That idempotency key already identifies a different manifest.",
               );
-            return present(row);
+            return presentOne(tx, row);
           }
           const displayRows = await tx
             .select()
@@ -767,7 +783,7 @@ export function createFinanceReviewBatchService({
     async get(id: string, context: Context): Promise<FinanceReviewBatchRun> {
       return db.transaction(async (tx) => {
         await authorize(tx, context, "read");
-        return present(await find(tx, id, context));
+        return presentOne(tx, await find(tx, id, context));
       });
     },
     async list(context: Context, raw: unknown = {}): Promise<FinanceReviewBatchRun[]> {
@@ -780,7 +796,7 @@ export function createFinanceReviewBatchService({
           .where(binding(context.principal))
           .orderBy(desc(financeReviewBatchRuns.createdAt), desc(financeReviewBatchRuns.id))
           .limit(limit);
-        return rows.map(present);
+        return presentCurrent(tx, context.principal.userId, rows);
       });
     },
     async execute(id: string, raw: unknown, context: Context): Promise<FinanceReviewBatchRun> {
@@ -944,6 +960,7 @@ export function createFinanceReviewBatchService({
       let latest = await bounded(async (tx) => {
         await authorize(tx, context, "execute", id);
         const row = await find(tx, id, context);
+        await assertFinanceDecisionNotDeclined(tx, row.userId, "review_batch", row.id);
         await assertPreparationAuthority(tx, row);
         await assertFinanceBatchContinuation(tx, context, id, input.fingerprint, now());
         if (row.fingerprint !== input.fingerprint)
@@ -959,6 +976,8 @@ export function createFinanceReviewBatchService({
           const progressed = await bounded(async (tx, preserve) => {
             await authorize(tx, context, "execute", id);
             const row = await find(tx, id, context);
+            // A decline may land between chunks; it stops every effect not yet committed.
+            await assertFinanceDecisionNotDeclined(tx, row.userId, "review_batch", row.id);
             await assertPreparationAuthority(tx, row);
             await assertFinanceBatchContinuation(tx, context, id, input.fingerprint, now());
             if (row.fingerprint !== input.fingerprint)
@@ -1113,6 +1132,8 @@ export function createFinanceReviewBatchService({
                       before: beforeEffect,
                       after: afterEffect,
                       createdAt: now(),
+                      appliedByActorType: context.principal.actorType,
+                      appliedByActorId: context.principal.actorId,
                     });
                   }
                   let appliedTransferRevision: string | undefined;

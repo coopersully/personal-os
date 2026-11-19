@@ -5,8 +5,10 @@ import test from "node:test";
 import { classifyChanges } from "./ci-scope.mjs";
 import {
   ObservationChanged,
+  observeMetadata,
   observeSource,
   SourceClient,
+  SourceSettling,
   stableObservation,
 } from "./source-observation.mjs";
 import { createReceipt, selectedJobNames, sha256 } from "./source-receipt.mjs";
@@ -684,4 +686,71 @@ test("Git scope recomputation uses the remaining command timeout and historical 
     return Buffer.from(JSON.stringify(classifyChanges([])));
   };
   assert.equal(client.scope(base, head, true).full, true);
+});
+
+test("a fast-lane draft run is green and receipted but can never be source evidence", () => {
+  const client = fixture();
+  // The shape a draft produces: the aggregate and both matrices are skipped.
+  for (const job of client.jobs)
+    if (/^(Source verification|Browser acceptance|Desktop) ?/u.test(job.name))
+      job.conclusion = "skipped";
+  assert.ok(client.jobs.some((job) => job.conclusion === "skipped"));
+  assert.throws(() => observeSource(client), /Selected source job missing or not successful/);
+});
+
+test("a selected job still reporting is settling, not failed and never success", () => {
+  const client = fixture();
+  client.jobs[1].status = "in_progress";
+  client.jobs[1].conclusion = null;
+  assert.throws(() => observeSource(client), SourceSettling);
+  // A job from another attempt is still a hard failure, not a reason to wait.
+  const foreign = fixture();
+  foreign.jobs[1].status = "in_progress";
+  foreign.jobs[1].run_attempt = 2;
+  assert.throws(
+    () => observeSource(foreign),
+    (error) => !(error instanceof SourceSettling) && /Selected source job/.test(error.message),
+  );
+});
+
+test("a run failed only by its own gate job is still a failed run", () => {
+  const client = fixture();
+  // Every selected source job succeeded, but the in-run gate rejected the Work map.
+  client.rows[0].conclusion = "failure";
+  client.jobs.push({ ...client.jobs[0], id: 99, name: "CI required", conclusion: "failure" });
+  assert.throws(() => observeSource(client), /Latest source run failed\/canceled/);
+  assert.equal(client.downloads, 0);
+});
+
+test("the in-run gate validates the live body and rejects a moved or retargeted candidate", () => {
+  const expected = { headSha: head, baseSha: base, baseRef: "main" };
+  const client = fixture();
+  assert.equal(observeMetadata(client, expected).headSha, head);
+  assert.deepEqual(client.validations, [client.live.body]);
+  for (const stale of [
+    { ...expected, headSha: base },
+    { ...expected, baseSha: head },
+    { ...expected, baseRef: "release" },
+    { ...expected, retargeted: true },
+  ])
+    assert.throws(() => observeMetadata(fixture(), stale), /catch up and push a genuine candidate/);
+  // Unlike the observer, the gate has no later evidence to bind a missing expectation.
+  for (const field of ["headSha", "baseSha", "baseRef"])
+    assert.throws(
+      () => observeMetadata(fixture(), { ...expected, [field]: undefined }),
+      /Missing candidate identity/,
+    );
+  const invalid = fixture();
+  invalid.validateBody = () => {
+    throw new Error("Current live Work map could not be validated");
+  };
+  assert.throws(() => observeMetadata(invalid, expected), /Work map/);
+  const edited = fixture();
+  const read = edited.pr;
+  let reads = 0;
+  edited.pr = function () {
+    if (++reads === 2) this.live.body = "edited during the gate";
+    return read.call(this);
+  };
+  assert.throws(() => observeMetadata(edited, expected), ObservationChanged);
 });

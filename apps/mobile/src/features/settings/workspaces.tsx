@@ -3,7 +3,6 @@ import {
   calendarAutomaticEvidenceKindSchema,
   calendarProfilePreferencesSchema,
   type DomainProfile,
-  type MailRule,
   mailProfilePreferencesSchema,
   type UpsertDomainProfileInput,
   upsertDomainProfileInputSchema,
@@ -15,18 +14,25 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useRef, useState } from "react";
-import { Text, View } from "react-native";
+import { View } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { FloatingAdd, FormSave } from "../../components/forms/form-save";
+import { SectionNote } from "../../components/forms/section-content";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
 import type { IconName } from "../../components/icons";
-import { useTheme } from "../../theme";
+import { storedLabel as human } from "../../product/labels";
 import { useAuth } from "../auth/context";
 import { TaskPreferencesScreen } from "../tasks/preferences";
 import { Action, Choice, confirm, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
-import { useSettingsAction, useSettingsResource } from "./data";
+import { useSettingsAction, useSettingsListPublisher, useSettingsResource } from "./data";
 import { FinanceConfigurationSettings } from "./finance-settings";
+import {
+  MailRulePreview,
+  mailRuleActionsSummary,
+  mailRuleConditionSummary,
+  useMailRuleDisable,
+} from "./mail-rule-preview";
 import { useWorkspacePreferenceQueue } from "./preferences-hook";
 import { SettingsActionRow, SettingsDetailRow, SettingsRow } from "./settings-row";
 
@@ -112,10 +118,6 @@ const choices: Record<string, readonly string[]> = {
   financeSpendingPeriod: ["today", "week", "month", "custom"],
   financeTransactionGroup: ["none", "date", "category", "merchant", "direction", "posting"],
 };
-const human = (value: string) => {
-  const words = value.replaceAll("_", " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
-};
 const preferenceGroups = [
   { title: "Search", keys: ["includeArchivedInSearch"] },
   {
@@ -124,9 +126,9 @@ const preferenceGroups = [
     help: "These layout choices apply on web and desktop. The iPhone keeps its native Mail layout.",
   },
   {
-    title: "Calendar layout on other devices",
+    title: "Calendar layout",
     keys: ["calendarView", "showWeekends", "weekStartsOn"],
-    help: "These choices apply to the web and desktop calendar, not the iPhone agenda.",
+    help: "Calendar view and weekends apply to the web and desktop calendar, not the iPhone agenda. Week start applies on iPhone too: it sets the Calendar week and where This week begins in Spending.",
   },
   {
     title: "Following today on other devices",
@@ -135,7 +137,7 @@ const preferenceGroups = [
   },
   { title: "Event defaults on other devices", keys: ["defaultEventDurationMinutes"] },
   {
-    title: "Spending defaults on other devices",
+    title: "Spending defaults",
     keys: [
       "financeSpendingBasis",
       "financeSpendingPeriod",
@@ -143,19 +145,19 @@ const preferenceGroups = [
       "financeSpendingIncludeUncategorized",
       "financeSpendingSubtractRefunds",
     ],
+    help: "These apply to Spending on iPhone, web and desktop.",
   },
   {
     title: "Transaction defaults on other devices",
     keys: ["financeManualVisibility", "financeTransactionGroup"],
   },
   {
-    title: "Finance layout on other devices",
+    title: "Finance layout",
     keys: ["financeSpendingView", "financeSpendingGrouping", "financeTransactionView"],
-    help: "These shared web and desktop layout choices do not change the iPhone Finance views.",
+    help: "Spending view applies on iPhone, where bubbles opens as the list. Grouping and transaction layout apply on web and desktop.",
   },
 ];
 function WorkspacePreferencesEditor({ initial }: { initial: WorkspaceSettings }) {
-  const t = useTheme();
   const action = useSettingsAction();
   const cache = useQueryClient();
   const { state, session } = useAuth();
@@ -287,7 +289,7 @@ function WorkspacePreferencesEditor({ initial }: { initial: WorkspaceSettings })
         const keys = group.keys.filter((key) => key in draft);
         return keys.length > 0 ? (
           <Section key={group.title} title={group.title}>
-            {group.help && <Text style={{ color: t.secondary, padding: 16 }}>{group.help}</Text>}
+            {group.help && <SectionNote>{group.help}</SectionNote>}
             {keys.map(control)}
           </Section>
         ) : null;
@@ -334,7 +336,6 @@ function NumberPreference({
   );
 }
 function GuidanceEditor({ initial }: { initial: DomainProfile }) {
-  const t = useTheme();
   const action = useSettingsAction();
   const cache = useQueryClient();
   const [baseline, setBaseline] = useState(initial);
@@ -411,9 +412,9 @@ function GuidanceEditor({ initial }: { initial: DomainProfile }) {
               }),
             }}
           />
-          <Text style={{ color: t.secondary, padding: 16 }}>
+          <SectionNote>
             Version {baseline.version} · {baseline.status}
-          </Text>
+          </SectionNote>
           <Field
             label="Objective"
             value={objective}
@@ -703,28 +704,6 @@ export function validateGuidancePreferences(
     ).parse(preferences);
   return preferences;
 }
-/** Publish an accepted record without letting an older in-flight read replace it. */
-function useSettingsListPublisher<T>(name: string) {
-  const { state, session } = useAuth();
-  const cache = useQueryClient();
-  const owner = state.user?.id;
-  const epoch = session.epoch();
-  const live = useRef({ owner, epoch });
-  live.current = { owner, epoch };
-  return async (update: (records: T[]) => T[]) => {
-    const current = () =>
-      !!owner &&
-      live.current.owner === owner &&
-      live.current.epoch === epoch &&
-      session.epoch() === epoch;
-    if (!current()) return false;
-    const queryKey = ["settings", owner, epoch, name];
-    await cache.cancelQueries({ queryKey, exact: true });
-    if (!current()) return false;
-    cache.setQueryData<T[]>(queryKey, (records) => update(records ?? []));
-    return true;
-  };
-}
 function MailRules() {
   const rules = useSettingsResource("mail-rules", (api) => api.listMailRules());
   return (
@@ -745,6 +724,11 @@ function MailRules() {
         />
       )}
       {rules.data?.length === 0 && <State empty="No Mail rules." />}
+      <SettingsActionRow
+        icon="add"
+        label="Add rule"
+        onPress={() => router.push("/settings/mail/rule-new")}
+      />
     </Section>
   );
 }
@@ -760,8 +744,7 @@ export function MailRuleSettingsScreen() {
 }
 function MailRuleDetails({ id }: { id: string | undefined }) {
   const rules = useSettingsResource("mail-rules", (api) => api.listMailRules());
-  const action = useSettingsAction();
-  const publish = useSettingsListPublisher<MailRule>("mail-rules");
+  const action = useMailRuleDisable();
   useDirtyDismiss(false, action.pending);
   const rule = id ? rules.data?.find((candidate) => candidate.id === id) : undefined;
   return (
@@ -773,7 +756,10 @@ function MailRuleDetails({ id }: { id: string | undefined }) {
             <SettingsDetailRow label="Name" value={rule.name} icon="mail" />
             <SettingsDetailRow label="Status" value={rule.enabled ? "Enabled" : "Disabled"} />
             <SettingsDetailRow label="Policy" value={human(rule.policy)} />
+            <SettingsDetailRow label="When" value={mailRuleConditionSummary(rule.condition)} />
+            <SettingsDetailRow label="Then" value={mailRuleActionsSummary(rule.actions)} />
           </Section>
+          <MailRulePreview rule={rule} />
           {rule.enabled && (
             <Section>
               <SettingsActionRow
@@ -784,20 +770,7 @@ function MailRuleDetails({ id }: { id: string | undefined }) {
                   confirm(
                     "Disable Mail rule?",
                     `${rule.name} will stop applying to new mail.`,
-                    () =>
-                      void action.run(async (api) => {
-                        const accepted = await api.updateMailRule(rule.id, {
-                          enabled: false,
-                          expectedVersion: rule.version,
-                        });
-                        await publish((records) =>
-                          records.map((current) =>
-                            current.id === rule.id && current.version <= accepted.version
-                              ? accepted
-                              : current,
-                          ),
-                        );
-                      }, "Mail rule disabled"),
+                    () => void action.disable(rule),
                   )
                 }
               />

@@ -16,12 +16,10 @@ import BudgetEditRoute from "../../app/finance-budget-edit";
 import TodayHome from "../briefing/today";
 import { FinanceAccountsScreen } from "./accounts";
 import { FinanceAssistantScreen } from "./assistant";
-import { FinanceAttentionSummary } from "./attention-summary";
 import { FinanceBudgetCategoryScreen, FinanceBudgetEditor } from "./budget-category";
 import { FinanceConversationReference } from "./conversation-reference";
 import { FinanceTransactionScreen } from "./details";
 import { InstitutionLogo } from "./institution-logo";
-import { FinanceOpeningPositionScreen } from "./opening-position";
 import { FinanceOverviewScreen } from "./overview";
 import { FinancePlanScreen } from "./plan";
 import { FinanceSpendingScreen, Transactions } from "./spending";
@@ -81,24 +79,14 @@ const h = vi.hoisted(() => ({
     listTaskWorkspace: vi.fn(),
     listFinanceAccounts: vi.fn(),
     getFinanceSpending: vi.fn(),
+    getWorkspaceSettings: vi.fn(),
     listFinanceActivity: vi.fn(),
     listFinanceTransactions: vi.fn(),
     listFinanceSpendingTransactions: vi.fn(),
     getFinanceBudget: vi.fn(),
-    getFinanceAttention: vi.fn(),
-    getFinanceOpeningPosition: vi.fn(),
-    confirmFinanceOpeningStatement: vi.fn(),
-    getFinanceBudgetStartPreview: vi.fn(),
-    applyFinanceBudgetStart: vi.fn(),
-    getFinanceBatchContinuation: vi.fn(),
-    approveFinanceBatchContinuation: vi.fn(),
-    cancelFinanceBatchContinuation: vi.fn(),
     createFinanceBudget: vi.fn(),
     approveFinanceBudget: vi.fn(),
     getFinanceReviewBatch: vi.fn(),
-    getFinanceReviewBatchUndo: vi.fn(),
-    executeFinanceReviewBatchUndo: vi.fn(),
-    previewFinanceReviewBatchUndo: vi.fn(),
     executeFinanceReviewBatch: vi.fn(),
     getFinanceContextualQuestion: vi.fn(),
     getFinanceBudgetStatus: vi.fn().mockResolvedValue([]),
@@ -248,7 +236,9 @@ vi.mock("react-native", () => {
   };
 });
 vi.mock("../../components/screen", () => ({
-  Screen: ({ children }: PropsWithChildren) => <main>{children}</main>,
+  Screen: ({ children, tabBar }: PropsWithChildren<{ tabBar?: boolean }>) => (
+    <main data-tab-bar={String(!!tabBar)}>{children}</main>
+  ),
 }));
 vi.mock("../../components/icons", () => ({
   Icon: ({ name }: { name: string }) => <span data-icon={name} />,
@@ -347,6 +337,12 @@ beforeEach(() => {
     },
   });
   h.api.getFinanceSpending.mockResolvedValue(spending);
+  // The week starts on Monday here, as these tests' fixed dates assume.
+  h.api.getWorkspaceSettings.mockImplementation(async (workspace: string) => ({
+    workspace,
+    revision: 1,
+    preferences: workspace === "calendar" ? { weekStartsOn: "monday" } : {},
+  }));
   h.api.listFinanceActivity.mockResolvedValue({ entries: [], nextCursor: null });
   h.api.listFinanceTransactions.mockResolvedValue({ items: [transaction], nextCursor: null });
   h.api.listFinanceSpendingTransactions.mockResolvedValue({
@@ -354,14 +350,12 @@ beforeEach(() => {
     nextCursor: null,
   });
   h.api.getFinanceBudget.mockResolvedValue({ data: null });
-  h.api.getFinanceBatchContinuation.mockReset().mockResolvedValue(null);
   h.api.listFinanceGoals.mockResolvedValue({ data: [] });
   h.api.listFinanceRecurringOccurrences.mockResolvedValue({
     occurrences: [],
     unavailableSources: [],
   });
   h.api.getFinanceReviewQueue.mockResolvedValue([]);
-  h.api.getFinanceAttention.mockResolvedValue(attentionSnapshot);
   h.api.getFinanceConversationHistory.mockResolvedValue({ messages: [], nextCursor: null });
   h.api.getFinanceTransaction.mockResolvedValue({ data: transaction });
   h.api.getFinanceCategories.mockResolvedValue([
@@ -372,16 +366,19 @@ beforeEach(() => {
   h.api.resolveFinanceReview.mockResolvedValue({ applied: true, transaction });
 });
 afterEach(cleanup);
+// Only the five Finances tab pages ask the shared screen to clear the native tab bar.
+const tabBar = () => screen.getByRole("main").getAttribute("data-tab-bar");
 it("shows real amounts and source qualifications without a duplicate review read", async () => {
   mount(<FinanceOverviewScreen />);
   expect(await screen.findByText("$42.00")).toBeTruthy();
+  expect(tabBar()).toBe("true");
   expect(screen.getByText("Partial total")).toBeTruthy();
   expect(screen.queryByText(/Your share of spending/)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "About spent this month" }));
   expect(screen.getByText(/Your share of spending/)).toBeTruthy();
   expect(screen.getByText(/Only part of this month/)).toBeTruthy();
   expect(screen.getByText("Some sources need an update.")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Close information" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(screen.queryByText(/Your share of spending/)).toBeNull();
   expect(h.api.getFinanceReviewQueue).not.toHaveBeenCalled();
 });
@@ -403,6 +400,7 @@ it("keeps mixed currency totals out of overview", async () => {
 it("opens accounts and keeps search in the shared header", async () => {
   const view = mount(<FinanceAccountsScreen />);
   fireEvent.click(await screen.findByRole("button", { name: /Everyday checking/ }));
+  expect(tabBar()).toBe("true");
   expect(h.push).toHaveBeenCalledWith({ pathname: "/finance-account", params: { id: account.id } });
   expect(screen.queryByLabelText("Search accounts")).toBeNull();
   h.params = { accountSearch: "missing" };
@@ -417,6 +415,7 @@ it("preserves the exact spending reference for category drill-down", async () =>
   mount(<FinanceSpendingScreen />);
   fireEvent.click(await screen.findByRole("button", { name: /Groceries/ }));
   await screen.findByText("Corner market");
+  expect(tabBar()).toBe("true");
   expect(h.api.listFinanceSpendingTransactions).toHaveBeenCalledWith(
     expect.objectContaining({
       referenceRevision: revision,
@@ -447,6 +446,7 @@ it("loads subsequent transaction pages only on request", async () => {
 it("uses canonical budget, cash flow and wealth reads", async () => {
   mount(<FinancePlanScreen />);
   await screen.findByText("No budget proposal yet.");
+  expect(tabBar()).toBe("true");
   fireEvent.click(screen.getByRole("button", { name: "Cash flow" }));
   await screen.findByText("No scheduled income or bills in the next 30 days.");
   fireEvent.click(screen.getByRole("button", { name: "Wealth" }));
@@ -454,9 +454,11 @@ it("uses canonical budget, cash flow and wealth reads", async () => {
 });
 it("shows the existing conversation and recorded activity without creating new records", async () => {
   mount(<FinanceAssistantScreen />);
-  await screen.findByText("No decisions waiting");
+  await screen.findByText("No transaction reviews waiting.");
+  expect(tabBar()).toBe("true");
   fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
   await screen.findByText("Your Finance conversation will appear here.");
+  expect(tabBar()).toBe("true");
   fireEvent.click(screen.getByRole("button", { name: "Activity" }));
   await screen.findByText("No recorded activity yet.");
 });
@@ -648,11 +650,16 @@ it("shows transaction notes, splits, and provenance with the USD default", async
       pending: true,
       notes: "Shared lunch",
       categoryRationale: "Confirmed by owner",
-      allocations: [{ id: "split", treatment: "personal", state: "active", amount: 20 }],
+      allocations: [
+        { id: "split", treatment: "personal", state: "active", amount: 20, allocationOrder: 0 },
+        { id: "rest", treatment: "reimbursable", state: "active", amount: 5, allocationOrder: 1 },
+      ],
     },
   });
   mount(<FinanceTransactionScreen />);
   await screen.findByText("Shared lunch");
+  // A detail route opens above the tabs, so it must not reserve tab-bar space.
+  expect(tabBar()).toBe("false");
   expect(screen.getByText("Pending")).toBeTruthy();
   expect(screen.getByText("Confirmed by owner")).toBeTruthy();
   expect(screen.getByText("Personal")).toBeTruthy();
@@ -734,15 +741,57 @@ it("shows goals and suppresses untrustworthy wealth aggregates", async () => {
   expect(screen.getAllByText("$2,400.00").length).toBeGreaterThan(0);
   expect(screen.queryByText(/999,999/)).toBeNull();
 });
-it("opens Finance Chat from canonical active decisions without listing the historical queue", async () => {
-  h.api.getFinanceAttention.mockResolvedValue({ ...attentionSnapshot, activeDecisionCount: 2 });
+it("opens canonical transaction details from a review", async () => {
+  h.api.getFinanceReviewQueue.mockResolvedValue([
+    { id: "review", rationale: null, reason: "unknown_merchant", transaction },
+  ]);
   mount(<FinanceAssistantScreen />);
-  fireEvent.click(await screen.findByRole("button", { name: /^Your decisions/ }));
-  await screen.findByText("Your Finance conversation will appear here.");
-  expect(h.setParams).toHaveBeenCalledWith({ view: "Conversation" });
-  expect(h.api.getFinanceReviewQueue).not.toHaveBeenCalled();
+  fireEvent.click(await screen.findByRole("button", { name: /^Corner market/ }));
+  expect(h.push).toHaveBeenCalledWith({
+    pathname: "/finance-transaction",
+    params: { id: transaction.id },
+  });
 });
-
+it("names provider-coded categories as words on review cards and budget rows", async () => {
+  h.api.getFinanceReviewQueue.mockResolvedValue([
+    {
+      id: "review",
+      rationale: null,
+      reason: "unknown_merchant",
+      transaction: { ...transaction, category: "MEDICAL" },
+    },
+    {
+      id: "suggested",
+      rationale: null,
+      reason: "unknown_merchant",
+      suggestedCategory: { id: "c", name: "ENTERTAINMENT" },
+      transaction: { ...transaction, id: "transaction-2", merchant: "Cinema", category: null },
+    },
+  ]);
+  const view = mount(<FinanceAssistantScreen />);
+  expect((await screen.findByRole("button", { name: /^Corner market/ })).textContent).toContain(
+    "Medical",
+  );
+  expect(screen.getByRole("button", { name: /^Cinema/ }).textContent).toContain("Entertainment");
+  expect(screen.queryByText(/MEDICAL|ENTERTAINMENT/)).toBeNull();
+  view.unmount();
+  h.api.getFinanceBudgetStatus.mockResolvedValueOnce([
+    { budget: { id: "one", category: "RENT_AND_UTILITIES", limit: 100 }, spent: 20, remaining: 80 },
+  ]);
+  mount(<FinancePlanScreen />);
+  expect(await screen.findByText("Rent And Utilities")).toBeTruthy();
+  expect(screen.getByRole("button", { name: /^Rent And Utilities, \$20\.00 spent/ })).toBeTruthy();
+  expect(screen.queryByText(/RENT_AND_UTILITIES/)).toBeNull();
+});
+it("titles a budget category page with words for a provider-coded category", async () => {
+  h.params = { id: categoryBudget.id, month: categoryBudget.month };
+  h.api.getFinanceBudgetStatus.mockResolvedValue([
+    { budget: { ...categoryBudget, category: "TRANSPORTATION" }, spent: 42, remaining: 558 },
+  ]);
+  mount(<BudgetCategoryRoute />);
+  expect(await screen.findByText("Transportation")).toBeTruthy();
+  expect(screen.queryByText("TRANSPORTATION")).toBeNull();
+});
 it("paginates recorded activity with its authoritative cursor", async () => {
   h.params = { view: "Activity" };
   h.api.listFinanceActivity
@@ -1113,6 +1162,11 @@ it("keeps Assistant shortcuts on their matching canonical view", async () => {
   await screen.findByText("No recorded activity yet.");
   expect(h.setParams).toHaveBeenLastCalledWith({ view: "Activity" });
 });
+it("opens Finance automations from the Assistant", async () => {
+  mount(<FinanceAssistantScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: /^Automations/ }));
+  expect(h.push).toHaveBeenLastCalledWith("/finance-automations");
+});
 it("resets the spending drill-down when changing period and opens full transaction details", async () => {
   mount(<FinanceSpendingScreen />);
   fireEvent.click(await screen.findByRole("button", { name: /Groceries/ }));
@@ -1123,9 +1177,9 @@ it("resets the spending drill-down when changing period and opens full transacti
   });
   fireEvent.click(screen.getByRole("button", { name: /All categories/ }));
   expect(screen.queryByText(/Spending contribution:/)).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "This month" }));
+  fireEvent.click(screen.getByRole("button", { name: "Month" }));
   expect(h.setParams).toHaveBeenLastCalledWith({ period: "month" });
-  fireEvent.click(screen.getByRole("button", { name: "This week" }));
+  fireEvent.click(screen.getByRole("button", { name: "Week" }));
   expect(h.setParams).toHaveBeenLastCalledWith({ period: "week" });
 });
 it("preserves actionable source and planning state across account groups", async () => {
@@ -1398,7 +1452,7 @@ it("keeps healthy overview cards quiet and opens account explanations without na
   expect(screen.getByText("Included accounts")).toBeTruthy();
   expect(screen.getByText("Everyday checking")).toBeTruthy();
   expect(h.navigate).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Close information" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   fireEvent.click(screen.getByRole("button", { name: /^Cash,/ }));
   expect(h.navigate).toHaveBeenCalledWith("/finances/accounts");
 });
@@ -1669,6 +1723,36 @@ it("opens structured Finance chat references in native details", async () => {
   });
 });
 
+it("omits chat references this build cannot open while keeping the message and its other links", async () => {
+  h.params = { view: "Conversation" };
+  h.api.getFinanceConversationHistory.mockResolvedValue({
+    messages: [
+      {
+        id: "reply",
+        authorKind: "agent",
+        text: "Start budgeting in November?",
+        createdAt: "2026-11-09T12:00:00Z",
+        recordRefs: [
+          { kind: "budget_start_preview", id: "start-1" },
+          { kind: "review_batch_undo", id: "undo-1" },
+          { kind: "account", id: "account-1" },
+        ],
+      },
+    ],
+    nextCursor: null,
+  });
+  mount(<FinanceAssistantScreen />);
+  expect(await screen.findByText("Start budgeting in November?")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "View account" }));
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/finance-account",
+    params: { id: "account-1" },
+  });
+  expect(h.push).toHaveBeenCalledTimes(1);
+  for (const label of ["Review starting month", "Review correction"])
+    expect(screen.queryByRole("button", { name: label })).toBeNull();
+});
+
 it("shows the review action before its evidence and links the saved counterpart", async () => {
   const evidence = "Two posted entries show equal and opposite movement between owned accounts.";
   h.params = { kind: "review_batch", id: "batch-1" };
@@ -1755,9 +1839,9 @@ const pendingReviewBatch = {
 it.each([
   "applied",
   "review_required",
-] as const)("shows the saved %s outcome without resubmitting it", async (status) => {
+] as const)("reports the saved %s outcome after applying a reviewed batch", async (status) => {
   h.params = { kind: "review_batch", id: pendingReviewBatch.id };
-  h.api.getFinanceReviewBatch.mockResolvedValue({
+  const saved = {
     ...pendingReviewBatch,
     pendingCount: 0,
     outcomes: [
@@ -1767,80 +1851,126 @@ it.each([
         error: status === "review_required" ? { message: "The record changed." } : null,
       },
     ],
-  });
-  h.api.getFinanceBatchContinuation.mockResolvedValue({ state: "completed", recovery: "none" });
+  };
+  h.api.getFinanceReviewBatch.mockResolvedValue(saved).mockResolvedValueOnce(pendingReviewBatch);
+  h.api.executeFinanceReviewBatch.mockResolvedValue(saved);
   mount(<FinanceConversationReference />);
-  if (status === "applied")
-    await screen.findByRole("button", { name: /^Categorization Completed/ });
-  else await screen.findByText(/The record changed/);
-  expect(screen.queryByRole("button", { name: /Approve batch/ })).toBeNull();
-  expect(h.api.executeFinanceReviewBatch).not.toHaveBeenCalled();
+  fireEvent.click(await screen.findByRole("button", { name: "Apply reviewed batch (1)" }));
+  expect(h.api.executeFinanceReviewBatch).toHaveBeenCalledWith(
+    pendingReviewBatch.id,
+    { fingerprint: pendingReviewBatch.fingerprint, limit: 10 },
+    expect.any(AbortSignal),
+  );
+  if (status === "applied") {
+    await waitFor(() =>
+      expect(h.success).toHaveBeenCalledWith("Reviewed batch applied", { id: "save" }),
+    );
+    expect(screen.getByRole("button", { name: /^Categorization Completed/ })).toBeInTheDocument();
+  } else {
+    await waitFor(() =>
+      expect(h.info).toHaveBeenCalledWith("Some decisions need review. Check the saved outcomes.", {
+        id: "save",
+      }),
+    );
+    expect(await screen.findByText(/The record changed/)).toBeInTheDocument();
+    expect(h.success).not.toHaveBeenCalled();
+  }
+  expect(screen.queryByText("Reviewed batch applied")).toBeNull();
+  expect(screen.queryByText("Some decisions need review. Check the saved outcomes.")).toBeNull();
+  expect(screen.queryByRole("button", { name: /Apply reviewed batch/ })).toBeNull();
+});
+
+it("stops an in-flight batch without claiming that its pending decisions applied", async () => {
+  h.params = { kind: "review_batch", id: pendingReviewBatch.id };
+  h.api.getFinanceReviewBatch.mockResolvedValue(pendingReviewBatch);
+  const execution = Promise.withResolvers<void>();
+  h.api.executeFinanceReviewBatch.mockReturnValueOnce(execution.promise);
+  mount(<FinanceConversationReference />);
+  fireEvent.click(await screen.findByRole("button", { name: "Apply reviewed batch (1)" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Stop applying" }));
+  expect(h.api.executeFinanceReviewBatch.mock.calls[0]?.[2].aborted).toBe(true);
+  await act(async () => execution.resolve());
+  expect(
+    await screen.findByRole("button", { name: "Apply reviewed batch (1)" }),
+  ).toBeInTheDocument();
+  expect(h.dismiss).toHaveBeenCalledWith("save");
   expect(h.success).not.toHaveBeenCalled();
 });
-it("stops remaining server work without claiming pending decisions applied", async () => {
+
+it("aborts the reviewed batch when leaving its screen and suppresses a late failure", async () => {
   h.params = { kind: "review_batch", id: pendingReviewBatch.id };
   h.api.getFinanceReviewBatch.mockResolvedValue(pendingReviewBatch);
-  h.api.getFinanceBatchContinuation.mockResolvedValue({ state: "running" });
-  h.api.cancelFinanceBatchContinuation.mockImplementation(async () => {
-    const receipt = { state: "cancelled", recovery: "new_preview" };
-    h.api.getFinanceBatchContinuation.mockResolvedValue(receipt);
-    return receipt;
-  });
-  mount(<FinanceConversationReference />);
-  fireEvent.click(await screen.findByRole("button", { name: "Stop remaining decisions" }));
-  await screen.findByText("Cancelled");
-  expect(h.api.cancelFinanceBatchContinuation).toHaveBeenCalledWith(pendingReviewBatch.id);
-  expect(screen.getByText(/1 pending/)).toBeTruthy();
-  expect(h.success).toHaveBeenCalledWith("Remaining decisions stopped. Saved changes are kept.", {
-    id: "save",
-  });
-  expect(screen.queryByText("Remaining decisions stopped. Saved changes are kept.")).toBeNull();
-});
-it("suppresses late approval feedback after leaving without cancelling server work", async () => {
-  h.params = { kind: "review_batch", id: pendingReviewBatch.id };
-  h.api.getFinanceReviewBatch.mockResolvedValue(pendingReviewBatch);
-  const request = Promise.withResolvers<void>();
-  h.api.approveFinanceBatchContinuation.mockReturnValueOnce(request.promise);
+  const execution = Promise.withResolvers<void>();
+  h.api.executeFinanceReviewBatch.mockReturnValueOnce(execution.promise);
   const view = mount(<FinanceConversationReference />);
-  fireEvent.click(await screen.findByRole("button", { name: "Approve batch (1)" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Apply reviewed batch (1)" }));
   view.unmount();
-  await act(async () => request.reject(new Error("Response lost")));
+  expect(h.api.executeFinanceReviewBatch.mock.calls[0]?.[2].aborted).toBe(true);
+  await act(async () => execution.reject(new Error("Cancelled")));
   expect(h.dismiss).toHaveBeenCalledWith("save");
   expect(h.error).not.toHaveBeenCalled();
-  expect(h.api.cancelFinanceBatchContinuation).not.toHaveBeenCalled();
+  expect(h.api.getFinanceReviewBatch).toHaveBeenCalledTimes(1);
 });
-it("reconciles an uncertain approval and keeps recovery feedback in Sonner", async () => {
+
+it("keeps an unconfirmed batch resumable and refreshes the saved progress", async () => {
   h.params = { kind: "review_batch", id: pendingReviewBatch.id };
   h.api.getFinanceReviewBatch.mockResolvedValue(pendingReviewBatch);
-  h.api.approveFinanceBatchContinuation.mockImplementation(async () => {
-    h.api.getFinanceBatchContinuation.mockResolvedValue({ state: "pending" });
-    throw new Error("Response lost");
-  });
+  h.api.executeFinanceReviewBatch.mockRejectedValueOnce(new Error("Connection lost"));
   mount(<FinanceConversationReference />);
-  fireEvent.click(await screen.findByRole("button", { name: "Approve batch (1)" }));
-  await screen.findByText("Approved · waiting to process");
-  expect(h.error).toHaveBeenCalledWith(
-    "Could not confirm the request. Refresh saved progress before retrying.",
-    { id: "save" },
+  fireEvent.click(await screen.findByRole("button", { name: "Apply reviewed batch (1)" }));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(
+      "Could not finish checking the batch. Review saved progress before retrying.",
+      { id: "save" },
+    ),
   );
   expect(
-    screen.queryByText("Could not confirm the request. Refresh saved progress before retrying."),
+    await screen.findByRole("button", { name: "Apply reviewed batch (1)" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByText(
+      "Could not finish checking the batch. Review saved progress before retrying.",
+    ),
   ).toBeNull();
-  expect(screen.queryByRole("button", { name: /Approve batch/ })).toBeNull();
-  expect(h.api.executeFinanceReviewBatch).not.toHaveBeenCalled();
+  expect(h.api.getFinanceReviewBatch).toHaveBeenCalledTimes(2);
+  expect(h.success).not.toHaveBeenCalled();
 });
-it("requires the owned target category before saving approval", async () => {
+
+it("shows the owned target category and preserves a committed receipt after read failure", async () => {
   h.params = { kind: "review_batch", id: pendingReviewBatch.id };
   h.api.getFinanceCategories.mockResolvedValue([]);
-  h.api.getFinanceReviewBatch.mockResolvedValue(pendingReviewBatch);
+  const saved = {
+    ...pendingReviewBatch,
+    pendingCount: 0,
+    outcomes: [{ index: 0, status: "applied" }],
+  };
+  h.api.getFinanceReviewBatch
+    .mockResolvedValueOnce(pendingReviewBatch)
+    .mockRejectedValue(new Error("Offline"));
+  h.api.executeFinanceReviewBatch.mockResolvedValue(saved);
   mount(<FinanceConversationReference />);
   const refresh = await screen.findByRole("button", { name: /Refresh target categories/ });
-  expect(screen.queryByRole("button", { name: /Approve batch/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /Apply reviewed batch/ })).toBeNull();
   h.api.getFinanceCategories.mockResolvedValue([{ id: "category", name: "Groceries" }]);
   fireEvent.click(refresh);
-  await screen.findByText(/Category: Groceries/);
-  expect(await screen.findByRole("button", { name: "Approve batch (1)" })).toBeTruthy();
-  expect(h.api.approveFinanceBatchContinuation).not.toHaveBeenCalled();
+  expect(await screen.findByText(/Category: Groceries/)).toBeInTheDocument();
+  fireEvent.click(await screen.findByRole("button", { name: "Apply reviewed batch (1)" }));
+  expect(
+    await screen.findByRole("button", { name: /^Categorization Completed/ }),
+  ).toBeInTheDocument();
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(
+      "Could not finish checking the batch. Review saved progress before retrying.",
+      { id: "save" },
+    ),
+  );
+  expect(
+    screen.queryByText(
+      "Could not finish checking the batch. Review saved progress before retrying.",
+    ),
+  ).toBeNull();
+  expect(h.api.executeFinanceReviewBatch).toHaveBeenCalledOnce();
+  expect(h.success).not.toHaveBeenCalledWith("Reviewed batch applied", expect.anything());
 });
 
 it("withholds application when a saved transfer lacks its counterpart", async () => {
@@ -1851,7 +1981,7 @@ it("withholds application when a saved transfer lacks its counterpart", async ()
   });
   mount(<FinanceConversationReference />);
   await screen.findByText("Ask for a fresh batch with both transfer records attached.");
-  expect(screen.queryByRole("button", { name: /Approve batch/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /Apply reviewed batch/ })).toBeNull();
   expect(h.api.executeFinanceReviewBatch).not.toHaveBeenCalled();
 });
 
@@ -1872,7 +2002,19 @@ it.each([
     matching
       ? {
           state: "available",
-          question: { prompt: "Was this purchase reimbursed?", transactionId: null },
+          // The API always names the transaction a contextual question is about.
+          question: {
+            id: "reference-1",
+            prompt: "Was this purchase reimbursed?",
+            status: "answered",
+            transactionId: transaction.id,
+            transaction: {
+              merchant: transaction.merchant,
+              date: transaction.date,
+              amountCents: 4200,
+              currencyCode: "USD",
+            },
+          },
         }
       : { state: "unavailable" },
   );
@@ -1880,15 +2022,13 @@ it.each([
   if (!matching) {
     await screen.findByText("Reference unavailable.");
     expect(screen.queryByRole("button", { name: "View transaction" })).toBeNull();
-  } else if (kind === "review_case") {
+  } else {
+    if (kind === "contextual_question") await screen.findByText("Was this purchase reimbursed?");
     fireEvent.click(await screen.findByRole("button", { name: "View transaction" }));
     expect(h.push).toHaveBeenCalledWith({
       pathname: "/finance-transaction",
       params: { id: transaction.id },
     });
-  } else {
-    await screen.findByText("Was this purchase reimbursed?");
-    expect(screen.queryByRole("button", { name: "View transaction" })).toBeNull();
   }
   if (kind === "review_case")
     expect(h.api.getFinanceReviewQueue).toHaveBeenCalledWith(1, "reference-1");
@@ -1918,7 +2058,7 @@ const proposal = {
   allocations: [{ key: "food-groceries", kind: "spending", categoryId: "category", amount: 500 }],
   assumptions: ["Confirm recurring income"],
 };
-const approveLabel = /Confirm resources and approve November 2026 v8.*500/;
+const approveLabel = /Approve November 2026 v8.*500/;
 it("approves the exact linked budget and keeps its retry identity after an uncertain response", async () => {
   h.params = { kind: "budget_plan", id: "plan-1", versionId: "version-8" };
   h.api.getFinanceBudget.mockResolvedValue({ data: proposal, approvalReadiness: { ready: true } });
@@ -2031,7 +2171,6 @@ it("requires exact account and goal identities before allowing approval", async 
   h.api.getFinanceBudget.mockResolvedValue({
     data: {
       ...proposal,
-      resources: [{ key: "Expected pay", kind: "income", amount: 500, sourceId: account.id }],
       allocations: [
         {
           key: "debt",
@@ -2151,7 +2290,7 @@ it("keeps the accessible circular Send action inside the message field", async (
   expect(send).toBeEnabled();
 });
 
-it("opens the exact duplicate account comparison on the signed-in web origin", async () => {
+it("reviews a possible duplicate account in the app instead of the browser", async () => {
   const { FinanceAccountScreen } = await import("./details");
   h.params = { id: account.id };
   const existing = await h.api.listFinanceAccounts();
@@ -2163,84 +2302,12 @@ it("opens the exact duplicate account comparison on the signed-in web origin", a
     },
   });
   mount(<FinanceAccountScreen />);
-  fireEvent.click(await screen.findByRole("button", { name: /Compare duplicates in browser/ }));
-  await waitFor(() =>
-    expect(h.openURL).toHaveBeenCalledWith(
-      `https://nohmi.example/finances/accounts?accountId=${encodeURIComponent(account.id)}`,
-    ),
-  );
-});
-
-it.each([
-  "group changed",
-  "connection lost",
-] as const)("withholds the browser handoff when account comparison refresh finds %s", async (reason) => {
-  const { FinanceAccountScreen } = await import("./details");
-  h.params = { id: account.id };
-  const existing = await h.api.listFinanceAccounts();
-  h.api.listFinanceAccounts
-    .mockResolvedValue({
-      ...existing,
-      accountSemantics: { possibleDuplicateGroups: [{ accountIds: [account.id, "second"] }] },
-    })
-    .mockResolvedValueOnce({
-      ...existing,
-      accountSemantics: { possibleDuplicateGroups: [{ accountIds: [account.id, "second"] }] },
-    });
-  mount(<FinanceAccountScreen />);
-  const compare = await screen.findByRole("button", { name: /Compare duplicates in browser/ });
-  if (reason === "group changed")
-    h.api.listFinanceAccounts.mockResolvedValue({ ...existing, accountSemantics: undefined });
-  else h.api.listFinanceAccounts.mockRejectedValueOnce(new Error(reason));
-  fireEvent.click(compare);
-  await waitFor(() =>
-    expect(h.error).toHaveBeenCalledWith("Could not open this account comparison.", { id: "save" }),
-  );
-  expect(h.openURL).not.toHaveBeenCalled();
-  expect(screen.queryByText("Could not open this account comparison.")).toBeNull();
-});
-
-it("does not open a comparison after its owner leaves the screen", async () => {
-  const { FinanceAccountScreen } = await import("./details");
-  h.params = { id: account.id };
-  const existing = await h.api.listFinanceAccounts();
-  const comparison = {
-    ...existing,
-    accountSemantics: { possibleDuplicateGroups: [{ accountIds: [account.id, "second"] }] },
-  };
-  h.api.listFinanceAccounts.mockResolvedValue(comparison);
-  const view = mount(<FinanceAccountScreen />);
-  const compare = await screen.findByRole("button", { name: /Compare duplicates in browser/ });
-  const fresh = Promise.withResolvers<typeof comparison>();
-  h.api.listFinanceAccounts.mockReturnValueOnce(fresh.promise);
-  const priorReads = h.api.listFinanceAccounts.mock.calls.length;
-  fireEvent.click(compare);
-  fireEvent.click(compare);
-  expect(h.api.listFinanceAccounts).toHaveBeenCalledTimes(priorReads + 1);
-  view.unmount();
-  await act(async () => fresh.resolve(comparison));
-  await waitFor(() => expect(h.dismiss).toHaveBeenCalledWith("save"));
-  expect(h.openURL).not.toHaveBeenCalled();
-  expect(h.success).not.toHaveBeenCalled();
-});
-
-it("suppresses account comparison success when the browser opens after the screen closes", async () => {
-  const { FinanceAccountScreen } = await import("./details");
-  h.params = { id: account.id };
-  const existing = await h.api.listFinanceAccounts();
-  h.api.listFinanceAccounts.mockResolvedValue({
-    ...existing,
-    accountSemantics: { possibleDuplicateGroups: [{ accountIds: [account.id, "second"] }] },
+  fireEvent.click(await screen.findByRole("button", { name: /Review possible duplicate/ }));
+  expect(h.push).toHaveBeenCalledWith({
+    pathname: "/finance-account-duplicate",
+    params: { id: account.id },
   });
-  const browser = Promise.withResolvers<void>();
-  h.openURL.mockReturnValueOnce(browser.promise);
-  const view = mount(<FinanceAccountScreen />);
-  fireEvent.click(await screen.findByRole("button", { name: /Compare duplicates in browser/ }));
-  await waitFor(() => expect(h.openURL).toHaveBeenCalledOnce());
-  view.unmount();
-  await act(async () => browser.resolve());
-  expect(h.dismiss).toHaveBeenCalledWith("save");
-  expect(h.success).not.toHaveBeenCalled();
+  expect(h.openURL).not.toHaveBeenCalled();
 });
 
 it("opens chat from a transaction with its record attached", async () => {
@@ -2443,7 +2510,11 @@ it("edits the monthly limit inline and stays on category details", async () => {
   h.api.createFinanceBudget.mockResolvedValue({ ...categoryBudget, limit: 700 });
   mount(<FinanceBudgetCategoryScreen />);
   fireEvent.click(await screen.findByText("Monthly limit"));
+  // The inline editor ends with the shared text commands, not hand-built icon buttons.
+  expect(screen.getByRole("button", { name: "Close" })).toHaveTextContent("Close");
   fireEvent.change(screen.getByLabelText("Monthly budget limit"), { target: { value: "700" } });
+  expect(screen.getByRole("button", { name: "Cancel" })).toHaveTextContent("Cancel");
+  expect(screen.getByRole("button", { name: "Save budget limit" })).toHaveTextContent("Save");
   fireEvent.click(screen.getByRole("button", { name: "Save budget limit" }));
   await waitFor(() =>
     expect(h.success).toHaveBeenCalledWith("Budget limit updated", expect.anything()),
@@ -2459,6 +2530,8 @@ it("saves an inline transaction note with its original revision and no category 
   fireEvent.change(screen.getByLabelText("Transaction note"), {
     target: { value: "Gift for Maya" },
   });
+  expect(screen.getByRole("button", { name: "Cancel" })).toHaveTextContent("Cancel");
+  expect(screen.getByRole("button", { name: "Save note" })).toHaveTextContent("Save");
   fireEvent.click(screen.getByRole("button", { name: "Save note" }));
   await waitFor(() =>
     expect(h.api.updateFinanceTransaction).toHaveBeenCalledWith(transaction.id, {
@@ -2509,6 +2582,10 @@ it("requires an explicit valid joint ownership share and reports failed outcomes
   fireEvent.click(screen.getByRole("button", { name: "Joint" }));
   fireEvent.change(screen.getByLabelText("Ownership percentage"), { target: { value: "150" } });
   expect(screen.getByRole("button", { name: "Save ownership" })).toHaveProperty("disabled", true);
+  expect(screen.getByRole("button", { name: "Save ownership" })).toHaveTextContent("Save");
+  expect(screen.getByRole("button", { name: "Cancel ownership change" })).toHaveTextContent(
+    "Cancel",
+  );
   fireEvent.change(screen.getByLabelText("Ownership percentage"), { target: { value: "50" } });
   fireEvent.click(screen.getByRole("button", { name: "Save ownership" }));
   await waitFor(() =>
@@ -2681,9 +2758,9 @@ it("Today requires the user's timezone before reading date-scoped records", asyn
   expect(h.api.listFinanceRecurringOccurrences).not.toHaveBeenCalled();
 });
 it("Today gives descriptions the width below the heading and value", async () => {
-  h.api.getFinanceAttention.mockResolvedValue({ ...attentionSnapshot, activeDecisionCount: 1 });
+  h.api.getFinanceReviewQueue.mockResolvedValue([{ status: "open", transaction }]);
   mount(<TodayHome />);
-  const description = await screen.findByText("Continue in Finance Chat");
+  const description = await screen.findByText(transaction.merchant);
   const value = screen.getByText("Review");
   expect(description.parentElement).toBe(value.parentElement?.parentElement);
 });
@@ -3396,6 +3473,7 @@ it("preserves transaction details when its account is missing and uses split cat
       ...transaction,
       allocations: [
         { id: "split", treatment: "personal", state: "active", amount: 20, categoryId: "travel" },
+        { id: "rest", treatment: "reimbursable", state: "active", amount: 5, categoryId: "other" },
       ],
     },
   });
@@ -3650,7 +3728,7 @@ it("retains transaction search and status while a new period's summary is pendin
     ),
   );
   const previousFrom = h.api.listFinanceTransactions.mock.calls.at(-1)?.[0].from;
-  fireEvent.click(screen.getByRole("button", { name: "This month" }));
+  fireEvent.click(screen.getByRole("button", { name: "Month" }));
   await waitFor(() =>
     expect(h.api.listFinanceTransactions).toHaveBeenLastCalledWith(
       expect.objectContaining({ search: "coffee", pending: true }),
@@ -3813,301 +3891,4 @@ it.each([
   );
   expect(screen.queryByText(transaction.merchant)).toBeNull();
   expect(screen.getByLabelText("Loading finance data")).toBeTruthy();
-});
-
-const attentionSnapshot = {
-  period: "2026-11",
-  complete: true,
-  activeDecisionCount: 0,
-  activeTransactionCount: 0,
-  historicalRecordCount: 2000,
-  futureRecordCount: 0,
-  triageRecordCount: 0,
-  processingCount: 0,
-  technicalBlockerCount: 1,
-  dependencyRefs: [],
-  rawCounts: { transactionFlags: 1000, reviewCases: 1000, questions: 0, approvals: 0 },
-  budgetReady: false,
-  asOf: "2026-11-12T12:00:00Z",
-  timezone: "America/New_York",
-  snapshot: "a".repeat(64),
-  readiness: { openingPositionQualified: false, budgetApproved: true },
-  policy: { firstMonth: "2026-11", revision: 1 },
-  qualificationRecovery: "opening_position_required" as const,
-};
-it("keeps zero owner decisions distinct from blocked evidence and historical cleanup", () => {
-  mount(<FinanceAttentionSummary snapshot={attentionSnapshot} />);
-  expect(screen.getByText("No decisions waiting")).toBeTruthy();
-  expect(screen.getByText("Starting balances")).toBeTruthy();
-  expect(screen.getByText("Needs evidence")).toBeTruthy();
-  expect(screen.getByText("Approved")).toBeTruthy();
-  expect(screen.getByText("1 issue")).toBeTruthy();
-  expect(screen.getByText("2,000 records")).toBeTruthy();
-  expect(screen.queryByText("Budget ready")).toBeNull();
-});
-it("uses the server month and readiness rather than adding overlapping raw counts", () => {
-  mount(
-    <FinanceAttentionSummary
-      snapshot={{
-        ...attentionSnapshot,
-        period: "2026-12",
-        activeDecisionCount: 2,
-        activeTransactionCount: 50,
-        technicalBlockerCount: 0,
-        readiness: { openingPositionQualified: true, budgetApproved: false },
-      }}
-    />,
-  );
-  expect(screen.getByText("December")).toBeTruthy();
-  expect(screen.getByText("2 decisions")).toBeTruthy();
-  expect(screen.getByText("Not approved")).toBeTruthy();
-  expect(screen.queryByText("50 decisions")).toBeNull();
-});
-it("never presents an incomplete assessment as inbox zero", () => {
-  mount(<FinanceAttentionSummary snapshot={{ ...attentionSnapshot, complete: false }} />);
-  expect(screen.getByText("Assessment incomplete")).toBeTruthy();
-  expect(screen.queryByText("No decisions waiting")).toBeNull();
-});
-
-it("persists native batch approval without a foreground execution loop", async () => {
-  h.params = { kind: "review_batch", id: pendingReviewBatch.id };
-  h.api.getFinanceReviewBatch.mockResolvedValue(pendingReviewBatch);
-  const receipt = {
-    id: "approval",
-    batchId: pendingReviewBatch.id,
-    fingerprint: pendingReviewBatch.fingerprint,
-    state: "pending",
-    recovery: "none",
-  };
-  h.api.approveFinanceBatchContinuation.mockImplementation(async () => {
-    h.api.getFinanceBatchContinuation.mockResolvedValue(receipt);
-    return receipt;
-  });
-  const view = mount(<FinanceConversationReference />);
-  fireEvent.click(await screen.findByRole("button", { name: "Approve batch (1)" }));
-  await screen.findByText("Approved · waiting to process");
-  expect(h.api.approveFinanceBatchContinuation).toHaveBeenCalledWith(
-    pendingReviewBatch.id,
-    pendingReviewBatch.fingerprint,
-  );
-  expect(h.api.executeFinanceReviewBatch).not.toHaveBeenCalled();
-  view.unmount();
-  expect(h.api.cancelFinanceBatchContinuation).not.toHaveBeenCalled();
-});
-
-it("shows exact start-month impact and confirms only the reviewed policy", async () => {
-  h.params = { kind: "budget_start_preview", id: "start-preview" };
-  h.api.getFinanceBudgetStartPreview.mockResolvedValue({
-    id: "start-preview",
-    fingerprint: "frozen",
-    proposedMonth: "2026-11",
-    expectedPolicyRevision: 0,
-    attention: { ...attentionSnapshot, activeDecisionCount: 20 },
-    projectedAttention: { ...attentionSnapshot, activeDecisionCount: 2 },
-  });
-  h.api.applyFinanceBudgetStart.mockResolvedValue({ firstMonth: "2026-11", revision: 1 });
-  mount(<FinanceConversationReference />);
-  await screen.findByText("20 → 2");
-  fireEvent.click(screen.getByRole("button", { name: "Confirm starting month" }));
-  await waitFor(() =>
-    expect(h.success).toHaveBeenCalledWith("Starting month confirmed", { id: "save" }),
-  );
-  expect(h.api.applyFinanceBudgetStart).toHaveBeenCalledWith({
-    previewId: "start-preview",
-    fingerprint: "frozen",
-  });
-  expect(screen.queryByText("Starting month confirmed")).toBeNull();
-});
-it("keeps stale starting-month approval failures in Sonner without clearing the inbox", async () => {
-  h.params = { kind: "budget_start_preview", id: "start-preview" };
-  h.api.getFinanceBudgetStartPreview.mockResolvedValue({
-    id: "start-preview",
-    fingerprint: "frozen",
-    proposedMonth: "2026-11",
-    expectedPolicyRevision: 0,
-    attention: attentionSnapshot,
-    projectedAttention: attentionSnapshot,
-  });
-  h.api.applyFinanceBudgetStart.mockRejectedValue(new Error("Source changed"));
-  mount(<FinanceConversationReference />);
-  fireEvent.click(await screen.findByRole("button", { name: "Confirm starting month" }));
-  await waitFor(() =>
-    expect(h.error).toHaveBeenCalledWith(
-      "Could not confirm this preview. Ask nohmi for an updated starting-month proposal.",
-      { id: "save" },
-    ),
-  );
-  expect(h.success).not.toHaveBeenCalled();
-  expect(
-    screen.queryByText(
-      "Could not confirm this preview. Ask nohmi for an updated starting-month proposal.",
-    ),
-  ).toBeNull();
-});
-
-it("reviews an undo against the original batch and preserves later-edit conflicts", async () => {
-  h.params = { kind: "review_batch_undo", id: "correction" };
-  const correction = {
-    id: "correction",
-    batchId: pendingReviewBatch.id,
-    fingerprint: "correction-exact",
-    outcomeIndexes: [0],
-    effects: [
-      {
-        index: 0,
-        transactions: [
-          {
-            id: "t1",
-            merchant: "Grocery purchase",
-            amountCents: 1250,
-            currencyCode: "USD",
-            date: "2026-11-12",
-            before: { category: "Shopping", direction: "expense", needsReview: true },
-            after: { category: "Groceries", direction: "expense", needsReview: false },
-          },
-        ],
-        restoredAllocations: [],
-        reopenedReviews: [],
-      },
-    ],
-    pendingCount: 1,
-    outcomes: [],
-  };
-  h.api.getFinanceReviewBatchUndo.mockResolvedValue(correction);
-  h.api.getFinanceReviewBatch.mockResolvedValue(pendingReviewBatch);
-  h.api.executeFinanceReviewBatchUndo.mockImplementation(async () => {
-    const result = {
-      ...correction,
-      pendingCount: 0,
-      status: "completed_with_exceptions",
-      outcomes: [
-        { index: 0, status: "failed", error: { message: "A later edit must be preserved." } },
-      ],
-    };
-    h.api.getFinanceReviewBatchUndo.mockResolvedValue(result);
-    return result;
-  });
-  mount(<FinanceConversationReference />);
-  const undo = await screen.findByRole("button", { name: "Confirm undo (1)" });
-  await waitFor(() => expect(undo).toBeEnabled());
-  fireEvent.click(undo);
-  await screen.findByText(/A later edit must be preserved\./);
-  expect(h.api.executeFinanceReviewBatchUndo).toHaveBeenCalledWith("correction", {
-    fingerprint: "correction-exact",
-    limit: 10,
-  });
-  expect(h.info).toHaveBeenCalledWith("Some changes could not be undone. Review saved outcomes.", {
-    id: "save",
-  });
-  expect(screen.queryByText("Some changes could not be undone. Review saved outcomes.")).toBeNull();
-  expect(h.success).not.toHaveBeenCalled();
-});
-
-it("keeps opening statements blank until the owner enters an exact month balance", async () => {
-  h.api.getFinanceOpeningPosition.mockResolvedValue({
-    month: "2026-11",
-    qualified: false,
-    statements: [],
-    accounts: [
-      {
-        accountId: "account",
-        name: "Checking",
-        accountRevision: "7",
-        currencyCode: "USD",
-        kind: "cash",
-        openingBalanceCents: null,
-        reasons: ["statement_required"],
-      },
-    ],
-  });
-  h.api.confirmFinanceOpeningStatement.mockResolvedValue({
-    accountId: "account",
-    month: "2026-11",
-    signedOpeningBalanceCents: 125050,
-    revision: 1,
-  });
-  mount(<FinanceOpeningPositionScreen />);
-  fireEvent.click(await screen.findByRole("button", { name: /Checking/ }));
-  expect(screen.getByLabelText("Opening balance in USD")).toHaveValue("");
-  expect(screen.getByLabelText("Confirm opening balance")).toBeDisabled();
-  fireEvent.change(screen.getByLabelText("Opening balance in USD"), {
-    target: { value: "1250.50" },
-  });
-  fireEvent.click(screen.getByLabelText("Confirm opening balance"));
-  await waitFor(() =>
-    expect(h.success).toHaveBeenCalledWith("Opening statement recorded", { id: "save" }),
-  );
-  expect(h.api.confirmFinanceOpeningStatement).toHaveBeenCalledWith(
-    expect.objectContaining({
-      accountId: "account",
-      month: "2026-11",
-      expectedAccountRevision: "7",
-      expectedStatementRevision: 0,
-      signedOpeningBalanceCents: 125050,
-    }),
-  );
-});
-
-it("prepares a single saved effect for undo without applying a correction", async () => {
-  h.params = { kind: "review_batch", id: pendingReviewBatch.id };
-  h.api.getFinanceReviewBatch.mockResolvedValue({
-    ...pendingReviewBatch,
-    pendingCount: 0,
-    outcomes: [{ index: 0, status: "applied" }],
-  });
-  h.api.getFinanceBatchContinuation.mockResolvedValue({ state: "completed" });
-  h.api.previewFinanceReviewBatchUndo.mockResolvedValue({ id: "undo-preview" });
-  mount(<FinanceConversationReference />);
-  fireEvent.click(await screen.findByRole("button", { name: "Review undo for decision 1" }));
-  await waitFor(() =>
-    expect(h.push).toHaveBeenCalledWith({
-      pathname: "/finance-chat-reference",
-      params: { kind: "review_batch_undo", id: "undo-preview" },
-    }),
-  );
-  expect(h.api.previewFinanceReviewBatchUndo).toHaveBeenCalledWith(
-    expect.objectContaining({ batchId: pendingReviewBatch.id, outcomeIndexes: [0] }),
-  );
-  expect(h.api.executeFinanceReviewBatchUndo).not.toHaveBeenCalled();
-});
-it("shows frozen merchant and currency amount on the batch approval card", async () => {
-  h.params = { kind: "review_batch", id: pendingReviewBatch.id };
-  h.api.getFinanceReviewBatch.mockResolvedValue({
-    ...pendingReviewBatch,
-    transactionSummaries: [
-      {
-        index: 0,
-        merchant: "Neighborhood market",
-        amountCents: 7825,
-        currencyCode: "USD",
-        date: "2026-11-10",
-      },
-    ],
-  });
-  mount(<FinanceConversationReference />);
-  expect(await screen.findByText("Neighborhood market")).toBeVisible();
-  expect(screen.getByText(/\$78\.25/)).toBeVisible();
-});
-
-it("keeps approved funding that needs confirmation visible on Plan", async () => {
-  h.params = { view: "Budget" };
-  h.api.getFinanceBudget.mockResolvedValue({
-    data: {
-      allocatedTotal: 500,
-      effectiveFrom: "2026-11",
-      status: "active",
-      version: 1,
-      allocations: [],
-      resources: [],
-      assumptions: [],
-    },
-    planContext: { inputsCurrent: true, resourcesConfirmed: false },
-  });
-  mount(<FinancePlanScreen />);
-  await screen.findByText("Review needed");
-  fireEvent.click(screen.getByRole("button", { name: /Plan inputs/ }));
-  expect(h.push).toHaveBeenCalledWith({
-    pathname: "/finances/assistant",
-    params: { view: "Conversation" },
-  });
 });

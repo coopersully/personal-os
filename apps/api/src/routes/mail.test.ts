@@ -163,6 +163,7 @@ describe("Mail routes", () => {
       previewRule: vi.fn(async () => ({ candidates: [], matchedCount: 0, scannedCount: 1 })),
       previewSavedRule: vi.fn(async () => ({ candidates: [], matchedCount: 0, scannedCount: 1 })),
       snoozeThread: vi.fn(async () => undefined),
+      unsnoozeThread: vi.fn(async () => undefined),
       updateRule: vi.fn(async () => ({ id })),
       updateThread: vi.fn(async () => thread),
       upsertAttentionItem: vi.fn(async () => ({ id })),
@@ -315,7 +316,13 @@ describe("Mail routes", () => {
         })
       ).status,
     ).toBe(204);
+    const ended = await request(`/v1/mail/threads/${id}/snooze`, { method: "DELETE" });
+    expect(ended.status).toBe(204);
+    expect(await ended.text()).toBe("");
+    expect(mail.unsnoozeThread).toHaveBeenCalledWith(id, id);
     scopes = new Set<AccessScope>(["mail:read"]);
+    expect((await request(`/v1/mail/threads/${id}/snooze`, { method: "DELETE" })).status).toBe(403);
+    expect(mail.unsnoozeThread).toHaveBeenCalledTimes(1);
     expect(
       (
         await request("/v1/mail/rules/preview", {

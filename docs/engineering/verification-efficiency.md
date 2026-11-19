@@ -65,7 +65,7 @@ checkpoints or final protected merge enforcement for speed. Report latency and s
 
 ## Hosted browser shards
 
-Browser acceptance uses four file shards per browser project, each with its own Ubuntu runner,
+Browser acceptance uses six file shards per browser project, each with its own Ubuntu runner,
 application processes and PostgreSQL container. `fullyParallel: false` and one worker preserve
 ordering within a test file; no shared local worker increase is introduced. Every matrix member
 remains required. Failure artifacts include project and shard to avoid concurrent name collisions.
@@ -76,56 +76,112 @@ remain required; repository permissions remain read-only. Jobs retain their exis
 cancellation and retry policy. Missing, failed or canceled selected jobs block acceptance. Local
 discovery proves the test partition, not hosted scheduling, installation reliability or elapsed time.
 
-Measure the slowest shard, setup time, queueing and total runner minutes separately. Four shards
-trade more runner capacity for lower elapsed time; a large single file or slow browser dependency
-installation can limit gains. Five-minute ordinary PR CI remains a target, not a coverage exception.
+With four shards the slowest job set the length of the whole run. Six shards split the heaviest
+file groups; the hosted list reporter records each test's duration so a later change can balance
+shards from measurements. Each job carries about 90 seconds of setup and application start, so
+more shards cost more runner time. Draft PRs defer both hosted matrices; see the draft fast lane
+in [delivery verification](delivery-verification.md).
 
-Node quality retains one unsharded `pnpm test:coverage` execution. The local `pnpm check:node`
-command remains `pnpm typecheck && pnpm test:coverage && pnpm build`. Vitest 3.2.7 blob
-aggregation merges post-conversion Istanbul maps, which can infer hits for an uncovered nested
-branch from an enclosing covered range in another shard. A measured trial changed unchanged-source
-branch coverage from 94.00% to 96.61%; it is not equivalent evidence. Future coverage distribution
-must demonstrate branch-hit equivalence against the single-run raw-V8 aggregation, including nested
-uncovered branches, before replacing the existing coverage gate. Unchanged threshold numbers alone
-do not prove equivalent enforcement.
+Running two application stacks on one runner was tried locally and works, but was not adopted: a
+hosted Vitest trial showed a four-vCPU runner doing more total work with three workers than with
+two, so a second stack is unlikely to pay for itself there.
+
+## Sharded Node tests with one coverage gate
+
+Node tests run as six `Node tests` shards. `Node quality` waits for all six and for `Node build`,
+merges the shards' coverage and enforces the unchanged floors over the whole suite. It remains the
+canonical hosted result for types, tests, coverage and builds: a shard or build that fails, is
+canceled or goes missing skips `Node quality`, which the required gate rejects. The local
+`pnpm check:node` command remains `pnpm typecheck && pnpm test:coverage && pnpm build`.
+
+An earlier trial with Vitest 3.2.7 blob aggregation was rejected. `--merge-reports` merges shards
+after each has been converted to Istanbul maps, which can credit an uncovered nested branch from an
+enclosing covered range in another shard; that trial changed unchanged-source branch coverage from
+94.00% to 96.61%. The current design does not use it. A single run merges the raw V8 results of
+every test file per transform mode and converts once. `scripts/coverage-shard-provider.mjs` keeps
+that order:
+
+- A shard exports each test file's raw V8 result untouched. It converts nothing and checks no floor.
+- The merge combines every shard's raw results per transform mode in one pass with the same V8
+  merge library the provider uses, then hands the result to the unmodified upstream
+  `generateCoverage`. Conversion, untested files, reports and floors are the same code a single
+  run executes.
+- The merge requests each source file's transform in the mode its tests used, because no test ran
+  in that process to populate the cache a single run converts from.
+- The merge refuses a missing, repeated or mixed shard, another tool version or checkout, and any
+  difference between the shards' test files and the suite's own test list.
+
+A single run does not merge in one pass. It folds raw results together one test file at a time, in
+the order its tests happened to finish, re-merging its own output. That fold is order-sensitive
+and can leave a spurious covered range, so two single runs of the same source do not always agree.
+The one-pass merge has no order: the same suite yields the same report on any shard count.
+
+Acceptance evidence, in the form the earlier rejection required:
+
+- On a subset covering both transform modes, the one-pass merge is byte-identical to a single
+  run's `coverage-final.json`, identical between shard counts, and identical with the inputs
+  reversed. The fold over the same data adds a covered branch in some orders.
+- On the whole suite, a version that still folded read slightly higher than a single run, which
+  is what prompted the one-pass merge. The one-pass merge read equal or lower on every metric and
+  met every floor.
+
+Reproduce the subset check by running `pnpm test:coverage` and then the shard and merge scripts
+with the same path filters, and comparing with `scripts/compare-coverage.mjs`. Exact figures for
+each whole-suite comparison are in that workflow run's summary.
+
+Branch coverage sits within a hundredth of a point of its 94% floor, so this matters. The
+`Coverage equivalence` workflow runs the suite once on one machine, runs the same six shards,
+merges them and fails if a file is missing from either report, if any metric is more than 0.01
+points higher or 0.05 points lower in the merge than in the single run, or if more than 0.2% of
+all counters change across the files that differ. The bounds are asymmetric on purpose: the merge
+must not make the gate easier to pass. It runs on pull requests that change the coverage
+machinery, Vitest configuration, `package.json`, the lockfile or the CI workflow, weekly, and on
+request. It is not part of `CI required`: treat a failure on a pull request that changes those
+files as blocking.
+
+The provider depends on Vitest internals: the base provider's `readCoverageFiles`,
+`coverageFiles`, `pendingPromises` and `cleanAfterRun`, the Vitest instance's
+`initCoverageProvider`, vite-node's `fetchResult`, and the `@bcoe/v8-coverage` package resolved
+through `@vitest/coverage-v8`. A Vitest upgrade that changes them fails
+the merge or the equivalence workflow rather than passing silently; repair the provider in that
+upgrade.
+
+Vitest keeps two workers everywhere. A hosted trial with three workers was about a fifth slower
+than two, with total per-worker time nearly doubling: the runner was oversubscribed, not
+underused. Shards add machines instead.
+
+Hosted DOM tests also get five seconds for Testing Library's asynchronous waits instead of one,
+set in `vitest.setup.ts` alongside the existing hosted test timeout. A wait still has to succeed;
+it is only allowed longer on a busy runner. A sharded run exposed a one-second wait that timed out
+in two of eight executions of the same shard.
 
 ## Node phase budgets
 
-The hosted Node quality job runs type checking, coverage tests and production builds as separate,
-blocking steps on the same runner after one frozen install and production audit. Their budgets are
-5, 30 and 10 minutes respectively; the outer job allows 50 minutes for these phases plus setup and
-diagnostics. The test execution budget remains 30 minutes. A failed or canceled phase blocks the
-job and later source steps retain the default `success()` condition. The required aggregate still
-uses the actual job result. This split changes neither assertions, test timeouts, coverage floors,
-V8 aggregation, dependency caching nor job selection.
+`Node build` runs a frozen install, the production audit, type checking and production builds, with
+5- and 10-minute budgets for the last two inside a 20-minute job. Each `Node tests` shard has a
+15-minute test budget inside a 20-minute job. `Node quality` has a 10-minute merge budget inside a
+15-minute job. A failed or canceled phase blocks its job and later source steps retain the default
+`success()` condition. The required aggregate still uses the actual `Node quality` result.
 
-Historical source run 42154693945, attempt 1, reported 7,381 passing tests across 650 files and
-all coverage floors passing, with Vitest taking 1,645.47 seconds (27m25s). Type checking took about
-2m17s and setup about 26s. The former combined 30-minute job limit canceled the job after builds
-started; API and web build completion was unconfirmed. Separate budgets keep that non-test work
-outside the test execution allowance. This is execution headroom, not a measured speedup or proof
-that a future candidate's builds will complete. Hosted verification must still prove every phase.
+Before sharding, the single job spent roughly sixteen minutes in tests, a minute and a half in
+type checking and a minute in builds. With six shards each takes three to six minutes and the
+merge about a minute. The shards are uneven, so balancing them is the next gain. Elapsed time for
+a whole run also depends on the account's 20-job limit: a full run starts 24 jobs.
 
-Attempt-bound diagnostics record each phase outcome and preserve `sourceSteps.node` as an
-aggregate: only three successful phases produce Node success. A successful test phase followed by
-a failed, canceled, skipped or unknown build remains unsuccessful. Legacy callers supplying only
-`NODE_OUTCOME` retain their original manifest shape. Missing reports after successful coverage
-remain an incomplete diagnostic even when builds fail; artifacts never replace the required job.
+Attempt-bound diagnostics still record each phase. `Node quality` reports install and coverage from
+its own steps, and audit, type checking and builds from the `Node build` result it waited for; it
+cannot run unless that job succeeded as a whole. Missing reports after a successful merge remain an
+incomplete diagnostic; artifacts never replace the required job.
+
+A partial rerun does not work for the Node jobs: `Node quality` merges only shards uploaded by its
+own attempt, so rerun the whole workflow, as the source receipt already requires.
 
 ## Early production audit
 
-Node quality runs the unchanged `pnpm audit --prod` immediately after frozen dependency
-installation and before type checking. An audit failure stops that job before expensive
-type, coverage and build work; successful candidates still run every existing check. The same
-Node job and required aggregate gate enforce failure. Other parallel jobs are not canceled by
-this reorder, so earlier detection does not imply lower whole-workflow elapsed time or runner cost.
-
-Measure time to the audit result separately from complete elapsed time and aggregate runner
-minutes. In historical run 40040586614, installation finished 17 seconds after Node job start,
-then `check:node` took 22m45s before a one-second audit failure. Moving that audit earlier would
-have detected that failure roughly 22m45s sooner; this is a counterfactual from recorded timings,
-not a measured candidate speedup. Preserve the single-run sharding comparison separately and
-record actual current-candidate setup, audit and execution timings before making further claims.
+`Node build` runs the unchanged `pnpm audit --prod` immediately after frozen dependency
+installation and before type checking. An audit failure fails that job within seconds and skips
+`Node quality`. Other parallel jobs are not canceled, so earlier detection does not lower
+whole-workflow runner cost.
 
 ## Coordination and trustworthy reuse
 

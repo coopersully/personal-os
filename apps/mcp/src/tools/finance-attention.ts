@@ -116,7 +116,7 @@ export function registerFinanceAttentionTools(server: McpServer, api: PersonalOs
     {
       title: "Apply Finance batch correction",
       description:
-        "Apply at most ten pending corrections from the exact preview fingerprint. Authorization, policy and later edits are checked again per effect. Requires finances:read, finances:write and finances:execute.",
+        "Apply at most ten pending corrections from the exact preview fingerprint. Authorization, policy and later edits are checked again per effect. Only changes this agent applied under its own authority can be undone here; changes the owner executed or approved, including confirmed transfer pairs, are forbidden and need the owner to apply the published preview. Requires finances:read, finances:write and finances:execute.",
       inputSchema: executeFinanceReviewBatchInputSchema.extend({ id: idSchema }),
     },
     async ({ id, ...input }) => apiResult(() => api.executeFinanceReviewBatchUndo(id, input)),

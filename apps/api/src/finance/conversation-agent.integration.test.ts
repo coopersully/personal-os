@@ -6,6 +6,7 @@ import {
   createDatabaseClient,
   financeAccounts,
   financeConversationMessages,
+  financeReviewBatchRuns,
   financeTransactions,
   migrateDatabase,
   nativePushEvents,
@@ -209,6 +210,131 @@ describe.sequential("authorized Finance agent cards", () => {
       service().publishAgentCard(f.context, { ...f.input, text: "x".repeat(1201) }),
     ).rejects.toBeDefined();
     await expect(service().getAgentHistory(f.context, { limit: 101 })).rejects.toBeDefined();
+  });
+  it("pages an agent's shared history forward, backward and from the latest message", async () => {
+    const f = await fixture();
+    const published = [];
+    for (const step of ["one", "two", "three"])
+      published.push(
+        await service().publishAgentCard(f.context, {
+          ...f.input,
+          text: `Synthetic card ${step}`,
+          idempotencyKey: step,
+        }),
+      );
+    const texts = (page: { messages: { text: string }[] }) =>
+      page.messages.map((message) => message.text);
+    const first = await service().getAgentHistory(f.context, { limit: 2 });
+    expect(texts(first)).toEqual(["Synthetic card one", "Synthetic card two"]);
+    expect(first.nextCursor).toBe(published[1]?.sequence);
+    const rest = await service().getAgentHistory(f.context, { after: first.nextCursor, limit: 2 });
+    expect(texts(rest)).toEqual(["Synthetic card three"]);
+    expect(rest.nextCursor).toBeNull();
+    // Backward pages still read oldest to newest; the cursor is their oldest message.
+    const latest = await service().getAgentHistory(f.context, { latest: "true", limit: 2 });
+    expect(texts(latest)).toEqual(["Synthetic card two", "Synthetic card three"]);
+    expect(latest.nextCursor).toBe(published[1]?.sequence);
+    const earlier = await service().getAgentHistory(f.context, {
+      before: latest.nextCursor,
+      limit: 2,
+    });
+    expect(texts(earlier)).toEqual(["Synthetic card one"]);
+    expect(earlier.nextCursor).toBeNull();
+  });
+  it("refuses a signed-in person, an expired grant and a card identity reused for other content", async () => {
+    const f = await fixture();
+    const person = {
+      ...f.context,
+      principal: {
+        ...f.context.principal,
+        actorType: "user" as const,
+        actorId: f.context.principal.userId,
+      },
+    };
+    await expect(service().publishAgentCard(person, f.input)).rejects.toMatchObject({
+      code: "forbidden",
+      message: expect.stringContaining("agent connection"),
+    });
+    await expect(service().getAgentHistory(person, {})).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    const card = await service().publishAgentCard(f.context, f.input);
+    await expect(
+      service().publishAgentCard(f.context, {
+        ...f.input,
+        text: "Different words, same identity.",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(await service().publishAgentCard(f.context, f.input)).toEqual(card);
+    await database.db
+      .update(accessTokens)
+      .set({ expiresAt: new Date(now().getTime() - 1) })
+      .where(eq(accessTokens.id, f.context.principal.actorId));
+    await expect(
+      service().publishAgentCard(f.context, { ...f.input, idempotencyKey: "after-expiry" }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect(
+      await database.db
+        .select()
+        .from(financeConversationMessages)
+        .where(eq(financeConversationMessages.userId, f.context.principal.userId)),
+    ).toHaveLength(1);
+  });
+  it("publishes only this agent's own batch or correction preview, never without its connection", async () => {
+    const f = await fixture();
+    const batchRef = (id: string) => ({
+      ...f.input,
+      idempotencyKey: randomUUID(),
+      recordRefs: [{ kind: "review_batch" as const, id }],
+    });
+    await expect(
+      service().publishAgentCard(f.context, batchRef(randomUUID())),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service().publishAgentCard(f.context, {
+        ...f.input,
+        idempotencyKey: randomUUID(),
+        recordRefs: [{ kind: "review_batch_undo" as const, id: randomUUID() }],
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const prepared = async (actorId: string) => {
+      const [batch] = await database.db
+        .insert(financeReviewBatchRuns)
+        .values({
+          userId: f.context.principal.userId,
+          actorType: "agent",
+          actorId,
+          idempotencyKey: randomUUID(),
+          fingerprint: `sha256:${"b".repeat(64)}`,
+          manifest: [{ decision: { kind: "categorization", transactionId: f.transaction.id } }],
+        })
+        .returning();
+      if (!batch) throw new Error("fixture");
+      return batch.id;
+    };
+    // Another agent's batch for the same owner is not this agent's to publish.
+    await expect(
+      service().publishAgentCard(f.context, batchRef(await prepared(randomUUID()))),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const own = await prepared(f.context.principal.actorId);
+    expect(await service().publishAgentCard(f.context, batchRef(own))).toMatchObject({
+      authorKind: "agent",
+      recordRefs: [{ kind: "review_batch", id: own }],
+    });
+    // Every token belongs to a connection; a principal that omits it cannot publish.
+    const { authorizationConnectionId: _omitted, ...unbound } = f.context.principal;
+    await expect(
+      service().publishAgentCard(
+        { requestId: randomUUID(), principal: unbound },
+        { ...f.input, idempotencyKey: randomUUID() },
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect(
+      await database.db
+        .select()
+        .from(financeConversationMessages)
+        .where(eq(financeConversationMessages.userId, f.context.principal.userId)),
+    ).toHaveLength(1);
   });
   it("rejects foreign references, spoofed authors and revoked grants before writing", async () => {
     const f = await fixture(),

@@ -1,14 +1,21 @@
+import type { FinanceActivityEntry } from "@personal-os/domain";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
-import { FinanceAttentionSummary } from "./attention-summary";
+import { View } from "react-native";
+import { ActivityEvidence } from "./activity-evidence";
+import { categoryIcon, categoryLabel } from "./category-presentation";
 import { Conversation } from "./conversation";
+import { unreadMessages, useConversationUnread } from "./conversation-unread";
 import { useFinance, useFinanceRead } from "./data";
-import { financeLabel } from "./presentation";
-import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Segments } from "./ui";
+import { financeLabel, recordAmount } from "./presentation";
+import { ActionReviews } from "./review-approvals";
+import { ReviewDestinations } from "./reviews";
+import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Section, Segments } from "./ui";
 
-function Activity() {
+function Activity({ onConversation }: { onConversation: () => void }) {
   const { api, owner } = useFinance();
+  const [opened, setOpened] = useState<FinanceActivityEntry | null>(null);
   const query = useInfiniteQuery({
     meta: { scopedReadFeedback: true },
     queryKey: ["finances", owner, "activity"],
@@ -18,6 +25,16 @@ function Activity() {
     getNextPageParam: (page) => page.nextCursor ?? undefined,
   });
   const rows = query.data?.pages.flatMap((page) => page.entries) ?? [];
+  // The opened entry is the one that was read; a later refresh does not swap its evidence.
+  if (opened)
+    return (
+      <ActivityEvidence
+        key={opened.id}
+        entry={opened}
+        onClose={() => setOpened(null)}
+        onConversation={onConversation}
+      />
+    );
   return (
     <ReadState query={{ ...query, feedbackKey: JSON.stringify(["finances", owner, "activity"]) }}>
       <Card>
@@ -29,6 +46,8 @@ function Activity() {
               subtitle={entry.explanation}
               value={financeLabel(entry.status)}
               icon="history"
+              accessibilityHint="Shows the evidence for this activity"
+              onPress={() => setOpened(entry)}
             />
           ))
         ) : (
@@ -44,31 +63,63 @@ function Activity() {
     </ReadState>
   );
 }
-function Attention({ onDecisions }: { onDecisions: () => void }) {
-  const query = useFinanceRead(["attention"], (api) => api.getFinanceAttention());
+function Attention() {
+  const query = useFinanceRead(["reviews"], (api) => api.getFinanceReviewQueue());
   return (
-    <ReadState query={query}>
-      {query.data ? (
-        <FinanceAttentionSummary
-          snapshot={query.data}
-          onDecisions={onDecisions}
-          onBudget={() => router.push({ pathname: "/finances/plan", params: { view: "Budget" } })}
-          onOpening={() => router.push("/finance-opening-position")}
-          onHistory={() => router.push("/finance-historical-cleanup")}
-        />
-      ) : null}
-    </ReadState>
+    <Section title="Needs your input">
+      <ReadState query={query}>
+        <View style={{ gap: 12 }}>
+          {query.data?.length ? (
+            query.data.map((review) => (
+              <Card key={review.id}>
+                <View style={{ flex: 1 }}>
+                  <FinanceRow
+                    title={review.transaction.merchant}
+                    value={recordAmount(review.transaction.amount, review.transaction.currencyCode)}
+                    subtitle={
+                      review.transaction.category || review.suggestedCategory?.name
+                        ? categoryLabel(
+                            review.transaction.category ?? review.suggestedCategory?.name,
+                          )
+                        : "Choose a category"
+                    }
+                    icon={categoryIcon(
+                      review.transaction.category ??
+                        review.suggestedCategory?.name ??
+                        "Uncategorized",
+                    )}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/finance-transaction",
+                        params: { id: review.transaction.id },
+                      })
+                    }
+                  />
+                </View>
+              </Card>
+            ))
+          ) : (
+            <Copy secondary>No transaction reviews waiting.</Copy>
+          )}
+        </View>
+      </ReadState>
+    </Section>
   );
 }
 export function FinanceAssistantScreen() {
   const { owner } = useFinance();
   const [mode, setMode] = useState<"For you" | "Conversation" | "Activity">("For you");
   const { view } = useLocalSearchParams<{ view?: string }>();
+  const unread = useConversationUnread();
+  const openConversation = () => {
+    setMode("Conversation");
+    router.setParams({ view: "Conversation" });
+  };
   useEffect(() => {
     if (view === "Activity" || view === "Conversation" || view === "For you") setMode(view);
   }, [view]);
   return (
-    <FinanceScreen title="Assistant" scroll={mode !== "Conversation"}>
+    <FinanceScreen title="Assistant" scroll={mode !== "Conversation"} tabBar>
       <Segments
         value={mode}
         options={["For you", "Conversation", "Activity"]}
@@ -80,24 +131,28 @@ export function FinanceAssistantScreen() {
       {mode === "Conversation" ? (
         <Conversation key={owner} />
       ) : mode === "Activity" ? (
-        <Activity />
+        <Activity onConversation={openConversation} />
       ) : (
         <>
-          <Attention
-            onDecisions={() => {
-              setMode("Conversation");
-              router.setParams({ view: "Conversation" });
-            }}
-          />
+          <Attention />
+          <ActionReviews />
+          <ReviewDestinations />
           <Card>
             <FinanceRow
               title="Your Finance conversation"
-              subtitle="Ask a question or continue your conversation"
+              subtitle={
+                unread && unread.count > 0n
+                  ? unreadMessages(unread.count)
+                  : "Ask a question or continue your conversation"
+              }
               icon="mail"
-              onPress={() => {
-                setMode("Conversation");
-                router.setParams({ view: "Conversation" });
-              }}
+              onPress={openConversation}
+            />
+            <FinanceRow
+              title="Automations"
+              subtitle="Hosts registered to run Finance maintenance"
+              icon="agent"
+              onPress={() => router.push("/finance-automations")}
             />
             <FinanceRow
               title="Recorded activity"

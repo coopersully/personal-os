@@ -27,7 +27,14 @@ export default defineConfig({
         "**/vite-env.d.ts",
       ],
       include: ["apps/*/src/**/*.{ts,tsx}", "packages/*/src/**/*.{ts,tsx}"],
-      provider: "v8",
+      // A sharded hosted run exports raw results per machine and merges them before
+      // conversion; see scripts/coverage-shard-provider.mjs. A single run uses v8 directly.
+      ...(process.env.NOHMI_COVERAGE_MODE
+        ? {
+            provider: "custom" as const,
+            customProviderModule: "./scripts/coverage-shard-provider.mjs",
+          }
+        : { provider: "v8" as const }),
       reporter: ["text", "html", "json-summary", "json"],
       thresholds: {
         // A high global floor catches meaningful regressions without encouraging brittle
@@ -48,7 +55,8 @@ export default defineConfig({
     ],
     // Keep the large DOM suite from contending with API integration-test containers.
     // Four local workers made otherwise-fast setup flows exceed their timeout under
-    // full `pnpm verify` load; matching CI keeps the repository-wide gate deterministic.
+    // full `pnpm verify` load. A hosted trial with three workers was slower than two
+    // (1179s against 988s for the suite), so hosted speed comes from shards instead.
     maxWorkers: 2,
     // A few end-to-end interaction tests intentionally cover several user actions. Their
     // deterministic work completes locally, but shared two-core runners need headroom;

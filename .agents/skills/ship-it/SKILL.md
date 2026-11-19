@@ -1,6 +1,7 @@
 ---
 name: ship-it
-description: "Compatibility entrypoint for ship it: hand off a nohmi worktree or PR through acceptance, protected merge and verified production delivery."
+description: "Delivery engine behind the handoff skill: convergence, readiness evaluation, protected merge and production acceptance for one nohmi PR. Use when handoff directs you here or when the ship-it scripts, checkpoints or evaluator are being run or changed; for a plain \"ship it\" request, start with handoff."
+disable-model-invocation: true
 ---
 
 # Ship It
@@ -25,7 +26,7 @@ Resolve exactly one repository, open PR, authenticated actor, head, base, and au
 If no PR exists or substantial implementation remains, finish that implementation and the create-pr
 phase first; report it as implementation, not merge waiting. Reload when the recorded policy version
 differs from the checked-in VERSION; do not assume another chat uses this checkout’s instructions.
-Claim the PR using `scripts/checkpoint.py` with the stable task/host owner identity. Its private
+Claim the PR using `python3 .agents/skills/ship-it/scripts/checkpoint.py` with the stable task/host owner identity. Its private
 registry lives in the Git common directory so it survives worktree removal. Preserve unrelated
 local edits; use an isolated checkout if needed. Never steal a claim on elapsed time alone.
 
@@ -40,7 +41,7 @@ Do not report completion when merely waiting or after enabling some external ope
 
 ## Convergence loop
 
-1. **Collect.** Run `scripts/collect_evidence.py --repo <owner/repo> --pr <number> --output
+1. **Collect.** Run `python3 .agents/skills/ship-it/scripts/collect_evidence.py --repo <owner/repo> --pr <number> --output
    .context/ship-it/github.json`. Use `resolve-pr-comments` to collect all review surfaces,
    including resolved/outdated threads. Inspect live Linear, current workflow scope, rules,
    dependencies, acceptance criteria, and actual diff. Collection gaps remain unknown.

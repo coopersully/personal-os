@@ -5,9 +5,11 @@ import { useEffect, useRef, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { toast } from "sonner-native";
 import { EnumChoice } from "../../components/forms/enum-choice";
+import { Action, Actions, formRow, PaddedSurfaceRows } from "../../components/forms/form-rows";
 import { Icon } from "../../components/icons";
+import { SettingsAccentProvider } from "../../components/settings-accent";
 import { SettingLabel, SettingValue } from "../../components/settings-row-content";
-import { useTheme, workspaceColor } from "../../theme";
+import { useTheme } from "../../theme";
 import { useFinance } from "./data";
 import { financeLabel } from "./presentation";
 
@@ -69,7 +71,7 @@ export function AccountPreferences({ account }: { account: FinanceAccount }) {
     }
   }
   return (
-    <>
+    <PaddedSurfaceRows>
       <EnumChoice
         label="Ownership"
         icon="people"
@@ -105,13 +107,7 @@ export function AccountPreferences({ account }: { account: FinanceAccount }) {
             setShare(String(Number(((account.ownershipShare ?? 0) * 100).toFixed(2))));
             setJoint(true);
           }}
-          style={{
-            minHeight: 56,
-            padding: 16,
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 12,
-          }}
+          style={({ pressed }) => [formRow, { opacity: pending ? 0.4 : pressed ? 0.6 : 1 }]}
         >
           <Icon name="people" color={t.secondary} size={22} />
           <SettingLabel>Your share</SettingLabel>
@@ -125,50 +121,46 @@ export function AccountPreferences({ account }: { account: FinanceAccount }) {
         </Pressable>
       )}
       {joint && (
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <Text style={{ flex: 1, color: t.ink }}>Your share</Text>
-          <TextInput
-            accessibilityLabel="Ownership percentage"
-            value={share}
-            onChangeText={setShare}
-            editable={!pending}
-            placeholder="50"
-            keyboardType="decimal-pad"
-            style={{
-              color: invalid && share ? t.destructive : t.ink,
-              minHeight: 44,
-              minWidth: 50,
-              textAlign: "right",
-            }}
-          />
-          <Text style={{ color: t.ink }}>%</Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Cancel ownership change"
-            disabled={pending}
-            onPress={() => setJoint(false)}
-            style={{ minHeight: 44, minWidth: 44, alignItems: "center", justifyContent: "center" }}
-          >
-            <Icon name="cancel" color={t.secondary} />
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Save ownership"
-            disabled={pending || invalid}
-            onPress={() =>
-              void save({ ownershipType: "joint", ownershipShare: Number(share) / 100 })
-            }
-            style={{
-              minHeight: 44,
-              minWidth: 44,
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: pending || invalid ? 0.5 : 1,
-            }}
-          >
-            <Icon name="save" color={workspaceColor(t, "finances")} />
-          </Pressable>
-        </View>
+        <SettingsAccentProvider workspace="finances">
+          <View style={formRow}>
+            <Icon name="people" color={t.secondary} size={22} />
+            <SettingLabel>Your share</SettingLabel>
+            <TextInput
+              accessibilityLabel="Ownership percentage"
+              value={share}
+              onChangeText={setShare}
+              editable={!pending}
+              placeholder="50"
+              placeholderTextColor={t.secondary}
+              keyboardType="decimal-pad"
+              style={{
+                color: invalid && share ? t.destructive : t.ink,
+                fontSize: 17,
+                minHeight: 32,
+                minWidth: 50,
+                padding: 0,
+                textAlign: "right",
+              }}
+            />
+            <Text style={{ color: t.ink, fontSize: 17 }}>%</Text>
+          </View>
+          <Actions>
+            <Action
+              label="Cancel"
+              accessibilityLabel="Cancel ownership change"
+              disabled={pending}
+              onPress={() => setJoint(false)}
+            />
+            <Action
+              label="Save"
+              accessibilityLabel="Save ownership"
+              disabled={pending || invalid}
+              onPress={() =>
+                void save({ ownershipType: "joint", ownershipShare: Number(share) / 100 })
+              }
+            />
+          </Actions>
+        </SettingsAccentProvider>
       )}
       <EnumChoice
         label="Planning"
@@ -184,6 +176,6 @@ export function AccountPreferences({ account }: { account: FinanceAccount }) {
             void save({ includeInPlanning: value === "included" });
         }}
       />
-    </>
+    </PaddedSurfaceRows>
   );
 }

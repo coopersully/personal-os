@@ -1,0 +1,4 @@
+interface:
+  display_name: "nohmi Project Manager"
+  short_description: "Coordinate nohmi priorities across oversight chats"
+  default_prompt: "Use $nohmi-project-manager to review nohmi portfolio priorities and advance the next oversight action."

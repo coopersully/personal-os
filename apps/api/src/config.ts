@@ -72,6 +72,7 @@ const configSchema = z
     PLAID_CLIENT_ID: z.string().default(""),
     PLAID_ENV: z.enum(["sandbox", "development", "production"]).default("sandbox"),
     PLAID_SECRET: z.string().default(""),
+    PLAID_IOS_REDIRECT_URI: z.string().default(""),
     RESEND_API_KEY: z.string().default(""),
     REGISTRATION_MODE: z.enum(["invite", "open"]).default("invite"),
     SESSION_COOKIE_NAME: z.string().min(1).default("personal_os_session"),
@@ -99,6 +100,21 @@ const configSchema = z
           "AGENT_SKILL_SOURCE_URL must include AGENT_SKILL_REVISION so the guide identifies a release instead of a generic latest endpoint.",
         path: ["AGENT_SKILL_SOURCE_URL"],
       });
+    }
+    if (value.PLAID_IOS_REDIRECT_URI.trim()) {
+      try {
+        const url = new URL(value.PLAID_IOS_REDIRECT_URI.trim());
+        // Plaid accepts only an HTTPS universal link as an iOS OAuth return address.
+        if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash)
+          throw new Error();
+      } catch {
+        context.addIssue({
+          code: "custom",
+          message:
+            "PLAID_IOS_REDIRECT_URI must be an HTTPS URL without credentials, query or fragment.",
+          path: ["PLAID_IOS_REDIRECT_URI"],
+        });
+      }
     }
     if (value.GOOGLE_GMAIL_PUSH_ENABLED === "true") {
       for (const key of [
@@ -265,6 +281,8 @@ export type AppConfig = {
   port: number;
   plaidClientId: string;
   plaidEnvironment: "sandbox" | "development" | "production";
+  /** The universal link Plaid returns to after bank sign-in in the iPhone app; unset by default. */
+  plaidIosRedirectUri?: string;
   plaidSecret: string;
   production: boolean;
   ownerEmails?: string[];
@@ -356,6 +374,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
     port: value.PORT,
     plaidClientId: value.PLAID_CLIENT_ID,
     plaidEnvironment: value.PLAID_ENV,
+    ...(value.PLAID_IOS_REDIRECT_URI.trim()
+      ? { plaidIosRedirectUri: value.PLAID_IOS_REDIRECT_URI.trim() }
+      : {}),
     plaidSecret: value.PLAID_SECRET,
     production: value.NODE_ENV === "production",
     ownerEmails: value.OWNER_EMAILS.split(",")

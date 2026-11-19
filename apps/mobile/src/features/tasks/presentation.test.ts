@@ -1,9 +1,31 @@
 import type { TaskWorkspaceItem } from "@personal-os/domain";
 import { describe, expect, it } from "vitest";
-import { activeFilters, matchingOptions, partitionPinned, taskMetadata } from "./presentation";
+import {
+  activeFilters,
+  formatEstimate,
+  formatTargetDate,
+  itemCount,
+  matchingOptions,
+  partitionPinned,
+  taskMetadata,
+  taskRowDetails,
+  taskRowSummary,
+} from "./presentation";
 import { buildViewOptions } from "./view-options";
 
 describe("task presentation", () => {
+  it("formats a project target as a calendar date and leaves unreadable values alone", () => {
+    const expected = new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(Date.UTC(2026, 11, 1)));
+    expect(formatTargetDate("2026-12-01")).toBe(expected);
+    expect(formatTargetDate("2026-12-01T00:00:00.000Z")).toBe(expected);
+    expect(formatTargetDate("2026-12-01")).not.toContain("2026-12-01");
+    expect(formatTargetDate("soon")).toBe("soon");
+  });
   it("keeps routine metadata quiet while retaining urgency and read-only status", () => {
     const item = {
       kind: "task",
@@ -88,4 +110,84 @@ it("renders task dates in the account zone across a midnight boundary", () => {
   } as TaskWorkspaceItem;
   expect(taskMetadata(item, "America/Los_Angeles")).toEqual(["Due Nov 5, 4:30 PM"]);
   expect(taskMetadata(item, "Asia/Tokyo")).toEqual(["Due Nov 6, 9:30 AM"]);
+});
+
+describe("task row details", () => {
+  const item = {
+    kind: "task",
+    readOnly: false,
+    record: {
+      priority: "medium",
+      dueAt: null,
+      scheduledAt: "2026-11-06T00:30:00Z",
+      notes: "  Bring the long ladder  ",
+      tags: ["home", "errands"],
+      estimateMinutes: 50,
+    },
+  } as unknown as TaskWorkspaceItem;
+  it("always shows reserved time and the container, and nothing optional by default", () => {
+    expect(taskRowDetails(item, { list: "Home", project: "Move" })).toEqual({
+      context: ["Reserved Nov 6, 12:30 AM"],
+      container: "Home / Move",
+      notes: null,
+      tags: [],
+    });
+    expect(
+      taskRowDetails(item, { timezone: "America/Los_Angeles", project: "Move" }),
+    ).toMatchObject({ context: ["Reserved Nov 5, 4:30 PM"], container: "Move" });
+  });
+  it("adds each saved detail on its own", () => {
+    expect(taskRowDetails(item, { details: ["estimate"] })).toEqual({
+      context: ["Reserved Nov 6, 12:30 AM", "50 min"],
+      container: null,
+      notes: null,
+      tags: [],
+    });
+    expect(taskRowDetails(item, { details: ["notes"] }).notes).toBe("Bring the long ladder");
+    expect(taskRowDetails(item, { details: ["tags"] }).tags).toEqual(["home", "errands"]);
+  });
+  it("renders nothing for a value the task does not have", () => {
+    const bare = {
+      ...item,
+      record: { ...item.record, scheduledAt: null, notes: " ", tags: [], estimateMinutes: null },
+    } as TaskWorkspaceItem;
+    expect(taskRowDetails(bare, { details: ["estimate", "tags", "notes"] })).toEqual({
+      context: [],
+      container: null,
+      notes: null,
+      tags: [],
+    });
+  });
+  it("keeps a reminder to its notes: it has no estimate, tags, container or reserved time", () => {
+    const reminder = {
+      kind: "reminder",
+      readOnly: false,
+      record: { priority: "low", dueAt: null, notes: "Call back" },
+    } as TaskWorkspaceItem;
+    expect(
+      taskRowDetails(reminder, { details: ["estimate", "tags", "notes"], list: "Home" }),
+    ).toEqual({ context: [], container: null, notes: "Call back", tags: [] });
+  });
+  it("formats an estimate in hours once it reaches one", () => {
+    expect([45, 60, 90].map(formatEstimate)).toEqual(["45 min", "1 hr", "1 hr 30 min"]);
+  });
+  it("summarizes the row for assistive technology in reading order", () => {
+    const shown = taskRowDetails(item, { details: ["estimate", "tags", "notes"], list: "Home" });
+    expect(taskRowSummary(["High priority", "Due Nov 5, 4:30 PM"], shown, true)).toBe(
+      "High priority, Overdue Nov 5, 4:30 PM, Reserved Nov 6, 12:30 AM, 50 min, Home, Bring the long ladder, Tags: home, errands",
+    );
+    expect(taskRowSummary([], taskRowDetails({ ...item, kind: "reminder" } as never))).toBe("");
+  });
+});
+it("words an item count in the singular and plural", () => {
+  expect([0, 1, 2, 1234].map((count) => itemCount(count))).toEqual([
+    "0 items",
+    "1 item",
+    "2 items",
+    "1,234 items",
+  ]);
+  expect([itemCount(1, "container"), itemCount(3, "container")]).toEqual([
+    "1 container",
+    "3 containers",
+  ]);
 });

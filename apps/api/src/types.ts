@@ -64,6 +64,10 @@ export type RequestLog = TransportDiagnostics & {
   code?: string | undefined;
   disposition?: ConnectorSyncRecovery;
   durationMs: number;
+  /** An internal failure's name, AppError code and stack frames; never its message. */
+  errorName?: string;
+  errorCode?: string;
+  errorStack?: string;
   claimCount?: number;
   hostOutcome?: "accepted" | "uncertain" | "unavailable";
   eligibleAccountCount?: number;
@@ -88,12 +92,15 @@ export type RequestLog = TransportDiagnostics & {
     | "desktop_release_unavailable"
     | "finance_sync_health_initialized"
     | "finance_host_handoff"
+    | "finance_approved_batch_failed"
     | "finance_receipt_mail_search_failed"
     | "mail_rule_work_dispatch_failed"
     | "finance_configuration_section_failed"
     | "finance_onboarding_chat_unavailable"
     | "workspace_review_search_source_failed"
     | "mail_attachment_download_failed"
+    | "knowledge_workflow_memory_failed"
+    | "knowledge_core_failed"
     | "request";
   section?: "profile" | "preferences" | "income" | "budget" | "accounts" | "guidance" | "execution";
   failureCount?: number;

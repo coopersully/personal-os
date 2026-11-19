@@ -204,6 +204,8 @@ export const updateUserInputSchema = z
 export type UpdateUserInput = z.infer<typeof updateUserInputSchema>;
 
 export const accessScopeSchema = z.enum([
+  "knowledge:read",
+  "knowledge:write",
   "reminders:read",
   "reminders:write",
   "tasks:read",
@@ -247,6 +249,14 @@ export const createAccessTokenInputSchema = z
       context.addIssue({
         code: "custom",
         message: "The texting:write scope requires texting:read.",
+        path: ["scopes"],
+      });
+    }
+    // Every memory save also reads, so a write-only memory grant could never be used.
+    if (input.scopes.includes("knowledge:write") && !input.scopes.includes("knowledge:read")) {
+      context.addIssue({
+        code: "custom",
+        message: "The knowledge:write scope requires knowledge:read.",
         path: ["scopes"],
       });
     }

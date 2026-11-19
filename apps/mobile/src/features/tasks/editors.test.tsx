@@ -215,7 +215,11 @@ vi.mock("@tanstack/react-query", async () => {
     useQueryClient: () => {
       const useSelectedClient = h.liveQueries
         ? real.useQueryClient
-        : () => ({ invalidateQueries: vi.fn(), refetchQueries: vi.fn() });
+        : () => ({
+            invalidateQueries: vi.fn(),
+            refetchQueries: vi.fn(),
+            cancelQueries: vi.fn(async () => {}),
+          });
       return useSelectedClient();
     },
   };
@@ -1018,7 +1022,7 @@ it.each([
     </MobileDataProvider>,
   );
   expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
-  expect(h.headerOptions.headerRight?.()).toBeNull();
+  expect(h.headerOptions.headerRight).toBeUndefined();
   let finish!: (value: unknown) => void;
   get.mockImplementationOnce(
     () =>
@@ -1033,7 +1037,7 @@ it.each([
     </MobileDataProvider>,
   );
   expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
-  expect(h.headerOptions.headerRight?.()).toBeNull();
+  expect(h.headerOptions.headerRight).toBeUndefined();
   await waitFor(() => expect(get).toHaveBeenCalledTimes(3));
   await act(async () => finish({ ...original, title: "Updated task", name: "Updated list" }));
   await waitFor(() =>

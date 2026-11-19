@@ -187,7 +187,7 @@ function baseIdentity(workspace, env) {
 function identity(workspace, env) {
   if (
     !["desktop-chromium", "mobile-chromium"].includes(env.BROWSER_PROJECT) ||
-    !/^[1-4]$/u.test(env.BROWSER_SHARD ?? "") ||
+    !/^[1-6]$/u.test(env.BROWSER_SHARD ?? "") ||
     env.BROWSER_DIAGNOSTIC_CONTEXT !== POLICY
   )
     throw new Error("Invalid browser diagnostic context");

@@ -56,6 +56,18 @@ Use the shared [feedback rubric](../feedback.md) for every operation.
 - Query failures expose Retry; background failures retain prior values with a
   stale warning. Each error has one announcement owner.
 
+## Memory
+
+The Memory screen is not in Settings yet. The web screen ships in PR 2 and the iPhone screen in
+PR 3 (COO-168). Their target is in
+[the agent-managed memory design](../../superpowers/specs/2026-11-15-persistent-memory-design.md)
+§5.9: All, Conflicts, Archived and Trash lists; text and tag search; origin, sensitivity and
+freshness on each row; and confirm, resolve, archive, restrict, Trash, restore, Delete now, export
+and tag management with Sonner feedback.
+
+Until then, Agents settings and the consent screen show the memory permission as one line,
+"Memory: read and save what nohmi knows about you", which new connections receive by default.
+
 ## Titles and subsection headers
 
 Use title case for Settings page titles, navigation destinations, and section labels

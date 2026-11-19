@@ -3,8 +3,10 @@ import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { toast } from "sonner-native";
 import { AppToaster } from "../components/app-toaster";
+import { stackChromeOptions } from "../components/editor-header";
 import { AuthProvider, useAuth } from "../features/auth/context";
 import { PreviewProvider } from "../features/briefing/context";
+import { LinkOpener } from "../features/links/opener";
 import { NotificationProvider } from "../features/notifications/provider";
 import { MobileDataProvider } from "../features/tasks/data";
 import { useTheme } from "../theme";
@@ -57,23 +59,16 @@ function AuthenticatedLayout() {
   return (
     <MobileDataProvider key={state.user?.id ?? "signed-out"}>
       <PreviewProvider>
-        <Stack
-          screenOptions={{
-            headerTintColor: t.ink,
-            statusBarStyle: t.dark ? "light" : "dark",
-            headerUserInterfaceStyle: t.dark ? "dark" : "light",
-            headerStyle: { backgroundColor: t.canvas },
-            contentStyle: { backgroundColor: t.canvas },
-            headerShadowVisible: false,
-            headerBackButtonDisplayMode: "minimal",
-          }}
-        >
+        <Stack screenOptions={stackChromeOptions(t)}>
           <Stack.Protected guard={state.status === "signedOut"}>
             <Stack.Screen name="sign-in" options={{ headerShown: false }} />
           </Stack.Protected>
           <Stack.Protected guard={state.status === "signedIn"}>
             <Stack.Screen name="(workspaces)" options={{ headerShown: false, title: "today" }} />
             <Stack.Screen name="settings" options={{ headerShown: false }} />
+            <Stack.Screen name="calendar-event" options={{ title: "" }} />
+            <Stack.Screen name="calendar-event-edit" options={{ title: "event" }} />
+            <Stack.Screen name="calendar-event-blocks" options={{ title: "block time" }} />
             <Stack.Screen name="finance-budget-category" options={{ title: "category budget" }} />
             <Stack.Screen
               name="finance-budget-edit"
@@ -90,11 +85,22 @@ function AuthenticatedLayout() {
               options={{ title: "Historical cleanup" }}
             />
             <Stack.Screen name="finance-account" options={{ title: "account" }} />
+            <Stack.Screen name="finance-account-edit" options={{ title: "edit account" }} />
+            <Stack.Screen
+              name="finance-account-duplicate"
+              options={{ title: "duplicate account" }}
+            />
             <Stack.Screen
               name="finance-transaction-edit"
               options={{ title: "edit transaction", presentation: "modal" }}
             />
             <Stack.Screen name="finance-transaction" options={{ title: "transaction" }} />
+            <Stack.Screen name="finance-setup" options={{ title: "finance setup" }} />
+            <Stack.Screen name="finance-automations" options={{ title: "automations" }} />
+            <Stack.Screen
+              name="finance-automation-new"
+              options={{ title: "register automation" }}
+            />
             <Stack.Screen name="task-preferences" options={{ title: "task preferences" }} />
             <Stack.Screen name="task-browser" options={{ title: "tasks" }} />
             <Stack.Screen name="task-containers" options={{ title: "tasks" }} />
@@ -104,7 +110,6 @@ function AuthenticatedLayout() {
               options={{ title: "organize", presentation: "modal" }}
             />
             <Stack.Screen name="reminders" options={{ title: "reminders" }} />
-            <Stack.Screen name="detail/[id]" options={{ title: "sample details" }} />
             <Stack.Screen
               name="profile"
               options={{ title: "preview settings", presentation: "modal" }}
@@ -115,6 +120,7 @@ function AuthenticatedLayout() {
             />
           </Stack.Protected>
         </Stack>
+        {state.status === "signedIn" && <LinkOpener />}
       </PreviewProvider>
     </MobileDataProvider>
   );

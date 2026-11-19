@@ -19,6 +19,12 @@ import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
 import { readFinanceAttentionSnapshot } from "./attention-read.js";
 import type { FinanceTransaction } from "./context.js";
+import {
+  assertFinanceDecisionNotDeclined,
+  readFinanceDeclinedAt,
+  recordFinanceDecisionDecline,
+  requireFinanceDeclineOwner,
+} from "./decision-decline.js";
 
 type Context = { principal: Principal; requestId: string };
 function policy(row: typeof financeBudgetStartPolicies.$inferSelect) {
@@ -30,7 +36,11 @@ function policy(row: typeof financeBudgetStartPolicies.$inferSelect) {
     approvalSource: "user_instruction",
   });
 }
-function preview(row: typeof financeBudgetStartPreviews.$inferSelect) {
+async function preview(
+  tx: Pick<Database, "select">,
+  row: typeof financeBudgetStartPreviews.$inferSelect,
+) {
+  const declined = await readFinanceDeclinedAt(tx, row.userId, "budget_start_preview", [row.id]);
   return financeBudgetStartPreviewSchema.parse({
     id: row.id,
     fingerprint: row.fingerprint,
@@ -39,6 +49,7 @@ function preview(row: typeof financeBudgetStartPreviews.$inferSelect) {
     expectedPolicyRevision: row.expectedPolicyRevision,
     attention: row.attention,
     projectedAttention: row.projectedAttention,
+    declinedAt: declined.get(row.id) ?? null,
   });
 }
 
@@ -93,7 +104,7 @@ export function createFinanceAttentionService({ db, now }: { db: Database; now: 
           "not_found",
           "The starting-policy preview was not found for this authorization.",
         );
-      return preview(row);
+      return preview(db, row);
     },
     async previewBudgetStart(context: Context, rawInput: unknown) {
       const input = previewFinanceBudgetStartInputSchema.parse(rawInput);
@@ -117,7 +128,7 @@ export function createFinanceAttentionService({ db, now }: { db: Database; now: 
               existing.timezone !== owner.timezone
             )
               throw new AppError("conflict", "This preview key belongs to a different request.");
-            return preview(existing);
+            return preview(tx, existing);
           }
           const current = await latest(tx, owner.id);
           if ((current?.revision ?? 0) !== input.expectedPolicyRevision)
@@ -161,10 +172,37 @@ export function createFinanceAttentionService({ db, now }: { db: Database; now: 
             .returning();
           if (!row)
             throw new AppError("internal_error", "The starting policy preview was not created.");
-          return preview(row);
+          return preview(tx, row);
         },
         { isolationLevel: "repeatable read" },
       );
+    },
+    /** The owner's "no" to a starting-month preview; the current policy is untouched. */
+    async declineBudgetStartPreview(context: Context, rawId: string) {
+      requireFinanceDeclineOwner(context);
+      const id = idSchema.parse(rawId);
+      return db.transaction(async (tx) => {
+        const owner = await ownerLock(tx, context.principal.userId);
+        const prepared = await tx.query.financeBudgetStartPreviews.findFirst({
+          where: and(
+            eq(financeBudgetStartPreviews.id, id),
+            eq(financeBudgetStartPreviews.userId, owner.id),
+          ),
+        });
+        if (!prepared) throw new AppError("not_found", "Starting policy preview not found.");
+        const applied = await tx.query.financeBudgetStartPolicies.findFirst({
+          where: and(
+            eq(financeBudgetStartPolicies.userId, owner.id),
+            eq(financeBudgetStartPolicies.previewId, prepared.id),
+          ),
+        });
+        if (applied)
+          throw new AppError(
+            "conflict",
+            "This starting month was already approved. Preview a change to reverse it.",
+          );
+        return recordFinanceDecisionDecline(tx, context, "budget_start_preview", id, now());
+      });
     },
     async applyBudgetStart(context: Context, rawInput: unknown) {
       const input = applyFinanceBudgetStartInputSchema.parse(rawInput);
@@ -203,6 +241,7 @@ export function createFinanceAttentionService({ db, now }: { db: Database; now: 
           ),
         });
         if (applied) return policy(applied);
+        await assertFinanceDecisionNotDeclined(tx, owner.id, "budget_start_preview", prepared.id);
         const attention = await readFinanceAttentionSnapshot(db, owner.id, now(), tx, {
           excludeBudgetStartPreviewId: prepared.id,
         });

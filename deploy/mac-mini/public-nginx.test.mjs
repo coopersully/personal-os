@@ -28,6 +28,13 @@ test("production nginx keeps public directory redirects on the visitor's HTTPS o
     mkdirSync(join(directory, path), { recursive: true });
     writeFileSync(join(directory, path, "index.html"), `<h1>${path}</h1>`);
   }
+  // The built web app carries the association file; nginx must serve it as JSON, unredirected.
+  const association = readFileSync(
+    new URL("../../apps/web/public/.well-known/apple-app-site-association", import.meta.url),
+    "utf8",
+  );
+  mkdirSync(join(directory, ".well-known"));
+  writeFileSync(join(directory, ".well-known/apple-app-site-association"), association);
   const dockerfile = readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8");
   const image = dockerfile.match(/^FROM (\S+) AS web$/m)?.[1];
   assert.ok(image, "Use the same nginx image as the production web container");
@@ -63,6 +70,13 @@ test("production nginx keeps public directory redirects on the visitor's HTTPS o
     if (!ready) await new Promise((resolve) => setTimeout(resolve, 100));
   }
   assert.ok(ready, "Production nginx starts within five seconds");
+  const served = await request("/.well-known/apple-app-site-association");
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get("content-type"), "application/json");
+  assert.deepEqual(await served.json(), JSON.parse(association));
+  // A missing association file is a 404, never the app shell: iOS must not parse HTML.
+  rmSync(join(directory, ".well-known"), { recursive: true });
+  assert.equal((await request("/.well-known/apple-app-site-association")).status, 404);
   for (const path of paths) {
     const response = await request(`/${path}?source=policy`);
     assert.equal(response.status, 301);

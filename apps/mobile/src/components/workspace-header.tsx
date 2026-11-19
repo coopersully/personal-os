@@ -13,7 +13,8 @@ import {
 } from "react-native";
 import { toast } from "sonner-native";
 import { useAuth } from "../features/auth/context";
-import { sampleItems } from "../features/briefing/sample";
+import { searchWorkspaces } from "../features/search/data";
+import { WorkspaceSearchResults } from "../features/search/results";
 import { workspaceSettingsPath } from "../features/settings/navigation";
 import { useTaskSearch } from "../features/tasks/data";
 import { useStablePan } from "../navigation/use-stable-pan";
@@ -28,7 +29,10 @@ const menuWorkspaces = workspaceOrder.flatMap((id) =>
 );
 type Workspace = (typeof workspaces)[number];
 
-/** Shared workspace chrome. Tasks and Accounts search their live lists; other destinations use preview fixtures. */
+/**
+ * Shared workspace chrome. Tasks, Accounts and Mail search their live lists in place; every other
+ * page searches the server: Today across all workspaces, a workspace page within its workspace.
+ */
 export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
   const chromeInk = chromeDark === undefined ? undefined : chromeDark ? "#f8f8fc" : "#202024";
   const chromeSecondary = chromeDark === undefined ? undefined : chromeDark ? "#d0d6e8" : "#4f5360";
@@ -51,7 +55,10 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
   const motion = useWorkspaceMotion();
   const path = usePathname();
   const isFinanceAccounts = path === "/finances/accounts";
-  const { accountSearch = "" } = useLocalSearchParams<{ accountSearch?: string }>();
+  const { accountSearch = "", mailSearch = "" } = useLocalSearchParams<{
+    accountSearch?: string;
+    mailSearch?: string;
+  }>();
   const current =
     workspaces.find(
       (workspace) =>
@@ -60,6 +67,8 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
         (workspace.id === "finances" && path.startsWith("/finance-")),
     ) ?? workspaces[0];
   const isSettings = path === "/settings" || path.startsWith("/settings/");
+  // Mail lists read this route param and search the server, so no results overlay applies.
+  const isMail = !isSettings && current.id === "mail";
   const [open, setOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -90,11 +99,10 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
   // Screen instances remain mounted in native tabs; dismiss transient state when leaving one.
   // biome-ignore lint/correctness/useExhaustiveDependencies: route changes dismiss transient header UI.
   useEffect(() => {
-    setOpen(false);
-    setAccountOpen(false);
+    close();
+    holding.current = false;
     setQuery("");
     taskSearch.setSearch("");
-    setHovered(null);
   }, [path]);
   const color = (workspace: Workspace) => workspaceColor(t, workspace.id);
   const choose = (workspace: Workspace) => {
@@ -123,6 +131,8 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
   const pan = useStablePan({
     onStartShouldSetPanResponderCapture: () => true,
     onPanResponderGrant: () => {
+      // Only one hold timer may be pending; an earlier one left running could open the menu later.
+      clearTimer();
       setAccountOpen(false);
       holding.current = false;
       candidate.current = null;
@@ -175,16 +185,9 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
     },
     onPanResponderTerminate: close,
   });
-  const results =
-    !isSettings && current.id !== "tasks" && query.trim()
-      ? sampleItems.filter(
-          (item) =>
-            (current.id === "index" || item.workspace === current.id) &&
-            `${item.title} ${item.summary} ${item.description}`
-              .toLowerCase()
-              .includes(query.trim().toLowerCase()),
-        )
-      : [];
+  const searchScope = searchWorkspaces.filter(
+    (workspace) => current.id === "index" || workspace === current.id,
+  );
   return (
     <View style={styles.layer}>
       {(open || accountOpen || (current.id !== "tasks" && !!query.trim())) && (
@@ -231,11 +234,18 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
           </View>
           <TextInput
             value={
-              isFinanceAccounts ? accountSearch : current.id === "tasks" ? taskSearch.search : query
+              isFinanceAccounts
+                ? accountSearch
+                : isMail
+                  ? mailSearch
+                  : current.id === "tasks"
+                    ? taskSearch.search
+                    : query
             }
             onChangeText={(value) => {
               close();
               if (isFinanceAccounts) router.setParams({ accountSearch: value });
+              else if (isMail) router.setParams({ mailSearch: value });
               else if (current.id === "tasks") taskSearch.setSearch(value);
               else setQuery(value);
             }}
@@ -243,11 +253,12 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
             accessibilityLabel={
               isFinanceAccounts
                 ? "Search accounts"
-                : `Search ${isSettings ? "settings" : current.label}${current.id === "tasks" ? "" : " sample data"}`
+                : `Search ${isSettings ? "settings" : current.label}`
             }
             placeholder={`Search ${isFinanceAccounts ? "accounts" : isSettings ? "settings" : current.label}`}
             placeholderTextColor={chromeSecondary ?? t.secondary}
             returnKeyType="search"
+            maxLength={200}
             autoCorrect={false}
             clearButtonMode="while-editing"
             style={[styles.input, { color: chromeInk ?? t.ink }]}
@@ -414,33 +425,15 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
           </GlassSurface>
         </View>
       )}
-      {!isFinanceAccounts && current.id !== "tasks" && !!query.trim() && (
-        <View style={[styles.results, { backgroundColor: t.canvas, borderColor: t.line }]}>
-          <Text style={[styles.caption, { color: t.secondary }]}>
-            sample results · {isSettings ? "settings" : current.label}
-          </Text>
-          {results.length ? (
-            results.map((item) => (
-              <Pressable
-                key={item.id}
-                accessibilityRole="button"
-                onPress={() => {
-                  setQuery("");
-                  Keyboard.dismiss();
-                  router.push(`/detail/${item.id}`);
-                }}
-                style={styles.result}
-              >
-                <Icon name={item.icon} color={t[item.workspace]} />
-                <Text style={[styles.resultText, { color: t.ink }]}>{item.title}</Text>
-              </Pressable>
-            ))
-          ) : (
-            <Text style={[styles.caption, { color: t.secondary }]}>
-              No sample matches. Try another search.
-            </Text>
-          )}
-        </View>
+      {!isFinanceAccounts && !isMail && current.id !== "tasks" && !!query.trim() && (
+        <WorkspaceSearchResults
+          scope={searchScope}
+          query={query}
+          onOpen={() => {
+            setQuery("");
+            Keyboard.dismiss();
+          }}
+        />
       )}
     </View>
   );
@@ -507,16 +500,4 @@ const styles = StyleSheet.create({
   },
   mark: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" },
   label: { fontSize: 17, fontWeight: "500", flex: 1 },
-  results: {
-    position: "absolute",
-    top: 60,
-    left: 0,
-    right: 0,
-    borderRadius: 20,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: 12,
-  },
-  caption: { fontSize: 13, padding: 8 },
-  result: { flexDirection: "row", alignItems: "center", gap: 12, padding: 10, minHeight: 48 },
-  resultText: { flex: 1, fontSize: 16 },
 });

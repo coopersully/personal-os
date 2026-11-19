@@ -1,6 +1,7 @@
 import type { AuditEvent } from "@personal-os/api-client";
 import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
+import { formBlock, formRow } from "../../components/forms/form-row";
 import { Icon } from "../../components/icons";
 import { Screen } from "../../components/screen";
 import { useTheme } from "../../theme";
@@ -141,13 +142,10 @@ function Activity() {
                 accessibilityRole="button"
                 accessibilityState={{ expanded: selected === event.id }}
                 onPress={() => setSelected(selected === event.id ? null : event.id)}
-                style={{
-                  padding: 16,
-                  minHeight: 64,
-                  flexDirection: "row",
-                  alignItems: "flex-start",
-                  gap: 12,
-                }}
+                style={({ pressed }) => [
+                  formRow,
+                  { alignItems: "flex-start", opacity: pressed ? 0.6 : 1 },
+                ]}
               >
                 <View style={{ width: 28, paddingTop: 2 }}>
                   <Icon
@@ -186,7 +184,7 @@ function Activity() {
                 </Text>
               </Pressable>
               {selected === event.id && (
-                <View style={{ padding: 16, gap: 8 }}>
+                <View style={formBlock}>
                   {[
                     ["Action", event.action],
                     ["Resource type", event.entityType],

@@ -116,6 +116,8 @@ must exist and succeed; optional skipped/neutral checks outside that union do no
 identity and candidate SHA explicitly. Legacy commit statuses require equivalent authenticated
 provider evidence; do not invent an app ID from a username.
 
+A required context may appear once per distinct workflow when several workflows report it (here `ci.yml` and `pr-metadata.yml` both report `CI required`). Include the current result from each, with proven `workflowId`, `runId`, `runAttempt` and `event`; every one must succeed. Same-workflow or unproven duplicates stay ambiguous.
+
 Each check may carry positive integer `workflowId`, `runId`, `runAttempt`, and nonempty `event`.
 Only an older attempt of the same name/provider/head/workflow/run/event can be superseded by a newer
 attempt. Missing identity, same-attempt duplicates, or different runs stay ambiguous. For separate
@@ -146,8 +148,9 @@ use the production evaluator before completion.
 Set `equivalenceVerified: true` after comparing commands/configuration, with `equivalentChecks`
 mapping `repository`, `lint`, `types-tests-coverage-builds`, and `browser` to the successful
 distinct current-head CI stage jobs. Each value is a job-name string or a nonempty list for a
-matrix stage. The Node row remains `Node quality`; the browser row includes all four
-`Browser acceptance (<project>, <shard>/4)`
+matrix stage. The Node row remains `Node quality`, which needs every `Node tests` shard and
+`Node build` and so cannot succeed without them; the browser row includes all six
+`Browser acceptance (<project>, <shard>/6)`
 jobs for each of `desktop-chromium` and `mobile-chromium`. Require every matrix member and never reuse a job across
 stages or fill multiple rows with a shared aggregate. These names must also appear in expected required/selected checks
 with their provider IDs. The evaluator independently requires the current canonical Node/repository/lint names, all eight

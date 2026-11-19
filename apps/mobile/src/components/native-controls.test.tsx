@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import {
   Fragment,
   type PropsWithChildren,
@@ -13,7 +13,7 @@ import { OptionsMenu } from "../features/tasks/options-menu.ios";
 import { buildViewOptions } from "../features/tasks/view-options";
 import { workspaces } from "../theme";
 import { AppToaster } from "./app-toaster";
-import { EditorClose } from "./editor-close.ios";
+import { EditorClose } from "./editor-close";
 import { Icon } from "./icons";
 import { RowActions } from "./row-actions.ios";
 import { WorkspacePicker } from "./workspace-picker.ios";
@@ -195,12 +195,30 @@ vi.mock("expo-router/native-tabs", () => {
     <span data-testid="native-tab-icon" data-default={src.default} data-selected={src.selected} />
   );
   const Trigger = Object.assign(
-    ({ children, accessibilityLabel }: PropsWithChildren<{ accessibilityLabel: string }>) => (
-      <div role="tab" tabIndex={0} aria-label={accessibilityLabel}>
+    ({
+      children,
+      accessibilityLabel,
+      disableAutomaticContentInsets,
+    }: PropsWithChildren<{
+      accessibilityLabel: string;
+      disableAutomaticContentInsets?: boolean;
+    }>) => (
+      <div
+        role="tab"
+        tabIndex={0}
+        aria-label={accessibilityLabel}
+        data-automatic-insets={String(!disableAutomaticContentInsets)}
+      >
         {children}
       </div>
     ),
-    { Label, Icon: Image },
+    {
+      Label,
+      Icon: Image,
+      Badge: ({ children }: PropsWithChildren) => (
+        <span data-testid="native-tab-badge">{children}</span>
+      ),
+    },
   );
   return {
     NativeTabs: Object.assign(
@@ -423,6 +441,28 @@ it("uses filled native tab assets with workspace tint and the standard labels", 
   expect(h.tabs.iconColor).toEqual(expect.objectContaining({ selected: h.tabs.tintColor }));
   for (const icon of screen.getAllByTestId("native-tab-icon"))
     expect(icon.getAttribute("data-selected")).toContain("Filled.png");
+});
+it("badges only the named tab and says what the count means", () => {
+  render(
+    <WorkspaceTabs
+      workspace="finances"
+      badges={{ assistant: { value: "3", label: "3 unread messages" } }}
+    />,
+  );
+  expect(screen.getAllByTestId("native-tab-badge")).toHaveLength(1);
+  const tab = screen.getByRole("tab", { name: "assistant, 3 unread messages" });
+  expect(within(tab).getByTestId("native-tab-badge")).toHaveTextContent("3");
+  expect(screen.getByRole("tab", { name: "spending" })).toBeVisible();
+});
+it("leaves every tab page's header spacing to the page, so a list is not inset twice", () => {
+  // Each page pads its list by the fixed search header. The tabs otherwise switch a tab's first
+  // scroll view to UIKit's automatic insets on top of that padding.
+  for (const workspace of ["tasks", "mail", "finances"] as const) {
+    const view = render(<WorkspaceTabs workspace={workspace} />);
+    for (const tab of screen.getAllByRole("tab"))
+      expect(tab).toHaveAttribute("data-automatic-insets", "false");
+    view.unmount();
+  }
 });
 it("passes native glass modifiers for vertical selection and respects Reduce Motion", () => {
   const { rerender } = render(<WorkspacePicker selected="tasks" options={workspaces} />);

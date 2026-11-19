@@ -41,6 +41,7 @@ vi.mock("../features/tasks/data", async () => {
     },
   };
 });
+vi.mock("../features/links/opener", () => ({ LinkOpener: () => <div data-testid="links" /> }));
 vi.mock("sonner-native", () => ({ toast: { error: h.error } }));
 vi.mock("expo-router", () => ({
   Stack: Object.assign(({ children }: PropsWithChildren) => <>{children}</>, {
@@ -75,12 +76,15 @@ it("admits only the correct routes and remounts account data when the owner chan
   h.user = undefined;
   const { rerender } = render(<RootLayout />);
   expect(screen.getAllByTestId("route").map((node) => node.textContent)).toEqual(["sign-in"]);
+  // A link is opened only for a signed-in user; until then it waits in the queue.
+  expect(screen.queryByTestId("links")).not.toBeInTheDocument();
   h.status = "signedIn";
   h.user = { id: "one" };
   rerender(<RootLayout />);
   expect(screen.queryByText("sign-in")).not.toBeInTheDocument();
   expect(screen.getByText("task-editor")).toBeVisible();
   expect(screen.getByText("(workspaces)")).toBeVisible();
+  expect(screen.getByTestId("links")).toBeVisible();
   h.user = { id: "two" };
   rerender(<RootLayout />);
   expect(h.mounts).toEqual(["signed-out", "clear:signed-out", "one", "clear:one", "two"]);

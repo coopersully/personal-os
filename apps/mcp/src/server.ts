@@ -15,6 +15,7 @@ import { registerFinanceTools } from "./tools/finances.js";
 import { registerFinanceManagementTools } from "./tools/finances-management.js";
 import { registerFinancePolicyManagementTools } from "./tools/finances-policy-management.js";
 import { registerFinanceStewardshipTools } from "./tools/finances-stewardship.js";
+import { registerKnowledgeTools } from "./tools/knowledge.js";
 import { registerMailTools } from "./tools/mail.js";
 import { registerMailManagementTools } from "./tools/mail-management.js";
 import { registerMailStewardshipTools } from "./tools/mail-stewardship.js";
@@ -54,7 +55,7 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
     {
       maxToolInputElements: 10_000,
       instructions:
-        "Call get_ilo_context first. Inspect authoritative state before proposing changes, use preview tools before consequential commits, and verify mutations from returned state or activity. nohmi's API remains the authority for access and policy.",
+        "Call get_ilo_context first; with memory access it includes the memory core. Inspect authoritative state before proposing changes, use preview tools before consequential commits, and verify mutations from returned state or activity. nohmi's API remains the authority for access and policy.",
     },
   );
   const tools = createPersonalOsToolSurface(server, {
@@ -77,6 +78,7 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
   registerAgentAccountTools(tools, options.api);
   registerAssistantTools(tools, options.api);
   registerPlanningTools(tools, options.api);
+  registerKnowledgeTools(tools, options.api);
   registerCalendarListTools(tools, options.api);
   registerCalendarManagementTools(tools, options.api);
   registerCalendarEventTools(tools, options.api);

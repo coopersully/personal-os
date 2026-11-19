@@ -39,7 +39,7 @@ export function FinanceOpeningPositionScreen() {
       />
     );
   return (
-    <FinanceScreen title="Starting balances" showTitle={false}>
+    <FinanceScreen title="Starting balances">
       <Stack.Screen
         options={{
           gestureEnabled: true,

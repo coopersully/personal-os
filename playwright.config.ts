@@ -15,7 +15,8 @@ export default defineConfig({
       use: { ...devices["iPhone 13"], browserName: "chromium" },
     },
   ],
-  reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
+  // The list reporter records each test's duration in the hosted job log.
+  reporter: process.env.CI ? [["github"], ["list"], ["html", { open: "never" }]] : "list",
   retries: process.env.CI ? 1 : 0,
   testDir: "e2e",
   timeout: 45_000,

@@ -868,6 +868,7 @@ function mockApi() {
       updatedIds: items.map((item) => item.id),
     })),
     snoozeMailThread: vi.fn(async () => undefined),
+    unsnoozeMailThread: vi.fn(async () => undefined),
     getMailStatus: vi.fn(async () => ({
       activeRun: null,
       domain: "mail" as const,
@@ -1659,6 +1660,7 @@ describe("Personal OS MCP server", () => {
         "update_mail",
         "bulk_update_mail",
         "snooze_mail",
+        "unsnooze_mail",
         "create_mail_attention_item",
         "list_mail_rules",
         "preview_mail_rule",
@@ -1696,6 +1698,7 @@ describe("Personal OS MCP server", () => {
       "update_mail",
       "bulk_update_mail",
       "snooze_mail",
+      "unsnooze_mail",
       "create_mail_attention_item",
       "create_mail_rule",
       "update_mail_rule",
@@ -2124,6 +2127,9 @@ describe("Personal OS MCP server", () => {
       name: "snooze_mail",
       arguments: { id, until: "2026-07-14T12:00:00.000Z" },
     });
+    const unsnoozed = await client.callTool({ name: "unsnooze_mail", arguments: { id } });
+    expect(unsnoozed.isError).not.toBe(true);
+    expect(unsnoozed.structuredContent).toMatchObject({ result: { snoozed: false } });
     await client.callTool({
       name: "create_mail_attention_item",
       arguments: {
@@ -2369,6 +2375,7 @@ describe("Personal OS MCP server", () => {
       unread: false,
     });
     expect(api.snoozeMailThread).toHaveBeenCalledWith(id, "2026-07-14T12:00:00.000Z");
+    expect(api.unsnoozeMailThread).toHaveBeenCalledExactlyOnceWith(id);
     expect(api.upsertDomainProfile).toHaveBeenCalledWith(
       expect.objectContaining({ domain: "mail", status: "draft" }),
     );
@@ -2497,6 +2504,37 @@ describe("Personal OS MCP server", () => {
       await client.close();
       await server.close();
     }
+  });
+
+  it("teaches saving memory only to sessions that can save it", async () => {
+    async function guidance(scopes: AccessScope[], readOnly = false) {
+      const server = createPersonalOsMcpServer({
+        api: mockApi() as unknown as PersonalOsApiClient,
+        readOnly,
+        scopes: new Set(scopes),
+        timeZone: "UTC",
+      });
+      const client = new Client({ name: "test", version: "1.0.0" });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      const context = await client.callTool({ arguments: {}, name: "get_ilo_context" });
+      await client.close();
+      await server.close();
+      return (context.structuredContent as { result: { mcp: { memoryGuidance?: string[] } } })
+        .result.mcp.memoryGuidance;
+    }
+    const saving = /save|saving|mark lasting/iu;
+
+    const writer = await guidance(["knowledge:read", "knowledge:write"]);
+    expect(writer).toEqual(expect.arrayContaining([expect.stringMatching(/^Save memory/u)]));
+    for (const reader of [
+      await guidance(["knowledge:read"]),
+      await guidance(["knowledge:read", "knowledge:write"], true),
+    ]) {
+      expect(reader).toEqual(expect.arrayContaining([expect.stringMatching(/memory core/u)]));
+      expect(reader?.filter((line) => saving.test(line))).toEqual([]);
+    }
+    expect(await guidance(["tasks:read"])).toBeUndefined();
   });
 
   it("filters task discovery by scopes and read-only posture while keeping typed nohmi metadata", async () => {
@@ -2878,7 +2916,10 @@ describe("Personal OS MCP server", () => {
         readOnlyHint: true,
       },
     });
-    expect(tools.tools.find((tool) => tool.name === "maintain_mail")).toMatchObject({
+    const maintainMail = tools.tools.find((tool) => tool.name === "maintain_mail");
+    expect(maintainMail?.description).toMatch(/memory section/);
+    expect(maintainMail?.description).not.toMatch(/has no memory/);
+    expect(maintainMail).toMatchObject({
       _meta: {
         "ilo/domain": "mail",
         "ilo/policy": "approved_rule",

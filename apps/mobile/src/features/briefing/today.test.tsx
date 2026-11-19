@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import TodayHome from "../../app/(workspaces)/index";
@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   refresh: vi.fn(),
   location: vi.fn(),
   hero: vi.fn(),
+  readMailThread: vi.fn(),
   busy: false,
   skySource: "time",
 }));
@@ -68,6 +69,16 @@ vi.mock("../../components/workspace-header-inset", async () => {
     WorkspaceHeroVisibility: createContext({ current: h.hero }),
   };
 });
+vi.mock("../mail/reader", () => ({
+  MailReader: ({ thread, close }: { thread: { subject: string }; close: () => void }) => (
+    <div role="dialog" aria-label="Conversation">
+      {thread.subject}
+      <button type="button" onClick={close}>
+        Close conversation
+      </button>
+    </div>
+  ),
+}));
 vi.mock("./today-hero", () => ({ TodayHeroBackdrop: () => null }));
 vi.mock("./live-data", () => ({ useTodayData: () => h.data }));
 vi.mock("./sky-context", () => ({
@@ -89,16 +100,15 @@ function data() {
     tasks: query({ items: [], total: 0 }),
     overdue: query({ total: 0 }),
     nextTasks: query({ items: [] }),
-    reviews: query({
-      complete: true,
-      activeDecisionCount: 0,
-      historicalRecordCount: 0,
-      technicalBlockerCount: 0,
-      processingCount: 0,
-    }),
+    reviews: query([]),
     budgets: query([]),
     upcoming: query({ occurrences: [], unavailableSources: [] }),
     activity: query({ entries: [], nextCursor: null }),
+    events: query<unknown[]>([]),
+    calendars: query([{ id: "cal", isSelected: true }]),
+    mail: query<unknown[]>([]),
+    mailAccounts: query([{ mailboxes: [{ role: "inbox", unreadCount: 0 }] }]),
+    readMailThread: h.readMailThread,
     failed: false,
     loading: false,
     refreshing: false,
@@ -155,6 +165,8 @@ it("distinguishes loading, unavailable, cached and truncated-history states", ()
     upcoming: { ...query(), isPending: true },
     nextTasks: { ...query(), isPending: true },
     activity: { ...query(), isPending: true },
+    events: { ...query(), isPending: true },
+    mail: { ...query(), isPending: true },
   };
   const view = render(<TodayHome />);
   for (const text of [
@@ -163,7 +175,10 @@ it("distinguishes loading, unavailable, cached and truncated-history states", ()
     "Loading priorities…",
     "Loading what’s next…",
     "Loading confirmed activity…",
-    "Loading Tasks and Finances…",
+    "Loading events…",
+    "Loading today’s events…",
+    "Loading mail that needs you…",
+    "Loading your day…",
   ])
     expect(screen.getByText(text)).toBeVisible();
   h.data = {
@@ -201,12 +216,10 @@ it("distinguishes loading, unavailable, cached and truncated-history states", ()
 it("opens multi-review queues, pacing budgets, and confirmed activity without inventing transaction links", () => {
   h.data = {
     ...data(),
-    reviews: query({
-      complete: true,
-      activeDecisionCount: 2,
-      technicalBlockerCount: 0,
-      processingCount: 0,
-    }),
+    reviews: query([
+      { status: "needs_review", transaction: { id: "a", merchant: "Market" } },
+      { status: "needs_review", transaction: { id: "b", merchant: "Cafe" } },
+    ]),
     budgets: query([
       { spent: 60, budget: { id: "food", category: "Dining", month: "2026-11", limit: 100 } },
     ]),
@@ -227,10 +240,10 @@ it("opens multi-review queues, pacing budgets, and confirmed activity without in
     }),
   };
   render(<TodayHome />);
-  fireEvent.click(screen.getByRole("button", { name: /2 Finance decisions need your input/ }));
+  fireEvent.click(screen.getByRole("button", { name: /2 transactions need your input/ }));
   expect(h.push).toHaveBeenLastCalledWith({
     pathname: "/finances/assistant",
-    params: { view: "Conversation" },
+    params: { view: "For you" },
   });
   fireEvent.click(screen.getByRole("button", { name: /Dining/ }));
   expect(screen.getByText("Pacing high")).toBeVisible();
@@ -358,16 +371,14 @@ it("never calls unconfirmed, human, old or unrelated activity handled by nohmi",
   expect(screen.queryByText(entry.explanation)).toBeNull();
 });
 
-it("opens active decisions separately from confirmed transaction activity", () => {
+it("opens one review directly and links confirmed transaction activity to the same canonical detail", () => {
   h.skySource = "weather";
   h.data = {
     ...data(),
-    reviews: query({
-      complete: true,
-      activeDecisionCount: 1,
-      technicalBlockerCount: 0,
-      processingCount: 0,
-    }),
+    reviews: query([
+      { status: "needs_review", transaction: { id: "tx", merchant: "Corner Market" } },
+      { status: "resolved", transaction: { id: "done", merchant: "Already reviewed" } },
+    ]),
     activity: query({
       entries: [
         {
@@ -385,13 +396,13 @@ it("opens active decisions separately from confirmed transaction activity", () =
     }),
   };
   render(<TodayHome />);
-  expect(screen.getByText("1 Finance decision needs your input")).toBeVisible();
+  expect(screen.getByText("1 transaction needs your input")).toBeVisible();
   expect(screen.queryByText("Already reviewed")).toBeNull();
   expect(screen.queryByText(/Use local weather/)).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: /1 Finance decision/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Corner Market/ }));
   expect(h.push).toHaveBeenLastCalledWith({
-    pathname: "/finances/assistant",
-    params: { view: "Conversation" },
+    pathname: "/finance-transaction",
+    params: { id: "tx" },
   });
   fireEvent.click(screen.getByRole("button", { name: /Categorized the groceries purchase/ }));
   expect(h.push).toHaveBeenLastCalledWith({
@@ -402,57 +413,271 @@ it("opens active decisions separately from confirmed transaction activity", () =
 
 vi.mock("../auth/context", () => ({ useOptionalAuth: () => null }));
 
-it("keeps historical reviews out of Today and shows technical recovery separately", () => {
-  h.data = {
-    ...data(),
-    reviews: query({
-      complete: true,
-      activeDecisionCount: 0,
-      historicalRecordCount: 2000,
-      technicalBlockerCount: 1,
-      processingCount: 0,
-    }),
-  };
-  render(<TodayHome />);
-  expect(screen.getByText("Finance needs recovery")).toBeVisible();
-  expect(screen.queryByText(/2000|2,000/)).toBeNull();
-  expect(screen.queryByText(/decisions need your input/)).toBeNull();
+const event = (id: string, title: string, startsAt: string, endsAt: string, more = {}) => ({
+  id,
+  title,
+  startsAt,
+  endsAt,
+  allDay: false,
+  status: "confirmed",
+  provider: "google",
+  location: null,
+  ...more,
 });
-it.each([
-  [false, true, "Verify Finance starting balances", "/finance-opening-position"],
-  [true, false, "Review this month's budget", "/finances/planning"],
-])("surfaces remaining budget readiness work with zero review counts", (openingPositionQualified, budgetApproved, title, pathname) => {
-  h.data = {
-    ...data(),
-    reviews: query({
-      complete: true,
-      activeDecisionCount: 0,
-      technicalBlockerCount: 0,
-      processingCount: 0,
-      readiness: { openingPositionQualified, budgetApproved },
-    }),
-  };
-  render(<TodayHome />);
-  fireEvent.click(screen.getByRole("button", { name: new RegExp(title) }));
-  expect(h.push).toHaveBeenLastCalledWith({ pathname });
+const attention = (id: string, title: string, more = {}) => ({
+  id,
+  title,
+  summary: `${title} summary`,
+  status: "open",
+  kind: "important",
+  importance: "normal",
+  expiresAt: null,
+  relatedEntityType: "mail_thread",
+  relatedEntityId: `thread-${id}`,
+  updatedAt: "2026-11-09T08:00:00Z",
+  ...more,
 });
-
-it("opens budget revision when approved inputs have changed and there are no questions", () => {
+it("briefs a day with events and attention mail and opens each row's native detail", async () => {
   h.data = {
     ...data(),
-    reviews: query({
-      complete: true,
-      activeDecisionCount: 0,
-      technicalBlockerCount: 0,
-      processingCount: 0,
-      readiness: {
-        openingPositionQualified: true,
-        budgetApproved: true,
-        budgetInputsCurrent: false,
+    events: query([
+      event("done", "Breakfast", "2026-11-09T08:00:00Z", "2026-11-09T09:00:00Z"),
+      event("off", "Cancelled sync", "2026-11-09T13:00:00Z", "2026-11-09T14:00:00Z", {
+        status: "cancelled",
+      }),
+      event("day", "Conference", "2026-11-09", "2026-11-10", { allDay: true }),
+      event("later", "Dentist", "2026-11-09T15:00:00Z", "2026-11-09T16:00:00Z", {
+        location: "Main St",
+        status: "tentative",
+      }),
+      event("now", "Standup", "2026-11-09T11:30:00Z", "2026-11-09T12:30:00Z"),
+      event("", "", "2026-11-09T18:00:00Z", "2026-11-09T19:00:00Z", { id: "last" }),
+    ]),
+    mail: query([
+      attention("low", "Newsletter choice", { importance: "low" }),
+      attention("old", "Expired request", {
+        importance: "critical",
+        expiresAt: "2026-11-09T11:00:00Z",
+      }),
+      attention("run", "Mail run finished", { kind: "run_summary", importance: "critical" }),
+      attention("done", "Already handled", { status: "resolved" }),
+      attention("travel", "Approve the fare", { importance: "critical" }),
+      attention("board", "Board packet", {
+        importance: "high",
+        relatedEntityType: null,
+        relatedEntityId: null,
+        summary: "x".repeat(200),
+      }),
+      attention("newer", "Reply to Maya", { updatedAt: "2026-11-09T10:00:00Z" }),
+    ]),
+    mailAccounts: query([
+      {
+        mailboxes: [
+          { role: "inbox", unreadCount: 4 },
+          { role: "sent", unreadCount: 9 },
+        ],
       },
-    }),
+      { mailboxes: [{ role: "inbox", unreadCount: 1 }] },
+    ]),
+  };
+  h.readMailThread.mockResolvedValueOnce(null).mockResolvedValueOnce({ subject: "Fare approval" });
+  render(<TodayHome />);
+  const rows = screen.getAllByRole("button").map((row) => row.textContent);
+  const order = ["Standup", "Dentist", "Untitled event", "Approve the fare", "Board packet"].map(
+    (title) => rows.findIndex((row) => row?.includes(title)),
+  );
+  expect(order).toEqual([...order].sort((a, b) => a - b));
+  expect(order).not.toContain(-1);
+  expect(screen.getByRole("button", { name: "Standup Now 11:30 AM – 12:30 PM" })).toBeVisible();
+  expect(screen.getByRole("button", { name: /Dentist.*Tentative · Main St/ })).toBeVisible();
+  for (const hidden of ["Breakfast", "Cancelled sync", "Conference"])
+    expect(screen.queryByText(hidden)).toBeNull();
+  expect(screen.getByText("3 of 4")).toBeVisible();
+  expect(screen.getByText("Needs you · 3 of 4")).toBeVisible();
+  for (const hidden of [
+    "Expired request",
+    "Mail run finished",
+    "Already handled",
+    "Newsletter choice",
+  ])
+    expect(screen.queryByText(hidden)).toBeNull();
+  expect(screen.getByRole("button", { name: /Approve the fare.*Critical/ })).toBeVisible();
+  expect(screen.getByText(`${"x".repeat(137)}…`)).toBeVisible();
+  expect(screen.getByText(/Tasks, Calendar, Mail & Finances/)).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: /Dentist/ }));
+  expect(h.push).toHaveBeenLastCalledWith({ pathname: "/calendar-event", params: { id: "later" } });
+  fireEvent.click(screen.getByRole("button", { name: "4 events left" }));
+  expect(h.push).toHaveBeenLastCalledWith("/calendar");
+  fireEvent.click(screen.getByRole("button", { name: "5 unread" }));
+  expect(h.push).toHaveBeenLastCalledWith("/mail");
+  fireEvent.click(screen.getByRole("button", { name: /Board packet/ }));
+  expect(h.push).toHaveBeenLastCalledWith("/mail");
+  expect(h.readMailThread).not.toHaveBeenCalled();
+
+  // A conversation that could not be read reports through Sonner in the data hook; nothing opens.
+  h.push.mockClear();
+  fireEvent.click(screen.getByRole("button", { name: /Approve the fare/ }));
+  expect(h.readMailThread).toHaveBeenLastCalledWith("thread-travel");
+  await Promise.resolve();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Approve the fare/ }));
+  expect(await screen.findByRole("dialog", { name: "Conversation" })).toHaveTextContent(
+    "Fare approval",
+  );
+  expect(h.push).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText("Close conversation"));
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+it("keeps the other sources when Calendar or Mail fails and says which part is missing", () => {
+  const mail = query([attention("travel", "Approve the fare")]);
+  const events = query([event("now", "Standup", "2026-11-09T11:30:00Z", "2026-11-09T12:30:00Z")]);
+  h.data = { ...data(), failed: true, mail, events: { ...query(), isError: true } };
+  const view = render(<TodayHome />);
+  expect(screen.getByText("Calendar is unavailable. Tap Refresh to try again.")).toBeVisible();
+  expect(screen.getByText("Events unavailable")).toBeVisible();
+  expect(screen.getByText("Some data unavailable · showing available results")).toBeVisible();
+  expect(screen.getByRole("button", { name: /Approve the fare/ })).toBeVisible();
+  expect(screen.getByText("Nothing needs your attention right now.")).toBeVisible();
+  expect(screen.queryByText("Mail is unavailable. Tap Refresh to try again.")).toBeNull();
+
+  h.data = { ...data(), failed: true, events, mail: { ...query(), isError: true } };
+  view.rerender(<TodayHome />);
+  expect(screen.getByText("Mail is unavailable. Tap Refresh to try again.")).toBeVisible();
+  expect(screen.getByText("Needs you · Partial")).toBeVisible();
+  expect(screen.getByRole("button", { name: /Standup/ })).toBeVisible();
+  expect(screen.queryByText("Calendar is unavailable. Tap Refresh to try again.")).toBeNull();
+
+  // A failed refresh keeps the last results on screen and marks them.
+  h.data = {
+    ...data(),
+    failed: true,
+    events: { ...events, isError: true },
+    mail: { ...mail, isError: true },
+  };
+  view.rerender(<TodayHome />);
+  expect(screen.getByText("1 event left · cached")).toBeVisible();
+  expect(screen.getByText("Partial")).toBeVisible();
+  expect(screen.getByRole("button", { name: /Standup/ })).toBeVisible();
+  expect(screen.getByRole("button", { name: /Approve the fare/ })).toBeVisible();
+});
+it("names a failed calendar or mail-account read instead of an empty day or a clear inbox", () => {
+  const failedRead = { ...query(), isError: true };
+  h.data = { ...data(), failed: true, calendars: failedRead, mailAccounts: failedRead };
+  const view = render(<TodayHome />);
+  expect(screen.getByText("Calendar is unavailable. Tap Refresh to try again.")).toBeVisible();
+  expect(screen.getByText("Mail is unavailable. Tap Refresh to try again.")).toBeVisible();
+  expect(screen.queryByText("Nothing scheduled today.")).toBeNull();
+  expect(screen.queryByText("No mail needs you right now.")).toBeNull();
+
+  // Rows that did arrive stay on screen, marked as a partial read.
+  h.data = {
+    ...h.data,
+    events: query([event("now", "Standup", "2026-11-09T11:30:00Z", "2026-11-09T12:30:00Z")]),
+    mail: query([attention("travel", "Approve the fare")]),
+  };
+  view.rerender(<TodayHome />);
+  expect(screen.getByRole("button", { name: /Standup/ })).toBeVisible();
+  expect(screen.getByRole("button", { name: /Approve the fare/ })).toBeVisible();
+  expect(screen.getByText("Partial")).toBeVisible();
+  expect(screen.getByText("Needs you · Partial")).toBeVisible();
+});
+it("opens only the latest conversation and none after the reader is closed", async () => {
+  const pending: Array<(thread: { subject: string }) => void> = [];
+  h.readMailThread.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+  h.data = {
+    ...data(),
+    mail: query([attention("travel", "Approve the fare"), attention("maya", "Reply to Maya")]),
   };
   render(<TodayHome />);
-  fireEvent.click(screen.getByRole("button", { name: /Review this month's budget/ }));
-  expect(h.push).toHaveBeenLastCalledWith({ pathname: "/finances/planning" });
+  fireEvent.click(screen.getByRole("button", { name: /Approve the fare/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Reply to Maya/ }));
+  await act(async () => pending[1]?.({ subject: "Maya" }));
+  expect(screen.getByRole("dialog")).toHaveTextContent("Maya");
+  await act(async () => pending[0]?.({ subject: "Fare approval" }));
+  expect(screen.getByRole("dialog")).toHaveTextContent("Maya");
+
+  // Closing the reader also drops a read that is still on its way.
+  fireEvent.click(screen.getByRole("button", { name: /Approve the fare/ }));
+  fireEvent.click(screen.getByText("Close conversation"));
+  await act(async () => pending[2]?.({ subject: "Fare approval" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+it("tells an empty day and a clear inbox apart from Calendar and Mail that are not set up", () => {
+  h.data = {
+    ...data(),
+    events: query([event("done", "Breakfast", "2026-11-09T08:00:00Z", "2026-11-09T09:00:00Z")]),
+  };
+  const view = render(<TodayHome />);
+  expect(screen.getByText("Nothing else scheduled today.")).toBeVisible();
+  expect(screen.getByText("No mail needs you right now.")).toBeVisible();
+  expect(screen.getByText("0 events left")).toBeVisible();
+  expect(screen.queryByText(/unread/)).toBeNull();
+
+  h.data = { ...data(), calendars: query([]), mailAccounts: query([]) };
+  view.rerender(<TodayHome />);
+  expect(screen.queryByText("Nothing scheduled today.")).toBeNull();
+  expect(screen.queryByText("No mail needs you right now.")).toBeNull();
+  expect(screen.getByText(/Updated .* · Tasks & Finances/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: /Add a calendar/ }));
+  expect(h.push).toHaveBeenLastCalledWith("/settings");
+  fireEvent.click(screen.getByRole("button", { name: /Connect a mail account/ }));
+  expect(h.push).toHaveBeenLastCalledWith("/settings");
+
+  // Calendars exist but none is shown: the events read is empty by choice, not by an empty day.
+  h.data = { ...data(), calendars: query([{ id: "cal", isSelected: false }]) };
+  view.rerender(<TodayHome />);
+  expect(screen.queryByText("Nothing scheduled today.")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Every calendar is hidden/ }));
+  expect(h.push).toHaveBeenLastCalledWith("/calendar");
+
+  // Attention raised before an account was disconnected is still shown rather than hidden.
+  h.data = {
+    ...data(),
+    mailAccounts: query([]),
+    mail: query([attention("travel", "Approve the fare")]),
+  };
+  view.rerender(<TodayHome />);
+  expect(screen.getByRole("button", { name: /Approve the fare/ })).toBeVisible();
+  expect(screen.queryByText("Connect a mail account")).toBeNull();
+  view.rerender(<TodayHome />);
+  // A day whose only event was cancelled has nothing behind it either.
+  h.data = {
+    ...data(),
+    events: query([
+      event("off", "Cancelled sync", "2026-11-09T08:00:00Z", "2026-11-09T09:00:00Z", {
+        status: "cancelled",
+      }),
+    ]),
+  };
+  view.rerender(<TodayHome />);
+  expect(screen.getByText("Nothing scheduled today.")).toBeVisible();
+});
+it("orders events that start together by title so the brief does not reshuffle between reads", () => {
+  h.data = {
+    ...data(),
+    events: query([
+      event("b", "Review", "2026-11-09T15:00:00Z", "2026-11-09T16:00:00Z"),
+      event("a", "Planning", "2026-11-09T15:00:00Z", "2026-11-09T16:00:00Z"),
+    ]),
+  };
+  render(<TodayHome />);
+  const rows = screen.getAllByRole("button").map((row) => row.textContent ?? "");
+  expect(rows.findIndex((row) => row.includes("Planning"))).toBeLessThan(
+    rows.findIndex((row) => row.includes("Review")),
+  );
+  expect(screen.getByText("2 events left")).toBeVisible();
+});
+it("does not count a neighbouring day's all-day event as part of today outside UTC", () => {
+  // The day's instant range overlaps the next calendar date, so the read can return this event.
+  h.data = {
+    ...data(),
+    timezone: "America/Los_Angeles",
+    events: query([event("next", "Offsite", "2026-11-10", "2026-11-11", { allDay: true })]),
+  };
+  render(<TodayHome />);
+  expect(screen.queryByText("Offsite")).toBeNull();
+  expect(screen.getByText("Nothing scheduled today.")).toBeVisible();
+  expect(screen.queryByText("Nothing else scheduled today.")).toBeNull();
+  expect(screen.getByText("0 events left")).toBeVisible();
 });

@@ -28,6 +28,7 @@ import type {
   MailRule,
   MailRulePreview,
   MailSetupContext,
+  MailSummaryCursor,
   MailThread,
   PreviewMailRuleInput,
   SendMailDraftInput,
@@ -435,6 +436,22 @@ export function createMailService({
         threadId: before.id,
       });
     }
+  }
+
+  /** Snoozes belong to a conversation the person still has; anything else is not found. */
+  async function ownedThread(userId: string, threadId: string) {
+    const [thread] = await db
+      .select({ id: mailThreads.id })
+      .from(mailThreads)
+      .where(
+        and(
+          eq(mailThreads.id, threadId),
+          eq(mailThreads.userId, userId),
+          isNull(mailThreads.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!thread) throw new AppError("not_found", "The mail conversation was not found.");
   }
 
   async function threadConditions(userId: string, query: MailListQuery) {
@@ -1003,22 +1020,19 @@ export function createMailService({
     },
 
     async snoozeThread(userId: string, threadId: string, until: Date) {
-      const [thread] = await db
-        .select({ id: mailThreads.id })
-        .from(mailThreads)
-        .where(
-          and(
-            eq(mailThreads.id, threadId),
-            eq(mailThreads.userId, userId),
-            isNull(mailThreads.deletedAt),
-          ),
-        )
-        .limit(1);
-      if (!thread) throw new AppError("not_found", "The mail conversation was not found.");
+      await ownedThread(userId, threadId);
       await db
         .insert(mailSnoozes)
         .values({ threadId, until, userId })
         .onConflictDoUpdate({ target: mailSnoozes.threadId, set: { until, updatedAt: now() } });
+    },
+
+    /** Ends a snooze. A conversation that is not snoozed is left as it is, so this can repeat. */
+    async unsnoozeThread(userId: string, threadId: string) {
+      await ownedThread(userId, threadId);
+      await db
+        .delete(mailSnoozes)
+        .where(and(eq(mailSnoozes.threadId, threadId), eq(mailSnoozes.userId, userId)));
     },
 
     async listRules(userId: string): Promise<MailRule[]> {
@@ -1948,8 +1962,21 @@ export function createMailService({
       } as import("@personal-os/domain").MailNavigationCounts;
     },
 
-    async listThreads(userId: string, query: MailListQuery): Promise<MailThread[]> {
+    async listThreads(
+      userId: string,
+      query: MailListQuery,
+      cursor?: MailSummaryCursor,
+    ): Promise<MailThread[]> {
       const conditions = await threadConditions(userId, query);
+      if (cursor?.beforeReceivedAt && cursor.beforeId) {
+        // Row comparison mirrors the (receivedAt, id) ordering, so equal timestamps never skip.
+        // The cursor is an ISO string with millisecond precision. That is exact because every
+        // receivedAt is written from a JavaScript Date, which carries no finer precision; a
+        // writer storing microseconds would need the cursor to carry them too.
+        conditions.push(
+          sql`(${mailThreads.receivedAt}, ${mailThreads.id}) < (${new Date(cursor.beforeReceivedAt)}, ${cursor.beforeId})`,
+        );
+      }
       const records = await db
         .select()
         .from(mailThreads)
@@ -1957,7 +1984,26 @@ export function createMailService({
         .orderBy(desc(mailThreads.receivedAt), desc(mailThreads.id))
         .limit(query.limit);
       const ids = await mailboxMap(userId);
-      return records.map((record) => serializeMailThread(record, ids));
+      const threads = records.map((record) => serializeMailThread(record, ids));
+      if (!query.snoozed || !threads.length) return threads;
+      // The Snoozed list says when each conversation returns.
+      const snoozes = await db
+        .select({ threadId: mailSnoozes.threadId, until: mailSnoozes.until })
+        .from(mailSnoozes)
+        .where(
+          and(
+            eq(mailSnoozes.userId, userId),
+            inArray(
+              mailSnoozes.threadId,
+              threads.map((thread) => thread.id),
+            ),
+          ),
+        );
+      const until = new Map(snoozes.map((snooze) => [snooze.threadId, snooze.until]));
+      return threads.map((thread) => {
+        const wake = until.get(thread.id);
+        return wake ? { ...thread, snoozedUntil: wake.toISOString() } : thread;
+      });
     },
 
     async bulkUpdateThreads(

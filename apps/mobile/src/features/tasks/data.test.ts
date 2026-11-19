@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   loading: vi.fn(() => "toast"),
   invalidateQueries: vi.fn(),
   refetchQueries: vi.fn(),
+  cancelQueries: vi.fn(async () => {}),
   refresh: vi.fn(),
 }));
 vi.mock("sonner-native", () => ({ toast: mocks }));
@@ -27,6 +28,7 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({
     invalidateQueries: mocks.invalidateQueries,
     refetchQueries: mocks.refetchQueries,
+    cancelQueries: mocks.cancelQueries,
   }),
   QueryCache: vi.fn(),
   QueryClient: vi.fn(),

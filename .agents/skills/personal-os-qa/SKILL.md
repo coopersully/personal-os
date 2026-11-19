@@ -1,6 +1,6 @@
 ---
 name: personal-os-qa
-description: Apply nohmi's repository fixtures and run evidence-backed product QA in the in-app browser. Use when testing a branch or PR, smoke-testing the local app, reviewing responsive UX, validating onboarding or provider states, checking workspace switching, or writing a regression report for Today, Calendar, Tasks, Mail, Finances, Settings, or account setup.
+description: Apply nohmi's repository fixtures and run evidence-backed product QA through the host's browser automation (Codex in-app browser or Claude Code browser pane). Use when testing a branch or PR, smoke-testing the local app, reviewing responsive UX, validating onboarding or provider states, checking workspace switching, or writing a regression report for Today, Calendar, Tasks, Mail, Finances, Settings, or account setup.
 ---
 
 # nohmi product QA
@@ -29,10 +29,21 @@ Fixture writes are disposable, but ordinary local accounts are not. Only mutate
 named fixture accounts. Reload fixtures after a pass that changes setup, mail,
 tasks, calendars, or finances.
 
-## Use the in-app browser
+## Use the host's browser automation
 
-Apply the `control-in-app-browser` skill and claim the existing localhost tab
-when available. Prefer semantic locators and fresh DOM snapshots. Use a
+Drive the app with the current host's browser automation:
+
+- **Codex:** its in-app browser tooling.
+- **Claude Code:** the built-in browser pane tools (`mcp__Claude_Browser__*`,
+  for example `preview_start`, `navigate`, `read_page`, `find`, `computer`,
+  `resize_window`, `read_console_messages`), or Claude in Chrome when the user
+  asks for it.
+
+If the host has no browser automation, report that gap and the untested
+surfaces; do not substitute static source reading for browser evidence.
+
+Claim the existing localhost tab when available. Prefer semantic locators and
+fresh DOM snapshots. Use a
 screenshot when hierarchy, clipping, motion, or density needs visual evidence.
 
 For each affected surface:
@@ -46,7 +57,7 @@ For each affected surface:
 6. Check document horizontal overflow and the browser console.
 7. Inspect the normal viewport and a 390 × 844 narrow viewport for responsive
    changes. Reset the viewport override when finished.
-8. Leave the in-app browser on a useful, stable fixture page.
+8. Leave the browser on a useful, stable fixture page.
 
 Do not connect a real provider, send mail, initiate money movement, or submit
 external data during QA unless the user explicitly requests that side effect.

@@ -27,6 +27,18 @@ Only supported USD activity with known ownership and a recorded ownership share 
 precise totals. Invalidated or non-reconciling splits are withheld with qualifications rather than
 silently reassigned. Unknown ownership/currency remains inspectable through qualification source IDs.
 Transfers and unclassified income do not become ordinary spending.
+A payment the provider labels `LOAN_PAYMENTS_CREDIT_CARD_PAYMENT` contributes nothing to spending,
+refunds or budget pace when it settles a card whose purchases are observed: a planning-included
+credit card the provider is currently syncing. The card-side leg on such a card always qualifies.
+The funding-side leg does not name the card it paid, so it qualifies only when an observed card
+received the same amount within five days; each receipt settles one payment. A payment to a manual
+liability, a loan, a card awaiting re-authentication or a card nohmi cannot see finds no receipt and
+still counts, because it is the only spending signal. A category decided by the person, an agent or
+a merchant rule overrides the label only when it names a purchase; confirming it as a payment or
+transfer, or clearing the category, keeps it excluded. Other loan payments still count. Known limit:
+a payment whose receipt posts more than five days away, or for a different amount, is not
+recognised and still counts as spending. The exclusion is a reader rule; it does not link or resolve the
+pair, which remains transfer-reconciliation work.
 
 Personal cost deducts recorded expected reimbursements; canceled claims deduct only amounts already
 received. Matched reimbursement credits are not subtracted again as refunds. Full outflow preserves

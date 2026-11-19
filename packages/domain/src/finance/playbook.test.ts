@@ -77,3 +77,169 @@ describe("Finance playbook", () => {
     );
   });
 });
+
+describe("Finance playbook rubric", () => {
+  const profile = {
+    debts: [],
+    expectedMonthlyTakeHome: 6_000,
+    incomeStability: "stable" as const,
+    insurance: [{ kind: "health", status: "active" }],
+    jurisdiction: "US-NY",
+    liquidReserves: 18_000,
+    reserveTargetMonths: 6,
+  };
+
+  it("defines every check it scores and names its sources", () => {
+    const sourceIds = new Set(PERSONAL_OS_FINANCE_PLAYBOOK.researchSources.map(({ id }) => id));
+    for (const check of PERSONAL_OS_FINANCE_PLAYBOOK.rubric)
+      for (const sourceId of check.sourceIds) expect(sourceIds.has(sourceId)).toBe(true);
+    for (const limit of PERSONAL_OS_FINANCE_PLAYBOOK.referenceLimits)
+      expect(sourceIds.has(limit.sourceId)).toBe(true);
+    const scored = assessFinancePlaybook({ now: "2026-11-13T12:00:00.000Z", profile });
+    expect(scored.rubric.map(({ id }) => id).sort()).toEqual(
+      PERSONAL_OS_FINANCE_PLAYBOOK.rubric.map(({ id }) => id).sort(),
+    );
+  });
+
+  it("leaves checks unassessed rather than guessing when evidence is missing", () => {
+    const { rubric } = assessFinancePlaybook({ now: "2026-11-13T12:00:00.000Z", profile });
+    const status = Object.fromEntries(rubric.map((item) => [item.id, item.status]));
+    expect(status).toMatchObject({
+      spending_within_income: "not_assessed",
+      plan_current: "not_assessed",
+      reserve_months: "not_assessed",
+      housing_share: "not_assessed",
+      costly_debt: "healthy",
+      protection: "healthy",
+      retirement_saving: "not_assessed",
+      employer_match: "not_assessed",
+    });
+  });
+
+  it("scores spending, reserves, housing and plan state from evidence with its arithmetic", () => {
+    const { rubric } = assessFinancePlaybook({
+      now: "2026-11-13T12:00:00.000Z",
+      profile,
+      evidence: {
+        currentMonthPlanApproved: false,
+        grossAnnualIncome: 120_000,
+        monthlyHousingCost: 3_000,
+        plannedMonthlySpending: 5_700,
+      },
+    });
+    const byId = Object.fromEntries(rubric.map((item) => [item.id, item]));
+    expect(byId.spending_within_income).toMatchObject({ status: "watch" });
+    expect(byId.spending_within_income?.detail).toContain("95%");
+    expect(byId.plan_current).toMatchObject({ status: "gap" });
+    expect(byId.reserve_months).toMatchObject({ status: "watch" });
+    expect(byId.reserve_months?.detail).toContain("3.2 months");
+    expect(byId.housing_share).toMatchObject({ status: "watch" });
+  });
+
+  it("uses a three-month default only when no reserve target is recorded, and says so", () => {
+    const { rubric } = assessFinancePlaybook({
+      now: "2026-11-13T12:00:00.000Z",
+      profile: { ...profile, reserveTargetMonths: null },
+      evidence: { plannedMonthlySpending: 5_000 },
+    });
+    const reserve = rubric.find((item) => item.id === "reserve_months");
+    expect(reserve).toMatchObject({ status: "healthy" });
+    expect(reserve?.detail).toContain("default 3-month target");
+  });
+
+  it("flags costly or unverified debt and lapsed coverage", () => {
+    const { rubric } = assessFinancePlaybook({
+      now: "2026-11-13T12:00:00.000Z",
+      profile: {
+        ...profile,
+        debts: [{ balance: 4_000, interestRate: 24 }],
+        insurance: [{ kind: "health", status: "lapsed" }],
+      },
+    });
+    const status = Object.fromEntries(rubric.map((item) => [item.id, item.status]));
+    expect(status).toMatchObject({ costly_debt: "gap", protection: "gap" });
+    const unverified = assessFinancePlaybook({
+      now: "2026-11-13T12:00:00.000Z",
+      profile: { ...profile, debts: [{ balance: 4_000, interestRate: null }], insurance: [] },
+    });
+    expect(
+      Object.fromEntries(unverified.rubric.map((item) => [item.id, item.status])),
+    ).toMatchObject({ costly_debt: "not_assessed", protection: "not_assessed" });
+  });
+
+  it("leaves debt unassessed until the person has answered, and scores a zero housing cost", () => {
+    const { rubric } = assessFinancePlaybook({
+      now: "2026-11-13T12:00:00.000Z",
+      profile: { ...profile, debts: [], debtsConfirmed: false },
+      evidence: { grossAnnualIncome: 120_000, monthlyHousingCost: 0 },
+    });
+    const byId = Object.fromEntries(rubric.map((item) => [item.id, item]));
+    expect(byId.costly_debt).toMatchObject({ status: "not_assessed" });
+    expect(byId.costly_debt?.detail).toContain("not been confirmed");
+    expect(byId.housing_share).toMatchObject({ status: "healthy" });
+    expect(byId.housing_share?.detail).toContain("0%");
+    const confirmed = assessFinancePlaybook({
+      now: "2026-11-13T12:00:00.000Z",
+      profile: { ...profile, debts: [], debtsConfirmed: true },
+      evidence: { grossAnnualIncome: 0, monthlyHousingCost: 0 },
+    });
+    const confirmedById = Object.fromEntries(confirmed.rubric.map((item) => [item.id, item]));
+    expect(confirmedById.costly_debt).toMatchObject({ status: "healthy" });
+    expect(confirmedById.housing_share).toMatchObject({ status: "not_assessed" });
+  });
+
+  it("never scores an empty reserve healthy against a zero target", () => {
+    const { rubric } = assessFinancePlaybook({
+      now: "2026-11-13T12:00:00.000Z",
+      profile: { ...profile, liquidReserves: 0, reserveTargetMonths: 0 },
+      evidence: {
+        plannedMonthlySpending: 5_000,
+        plannedSpendingBasis: "the approved 2026-10 plan",
+      },
+    });
+    const reserve = rubric.find((item) => item.id === "reserve_months");
+    expect(reserve).toMatchObject({ status: "gap" });
+    expect(reserve?.detail).toContain("default 3-month target");
+    expect(reserve?.detail).toContain("the approved 2026-10 plan");
+  });
+
+  it("reports a known costly debt as a gap even beside an unverified rate", () => {
+    const { rubric } = assessFinancePlaybook({
+      now: "2026-11-13T12:00:00.000Z",
+      profile: {
+        ...profile,
+        debts: [
+          { balance: 4_000, interestRate: 24 },
+          { balance: 900, interestRate: null },
+        ],
+      },
+    });
+    expect(rubric.find((item) => item.id === "costly_debt")).toMatchObject({ status: "gap" });
+  });
+
+  it("covers the gap and watch bands for spending, housing, debt wording and protection", () => {
+    const { rubric } = assessFinancePlaybook({
+      now: "2026-11-13T12:00:00.000Z",
+      profile: {
+        ...profile,
+        debts: [{ balance: 4_000, interestRate: 3 }],
+        insurance: [{ kind: "property", status: "active" }],
+        liquidReserves: 30_000,
+      },
+      evidence: {
+        currentMonthPlanApproved: true,
+        grossAnnualIncome: 60_000,
+        monthlyHousingCost: 2_500,
+        plannedMonthlySpending: 6_600,
+      },
+    });
+    const byId = Object.fromEntries(rubric.map((item) => [item.id, item]));
+    expect(byId.spending_within_income).toMatchObject({ status: "gap" });
+    expect(byId.housing_share).toMatchObject({ status: "gap" });
+    expect(byId.plan_current).toMatchObject({ status: "healthy" });
+    expect(byId.protection).toMatchObject({ status: "watch" });
+    expect(byId.costly_debt).toMatchObject({ status: "healthy" });
+    expect(byId.costly_debt?.detail).toContain("No recorded debt is at or above");
+    expect(byId.reserve_months).toMatchObject({ status: "watch" });
+  });
+});

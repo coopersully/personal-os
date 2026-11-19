@@ -126,6 +126,8 @@ export const mailThreadSchema = z.object({
   receivedAt: isoDateTimeSchema,
   remoteThreadId: z.string(),
   snippet: z.string(),
+  /** When nohmi's snooze ends. Present only on conversations listed as snoozed. */
+  snoozedUntil: isoDateTimeSchema.optional(),
   starred: z.boolean(),
   subject: z.string(),
   to: z.array(mailAddressSchema),
@@ -133,6 +135,17 @@ export const mailThreadSchema = z.object({
   updatedAt: isoDateTimeSchema,
 });
 export type MailThread = z.infer<typeof mailThreadSchema>;
+
+/**
+ * List projection for clients that may cache it. It never carries body text, recipient lists or
+ * the provider's thread identifier; those stay on authenticated detail reads.
+ */
+export const mailThreadSummarySchema = mailThreadSchema.omit({
+  bodyText: true,
+  remoteThreadId: true,
+  to: true,
+});
+export type MailThreadSummary = z.infer<typeof mailThreadSummarySchema>;
 
 export const mailAttachmentSchema = z.object({
   contentType: z.string(),
@@ -235,6 +248,18 @@ export const mailListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(100),
 });
 export type MailListQuery = z.infer<typeof mailListQuerySchema>;
+
+/** Summary pages continue after the last row's (receivedAt, id), matching the list order. */
+export const mailSummaryQuerySchema = mailListQuerySchema
+  .extend({
+    beforeId: idSchema.optional(),
+    beforeReceivedAt: isoDateTimeSchema.optional(),
+  })
+  .refine((value) => Boolean(value.beforeReceivedAt) === Boolean(value.beforeId), {
+    message: "Both cursor fields are required.",
+  });
+export type MailSummaryQuery = z.infer<typeof mailSummaryQuerySchema>;
+export type MailSummaryCursor = Pick<MailSummaryQuery, "beforeId" | "beforeReceivedAt">;
 
 /** A provider-backed change to a conversation. Fields are intentionally optional
  * so a single keyboard/bulk action can update one or more attributes. */

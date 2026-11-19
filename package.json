@@ -39,6 +39,8 @@
     "test:ci-scope": "node --test .github/scripts/ci-scope.test.mjs",
     "test:mac-production": "node --test deploy/mac-mini/*.test.mjs",
     "test:coverage": "vitest run --coverage",
+    "test:coverage:shard": "NOHMI_COVERAGE_MODE=shard vitest run --coverage",
+    "test:coverage:merge": "node scripts/merge-coverage-shards.mjs",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit -p integration/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json && pnpm --filter './apps/**' --filter './packages/**' --if-present run typecheck",
     "verify": "bash ./.codex/scripts/environment.sh verify",
@@ -46,7 +48,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.1.2",
-    "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/client": "^2.3.0",
     "@personal-os/api-client": "workspace:*",
     "@personal-os/database": "workspace:*",
     "@personal-os/domain": "workspace:*",
@@ -66,7 +68,7 @@
     "tsup": "^8.5.0",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
-    "vite": "^8.2.1",
+    "vite": "8.2.4",
     "vitest": "^3.2.4"
   }
 }

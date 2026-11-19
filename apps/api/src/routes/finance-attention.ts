@@ -60,6 +60,16 @@ export function registerFinanceAttentionRoutes({
   app.get("/v1/finances/budget-start/previews/:id", requireScope("finances:read"), async (c) =>
     c.json(await attention.getBudgetStartPreview(context(c), idSchema.parse(c.req.param("id")))),
   );
+  // Owner-only: the service refuses every agent principal regardless of scope.
+  app.post(
+    "/v1/finances/budget-start/previews/:id/decline",
+    requireScope("finances:read"),
+    requireScope("finances:write"),
+    async (c) =>
+      c.json(
+        await attention.declineBudgetStartPreview(context(c), idSchema.parse(c.req.param("id"))),
+      ),
+  );
   app.post("/v1/finances/budget-start/approve", requireScope("finances:write"), async (c) =>
     c.json(
       await attention.applyBudgetStart(

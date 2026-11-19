@@ -1,15 +1,15 @@
 import { router } from "expo-router";
 import { View } from "react-native";
 import { balanceHint, balancesFor } from "./balances";
-import { useFinanceRead, useSpending, useUpcoming } from "./data";
+import { useFinanceRead, useMonthSpending, useUpcoming } from "./data";
 import { OverviewMetric } from "./overview-metric";
 import { expectedAmount, financeLabel, formatLocalDate, formatMoney } from "./presentation";
+import { FinishFinanceSetup } from "./setup";
 import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Section } from "./ui";
 import { upcomingCategory, useUpcomingCategories } from "./upcoming-category";
 
 export function FinanceOverviewScreen() {
-  const spending = useSpending("month");
-  const attention = useFinanceRead(["attention"], (api) => api.getFinanceAttention());
+  const spending = useMonthSpending();
   const upcoming = useUpcoming();
   const categories = useUpcomingCategories(
     !!upcoming.data?.occurrences.some((item) => item.source?.kind === "obligation"),
@@ -62,7 +62,8 @@ export function FinanceOverviewScreen() {
     </>
   );
   return (
-    <FinanceScreen title="Overview">
+    <FinanceScreen title="Overview" tabBar>
+      <FinishFinanceSetup />
       <ReadState query={spending}>
         {spending.data && (
           <OverviewMetric
@@ -150,32 +151,6 @@ export function FinanceOverviewScreen() {
             </View>
           </View>
         )}
-      </ReadState>
-      <ReadState query={attention}>
-        {attention.data &&
-        (!attention.data.complete ||
-          attention.data.activeDecisionCount > 0 ||
-          attention.data.technicalBlockerCount > 0) ? (
-          <FinanceRow
-            title={
-              !attention.data.complete
-                ? "Finance assessment incomplete"
-                : attention.data.activeDecisionCount
-                  ? "Your decisions"
-                  : "Connection or evidence recovery"
-            }
-            value={
-              attention.data.activeDecisionCount
-                ? `${attention.data.activeDecisionCount} waiting`
-                : "Review"
-            }
-            valueTone="attention"
-            icon="categoryTags"
-            onPress={() =>
-              router.navigate({ pathname: "/finances/assistant", params: { view: "For you" } })
-            }
-          />
-        ) : null}
       </ReadState>
       <Section title="Coming next">
         <ReadState query={upcoming}>

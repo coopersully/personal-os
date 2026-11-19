@@ -54,9 +54,11 @@ export function matchEventValue(
 export function createFinanceRecurringOccurrenceService({
   db,
   now,
+  scopedActuals = false,
 }: {
   db: Database;
   now: () => Date;
+  scopedActuals?: boolean;
 }) {
   async function read(
     userId: string,
@@ -157,14 +159,19 @@ export function createFinanceRecurringOccurrenceService({
           )
       : [];
     const actualContext = transactions.length
-      ? await readCashflowActuals(tx, userId, {
-          from: transactions.map((row) => row.transactionDate).sort()[0] as string,
-          to: transactions
-            .map((row) => row.transactionDate)
-            .sort()
-            .at(-1) as string,
-          accountIds: [...new Set(transactions.map((row) => row.accountId))],
-        })
+      ? await readCashflowActuals(
+          tx,
+          userId,
+          {
+            from: transactions.map((row) => row.transactionDate).sort()[0] as string,
+            to: transactions
+              .map((row) => row.transactionDate)
+              .sort()
+              .at(-1) as string,
+            accountIds: [...new Set(transactions.map((row) => row.accountId))],
+          },
+          scopedActuals,
+        )
       : null;
     const reversed = new Set(
       events.flatMap((row) => (row.reversesMatchId ? [row.reversesMatchId] : [])),

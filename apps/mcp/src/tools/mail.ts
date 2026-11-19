@@ -181,6 +181,26 @@ export function registerMailTools(server: McpServer, api: PersonalOsApiClient) {
       }),
   );
   server.registerTool(
+    "unsnooze_mail",
+    {
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+        readOnlyHint: false,
+      },
+      description:
+        "End a cached conversation's snooze now so it is no longer hidden. This changes nohmi's local snooze state, not provider mail.",
+      inputSchema: z.object({ id }),
+      title: "Unsnooze mail",
+    },
+    async ({ id: threadId }) =>
+      apiResult(async () => {
+        await api.unsnoozeMailThread(threadId);
+        return { snoozed: false };
+      }),
+  );
+  server.registerTool(
     "create_mail_attention_item",
     {
       annotations: {

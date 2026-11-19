@@ -13,17 +13,23 @@ type RecognitionAccount = {
   kind: "cash" | "debt" | "investment" | "other";
   ownershipShareBps: number | null;
   ownershipType: "individual" | "joint" | "unknown";
+  /** Present on ledger rows; absent means card purchases are not known to be observed. */
+  providerType?: string | null;
+  status?: string | null;
 };
 
 type RecognitionTransaction = {
   accountId: string;
   amount: number;
   category: string | null;
+  /** Present on ledger rows; absent leaves provider-labelled card payments unrecognized. */
+  categorySource?: string | null;
   currencyCode: string | null;
   direction: "expense" | "income" | "transfer";
   id: string;
   pending: boolean;
   pendingTransactionId: string | null;
+  providerCategoryDetailed?: string | null;
   providerDirection: "expense" | "income" | null;
   providerTransactionId: string | null;
   reconciliationStatus: "candidate" | "confirmed" | "matched" | "not_applicable";

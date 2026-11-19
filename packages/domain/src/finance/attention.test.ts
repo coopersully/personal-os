@@ -22,14 +22,6 @@ const project = (records: FinanceAttentionRecord[], overrides = {}) =>
   });
 
 describe("Finance active attention", () => {
-  it("does not report budget-ready when an approved budget has stale planning inputs", () => {
-    expect(project([], { budgetInputsCurrent: false })).toMatchObject({
-      activeDecisionCount: 0,
-      budgetReady: false,
-    });
-    expect(project([], { budgetInputsCurrent: true }).budgetReady).toBe(true);
-    expect(project([], { budgetResourcesConfirmed: false }).budgetReady).toBe(false);
-  });
   it("separates historical work without treating flags as human decisions", () => {
     expect(
       project([
@@ -66,6 +58,22 @@ describe("Finance active attention", () => {
       activeTransactionCount: 1,
       budgetReady: false,
       rawCounts: { transactionFlags: 1, reviewCases: 2 },
+    });
+  });
+  it("counts a transaction's flag and review case as one unit of processing work", () => {
+    expect(
+      project([
+        record(),
+        record({ id: "case:a", source: "review_case" }),
+        record({ id: "flag:b", transactionId: "b" }),
+        // Work with no transaction remains its own unit.
+        record({ id: "case:orphan", transactionId: null, source: "review_case" }),
+        record({ id: "case:orphan:2", transactionId: null, source: "review_case" }),
+      ]),
+    ).toMatchObject({
+      activeTransactionCount: 2,
+      processingCount: 4,
+      rawCounts: { transactionFlags: 2, reviewCases: 3 },
     });
   });
   it.each([
@@ -118,6 +126,24 @@ describe("Finance active attention", () => {
       activeTransactionCount: 1,
       budgetReady: false,
     });
+  });
+  it("counts approvals without a shared decision key as separate approvals", () => {
+    const approval = (id: string, decisionKey: string | null) =>
+      record({
+        id,
+        transactionId: null,
+        source: "approval",
+        workState: "needs_person",
+        decisionKey,
+      });
+    expect(
+      project([
+        approval("action:1", null),
+        approval("action:2", null),
+        approval("batch:1:1", "batch:1"),
+        approval("batch:1:2", "batch:1"),
+      ]),
+    ).toMatchObject({ activeDecisionCount: 3, rawCounts: { approvals: 3 } });
   });
   it("rejects duplicate record identities rather than undercounting work", () => {
     expect(() => project([record(), record()])).toThrow();

@@ -28,6 +28,8 @@ function setup(scopes: AccessScope[] = ["finances:read", "finances:write"]) {
     approveForContinuation: vi.fn(async () => ({ id, state: "pending" })),
     getContinuation: vi.fn(async () => ({ id, state: "pending" })),
     cancelContinuation: vi.fn(async () => ({ id, state: "cancelled" })),
+    declineBatch: vi.fn(async () => ({ kind: "review_batch", id })),
+    declineUndo: vi.fn(async () => ({ kind: "review_batch_undo", id })),
     previewUndo: vi.fn(async () => ({ id })),
     getUndo: vi.fn(async () => ({ id })),
     executeUndo: vi.fn(async () => ({ id })),
@@ -84,6 +86,28 @@ describe("Finance backlog routes", () => {
         )
       ).status,
     ).toBe(403);
+  });
+  it("passes owner declines to the service with the authenticated principal and no caller identity", async () => {
+    const { app, batches, principal } = setup();
+    const post = { method: "POST", headers: { "content-type": "application/json" }, body: "{}" };
+    const declinedBatch = await app.request(`/v1/finances/review-batches/${id}/decline`, post);
+    expect(declinedBatch.status).toBe(200);
+    expect(declinedBatch.headers.get("cache-control")).toBe("no-store");
+    expect(batches.declineBatch).toHaveBeenCalledWith(id, { principal, requestId: "request-1" });
+    expect(
+      (await app.request(`/v1/finances/review-batch-corrections/${id}/decline`, post)).status,
+    ).toBe(200);
+    expect(batches.declineUndo).toHaveBeenCalledWith(id, { principal, requestId: "request-1" });
+    expect((await app.request("/v1/finances/review-batches/not-an-id/decline", post)).status).toBe(
+      400,
+    );
+    const denied = setup(["finances:read"]);
+    for (const path of ["review-batches", "review-batch-corrections"])
+      expect((await denied.app.request(`/v1/finances/${path}/${id}/decline`, post)).status).toBe(
+        403,
+      );
+    expect(denied.batches.declineBatch).not.toHaveBeenCalled();
+    expect(denied.batches.declineUndo).not.toHaveBeenCalled();
   });
   it("keeps corrections private and passes exact bounded acceptance to the execution owner", async () => {
     const { app, batches, principal } = setup();

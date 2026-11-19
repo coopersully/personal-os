@@ -2,8 +2,8 @@
 
 Expo SDK 58 supplies a React Native application with iOS and web targets. The native
 shell uses authenticated API sessions, workspace-specific native tabs and Apple's Liquid Glass
-on supported iOS versions. Tasks includes tasks, reminders, lists, projects, filters, history,
-archive and trash. Finance includes Overview, Spending, Plan, Accounts and Assistant read workflows,
+on supported iOS versions. Tasks includes tasks, reminders, lists, projects (active, completed
+and cancelled), filters, history, archive and trash. Finance includes Overview, Spending, Plan, Accounts and Assistant read workflows,
 plus category/notes editing, category budget limits and conversation sending. Today combines live
 Tasks and Finance reads with a time/weather hero and optional foreground location. Other workspace experiences
 retain their existing preview boundaries. Full Finance web parity (creation, approvals, imports and automation configuration)
@@ -11,7 +11,10 @@ remains in progress.
 The existing web and Tauri desktop UI remain separate consumers of shared domain/API contracts.
 
 Sessions use SecureStore; domain reads stay in memory and writes require connectivity. Encrypted
-offline caching and Universal Links are not implemented in this increment. Device notifications
+offline caching is not implemented in this increment. Signed builds claim nohmi record links on
+their HTTPS web origin (Universal Links); see "nohmi web links" in the mobile frontend standards
+and "iPhone Universal Links" in `docs/engineering/external-boundary-reliability.md` for what
+must be true outside the repository before a link opens the app. Device notifications
 schedule up to 50 future deadlines locally and reconcile while the app is active; web edits made
 while it is closed are not pushed to the device. See the mobile frontend standards and native API
 boundary documentation for the current scope.
@@ -44,10 +47,14 @@ pnpm --filter @personal-os/mobile archive
 ```
 
 The Release simulator build needs no signing identity. Archive uses Xcode automatic signing
-for John Cooper (`7J7HDVDCKQ`), bundle ID `app.personal-os.mobile`, version `0.1.0`, build `8`.
+for John Cooper (`7J7HDVDCKQ`), bundle ID `app.personal-os.mobile`, version `0.1.0`, build `11`.
 Archive builds explicitly bind to `https://nohmi-api.coopersully.me`, reject development API
 overrides and disable dotenv loading. Verify the signed archive against the committed source.
 Increment `ios.buildNumber` before every new App Store Connect upload and regenerate native files.
+An archive carries the `applinks:nohmi.coopersully.me` associated-domains entitlement, so the
+App ID needs the Associated Domains capability. Automatic signing is expected to add it; if the
+archive fails on the provisioning profile, enable the capability for `app.personal-os.mobile` in
+the Apple developer portal and archive again.
 
 ## TestFlight
 
@@ -72,6 +79,13 @@ using Xcode’s authenticated account. This export is restricted to internal Tes
 Build commands never upload automatically, and there is no OTA update channel. The app uses standard platform HTTPS and SecureStore cryptography; reassess export compliance
 when adding cryptographic capabilities. Native SDK privacy
 manifests are generated during prebuild; reassess declared collection on every added SDK.
+
+Plaid Link (`react-native-plaid-link-sdk` 13.5, an autolinked Expo module with no config plugin)
+vendors LinkKit 7.4 and that framework's own `PrivacyInfo.xcprivacy`: UserDefaults access (reason
+CA92.1) and a User ID collected for app functionality, linked to the person and not used for
+tracking. The App Store Connect privacy answers must be reassessed against that before the next
+upload; the release owner does this, and it is not automated. The module needs iOS 15.1 and a
+regenerated native project with `pod install`; a build made before it was added cannot open Link.
 
 ## External boundary
 
@@ -199,8 +213,8 @@ or put human credentials in browser storage to make local previews work.
 
 Expo export/typecheck and session lifecycle unit tests cover local correctness.
 A real account sign-in, cold restart, foreground expiry and logout on a physical
-phone remain release smoke checks. Domain screens still contain sample data or empty
-shells: authentication does not imply live Mail/Tasks/Finance data integration.
+phone remain release smoke checks. Workspace screens and the header search read live
+account data; only the unlinked preview settings and monitoring screens show example content.
 
 The iOS workspace selector uses an Expo UI SwiftUI Menu with an inline Picker.
 The system supplies its glass presentation, selection checkmark and dismissal; the

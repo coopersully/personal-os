@@ -82,16 +82,92 @@ section; omit an empty pinned row. Inbox remains the default list for unorganize
 Browse has no Add action. Upcoming and History share its top cards; below them group Task views
 (All, Tasks, Reminders, Scheduled), Storage (Archive, Trash), and Preferences.
 
+Projects has Active, Completed, Cancelled and All status chips with counts above its pinned row;
+Active is the default. A completed or cancelled project stays in Projects under its status until it
+is archived, and opening it shows all of its tasks, including finished ones. Rows and pinned cards
+for finished projects show the status and include it in the accessibility label ("Open Move,
+completed"). A project's metadata line (status, list, target date
+formatted as a short calendar date) sits directly under its name; a list description keeps the full
+width below the row actions. A finished or archived project, or one whose list is archived, offers no Add,
+because the server rejects new work there; Add also stays hidden until the project has loaded. Counts cover projects outside Archive and Trash and ignore the current search; chips show
+their bare label until lists and projects have loaded, never a zero from a pending or failed read.
+An empty status names itself, All with no projects says "No projects yet.", and a search that hides
+every project says no projects match. Lists have no completed or cancelled state and no status chips. Lists, Projects
+and Archive search matches names plus list descriptions and project why and notes.
+
 Upcoming means due/reserved after today; Scheduled means a task has reserved time, regardless of
 date. History contains completed/cancelled records outside archived containers. Archive contains
-archived containers, not merely closed projects. Trash contains deleted records and supports
+archived containers, not merely closed projects; those remain under Projects. Trash contains deleted records and supports
 Restore. Give Archive and Trash distinct icons. Trash does not offer capture or permanent deletion
 without an explicit product decision and confirmation. A failed restore keeps the item recoverable.
 
-Filters live in a bounded sheet; sort/group use native selected menus. Display human-readable
+Filters live in a bounded sheet; sort/group use native selected menus. Global views narrow by
+List, Project and the Today, Tomorrow and Next 7 days due shortcuts. Display human-readable
 active chips and effective sorting/grouping beside results. Preserve fixed destination scope,
 distinguish filter reset from view reset, and make saved defaults explicit. See the detailed form
 contract for geometry, state and reset behavior. Do not scatter configuration through result lists.
+
+### Task selection, counts and project header
+
+Long-pressing a task row starts a selection; its bar shows the number selected, Cancel, Select
+all and the actions every selected item allows. Select all selects the loaded items that can
+change, up to the selection limit of 100, and replaces the current selection, so a read-only
+pick that was blocking the actions is dropped. It is not offered when nothing loaded can change
+or everything that can is already selected. It never reaches items that have not been loaded:
+Load more first. The number selected and the actions both cover only selected items that are
+still listed, and a refresh that drops a row removes it from the selection, so it no longer
+counts toward the limit.
+
+Browse, Lists, Projects and Archive show how many items each destination lists. A count is the
+`total` of the same query the destination opens, read with a one-item page, so it equals the
+"N items" line on the opened list while no search is active, including the Show completed tasks preference and the
+every-status view of an archived container or finished project. The Archive row on Browse
+counts its containers, from the loaded lists and projects, and announces them as containers. Browse rows and the Upcoming and History cards show the
+bare number; list and project rows and pinned cards say "3 items" beside the name. The count is
+the control's accessibility value, so the label stays the destination's name. A count that is
+unread or could not be read is absent, never a zero; failed totals raise one Sonner error, not
+one per row or per screen. Counts ignore the search, which finds containers rather than
+narrowing what they hold. Counts read after the Tasks preferences answer. Each list or project
+row and pinned card reads its own count, so a long directory asks only for the rows it has
+drawn; Browse reads its seven together. A Tasks action refreshes the counts on mounted screens
+in the background: the action finishes, and its controls unlock, without waiting for them. A
+count read still in flight when the action lands is dropped and read again.
+Returning to a directory re-reads them, and the lists and projects behind the Archive count, so
+they follow changes made elsewhere.
+
+A project's page shows its why (three lines at most) and "Target" with the short calendar date
+under the title and above the filters and tasks. A project with neither shows nothing there.
+
+### Task row details
+
+A task row keeps its full title, wrapping rather than truncating, then quieter lines below it.
+The scan line stays about urgency: Read-only, Reminder, Cancelled, High priority and the due
+date, with the overdue treatment unchanged. A one-line context line follows with reserved time
+and the estimate, then the owning List / Project on a line of its own, so neither a long
+reservation nor a long container name can push the other out of view. Reserved time
+and the container always show when the task has them; a row inside a list or project browser, or
+under a List or Project filter, does not repeat that container. Estimate, notes and tags follow
+the saved row-detail preference shared with the web app: notes take at most two lines, tags wrap
+as small chips and a row shows five before counting the rest (+2 more). Nothing optional shows
+until the preference has loaded. An absent value, or a container that cannot be named, renders
+nothing; never a placeholder. Reminders have only notes. The row's accessibility value carries
+the same lines in reading order.
+
+### Archived items in task search
+
+"Include archived in search" (on by default) widens a task search to completed and cancelled
+items and to items in archived Lists and archived or finished Projects, the same intent as the
+web search toggle. Those container matches are read separately and listed last under "In
+archived or finished lists and projects", after
+every other match has loaded; the item count covers both. The preference applies wherever a
+search has no status of its own: it leaves alone a destination with a fixed status (To-do is open
+items), a Status the person chose, History and Trash. Inside a list or project one read with
+every status already covers its archived work. With the preference off a search keeps the view's
+own status. Until the preference has loaded a search is not widened. One search that
+fails raises one Sonner error even though it makes two reads; if only the archived read fails
+while other matches are showing, the list offers "Retry loading archived matches" and counts the
+matches it has. A cancelled task names itself Cancelled on the scan line, since it is otherwise
+drawn like a completed one.
 
 ## Accessibility and verification
 
@@ -165,8 +241,8 @@ when the action has a more informative name. Do not duplicate the same toast in 
 
 The approved mobile Finance map uses Overview, Spending, Plan, Accounts, and Assistant
 as five stable native tabs. Spending owns Summary and Transactions; Plan owns Budget,
-Cash flow, and Wealth. Assistant presents the existing conversation, review queue,
-and recorded activity; it does not create a second decision store. Preserve the native
+Cash flow, and Wealth. Assistant presents the existing conversation, review queue, approvals,
+review and correction pages, and recorded activity; it does not create a second decision store. Preserve the native
 system tab bar, selected workspace tint and filled icons.
 
 Finance summaries must preserve the server's currency, contribution basis, coverage,
@@ -236,9 +312,362 @@ rules; a transaction's top-level category is insufficient. Limit edits retain th
 bind to the displayed revision, and preserve server approval/input outcomes. Use the standard
 Close/Cancel, discard confirmation, floating Save and above-sheet Sonner feedback.
 
+### Budget plan revision
+
+Plan › Budget links to four pages behind one route, `/finance-budget-plan`, whose `view`
+parameter names the page. The budget pace graph sits on the Budget tab itself.
+
+- **Revise plan** edits the effective month, resources, allocations, rationale and assumptions of
+  the version on screen and saves it as a proposal bound to that version. With no plan it creates
+  the first proposal. Save stays disabled until every cent is assigned, names are unique and each
+  debt or goal allocation names its record. A saved proposal opens the existing proposal review,
+  which owns approval; the editor never activates a budget.
+- **Stale revision:** a conflict keeps the draft, disables Save and offers Reload latest version,
+  which asks before replacing the draft. Bucket edits recover the same way. A taken bucket name is
+  a correction, not a stale record.
+- **Uncertain writes:** an unchanged draft is resent under the same idempotency key. Only a
+  definite rejection, or the server recording the earlier attempt as failed, frees a new key.
+- **Budget buckets** shows the month's totals by bucket (never summed) and edits a bucket's name,
+  description and categories against its version. Turning on a category held by another bucket
+  says that it moves.
+- **Budget scope** confirms the approved version, accounts and currency a month is compared with:
+  choose each explicitly, preview the exact scope, then confirm that preview. Any change to the
+  selection or its source records discards the preview. Confirming a scope never approves or
+  rewrites a budget, and a later confirmation of a past month is labelled as such.
+- **Budget pace** shows one cell per day for the week, month or year, with the latest evaluated
+  day summarised in words. Status is never carried by colour alone: each cell has a spoken label.
+
 Account identities use validated provider institution artwork without recoloring it. Missing or
 failed artwork falls back to institution initials, never a fabricated company logo. Reuse the same
 identity component in account rows and details.
+
+### Finance account management
+
+Accounts has a floating plus that opens the manual account form; connecting a bank is a separate
+flow (see Finance bank connection). Account details keep ownership and planning as direct rows and put Edit account, Sync
+account, Review duplicate and the destructive Stop tracking account in the top-right action menu.
+Offer Sync only for a connected account, and neither Sync nor Stop tracking once tracking has
+stopped. A connected account's balance stays read-only; only a manual account edits its balance.
+
+Sync is a provider handoff: keep one toast from loading to the confirmed result, disable the
+account's actions while it runs, and refresh freshness afterwards whatever the result. Distinguish
+a definitive rejection from an unknown outcome (timeout, lost connection, server fault). An unknown
+outcome never claims success or failure, keeps the same idempotency key for the retry, and tells
+the person what to check. Adding a manual account has no retry key, so after an unknown outcome the
+next Save looks for the earlier attempt, under the name and institution it was sent with, before
+writing again; a corrected draft is not written as a second account. A rejected or unknown edit
+re-reads accounts so reopening the editor starts from the latest revision. An invalid Currency or
+Balance states the correction beside the field rather than relying on colour.
+The form names its required fields, uses Required/Optional as placeholders rather than sample
+values, and keeps one title: the page heading, with only dismissal in the navigation bar.
+
+Duplicate review happens in the app. The person chooses the account to keep from accounts that are
+connected and current, reads both identities, freshness and the overlapping and unique transaction
+counts, then confirms. Resolution is bound to the reviewed comparison revision; a changed
+comparison stops nothing and reloads. Stop tracking and duplicate resolution each keep a native
+confirmation that names the account and what is preserved.
+
+### Finance bank connection
+
+On iPhone, Connect a bank sits under the Accounts list and Reconnect account appears on the page
+of a connected account whose bank sign-in has lapsed. Neither is offered once tracking has
+stopped, or outside the iPhone build. Both present Plaid's native Link over the app; bank
+credentials are typed into Plaid's screens and never reach nohmi. The app asks the API for a link
+token as the iPhone app (for one account when reconnecting, which puts Link in update mode), and
+sends back only the public token, the institution and the chosen account names and masks.
+
+One toast follows the attempt: opening, then connecting or verifying, then the outcome the API
+confirmed. Closing Link is a neutral notice that nothing was connected or changed. A Plaid or bank
+error says the sign-in did not finish; Plaid's error text and codes are not shown or sent anywhere.
+A new connection counts the accounts the API returned. A public token is exchanged once, so an
+exchange with an unknown outcome is never sent again and the person is told to check Accounts. A
+reconnect verifies with an idempotency key that is kept while the outcome is unknown and renewed
+after a definitive refusal, whose reason from the server is shown. The key is held per person and
+account outside the screen, and the toast reaches its outcome even if the person leaves the screen
+first. Accounts are re-read after every attempt. The result is dropped only if the signed-in
+person changed. Names sent with the exchange are trimmed to the API's limits so a linked bank is
+not refused for its label.
+
+### Finance transaction management
+
+Spending offers Add as a command that opens the new transaction form: beside Select and Filters on
+Transactions, and on its own line above the content on Summary, where it stays through a category
+drill-down. It does not wait for the spending read, so it is there while that loads or fails. A
+manual account's action menu opens the same form with that account chosen. Spending has no
+floating plus, because it would sit over row amounts. The form uses Required and Optional as
+placeholders, like the account form, rather than sample values. A transaction a person adds belongs to a manual
+account, because the server removes a transaction only from one: the form offers manual accounts
+only, chooses a lone one, and explains what is missing when there is none. Merchant, Amount,
+Account and Date are required; the date defaults to today in the account planning timezone. A
+blank Category leaves the choice to nohmi. Adding has no retry key, so after an unknown outcome the
+next Save first looks on that account and date for the record the earlier attempt would have left,
+and adds nothing when it finds one. If any field of the draft was changed since, category and notes
+included, the form stays open, says the earlier version is recorded and offers Add anyway. That
+action hands its toast to the save, which clears the action from it (an updated toast keeps its
+earlier action unless told otherwise), and writes nothing while a save is running, once the add is
+confirmed or submitted, or after the form has been left. Leaving after an unknown outcome never says the
+transaction was not added, and re-reads Finance data. An amount takes a comma only as thousands
+grouping; `12,50` is corrected beside the field, never read as 1250.
+
+Transaction details put Edit transaction and, for a manual account's transaction only, the
+destructive Remove transaction in the top-right action menu. Remove is not offered while the
+account is unknown. It keeps a native confirmation, keeps its idempotency key across an unknown
+outcome, and returns to the list only on a confirmed removal or when the record is already gone.
+
+A category row is followed by New category, which expands in place to a name and Cancel/Add. The
+new category is selected in the draft; the form's Save still persists the transaction against its
+original revision. A name that already reads the same as an existing category is selected rather
+than written again. Categories stored under one of the provider's raw codes are shown as words
+(`RENT_AND_UTILITIES` reads "Rent And Utilities", as on web) wherever Finance names a category;
+other names, including all-capitals ones such as `HSA`, are left as written, and writes still send
+the stored name.
+
+Every non-drill-down transaction list has Select and Filters beside its search. Filters is a sheet
+with Category, Review, Sort by and Order as native choices that apply at once; a list already
+scoped to one budget category omits Category. Review offers Needs review and No review needed,
+which is every record not flagged, reviewed or not. Each active filter, and a non-default order, is
+a selected shared filter chip above the list that clears on press, and the Filters control names
+the active count and order to assistive technology. Rows state Pending and Needs review in their
+text.
+
+Select turns rows into toggles that state Selected or Not selected in their text. Categorize
+applies one category to at most 100 displayed records after a native confirmation, each guarded by
+the revision on screen, without changing merchant rules. One toast reports how many were applied
+and, separately, how many went to review, changed elsewhere, were rejected or are unconfirmed; a
+record the response does not mention is never counted as applied. Every submission ends the
+selection and reloads the list, and nothing can be selected again until a reload succeeds. That
+reload is silent when it works and raises one error when it fails, beside the Reload row.
+Selection is unavailable while the list is loading, failed, empty or showing a previous filter's
+rows.
+
+A manual transaction's date can be changed; see Changing a manual transaction's date below. A synced
+transaction's date cannot.
+
+A posted transaction's action menu offers Split transaction, or Edit splits once it has more than
+one part. It opens the split editor in the transaction editor sheet, which writes through the
+transaction breakdown endpoint the web Split dialog uses. A pending transaction offers neither,
+because the server gives a breakdown only to a posted one. The editor opens with the saved parts in
+their saved order, or with the whole amount on the transaction's category and one empty part. Each
+part has a Category, an Amount and a Treatment of Mine or Reimbursable; Add part starts a part with
+whatever is still unassigned, and Remove part is offered while more than one part remains; the
+last part left takes the whole amount. The
+amount still to assign, or the amount over-assigned, stays above the parts as field state. Save is
+enabled only once every part has a category and an exact amount, no two parts share a category and
+treatment, and the parts equal the transaction amount to the cent. One part alone assigns the whole
+transaction to that category, which is how a split is removed. Saving sends the revision the editor
+opened with. One toast reports the outcome: a conflict and any other rejection say nothing was
+saved and keep the draft (a conflict that follows an unconfirmed save says the earlier save may
+be why instead), and a save whose outcome is unknown says so, keeps the draft, re-reads
+Finance data and changes the discard prompt so it never claims the splits were not saved. The
+editor closes only on a confirmed save, and transaction details show parts only from what the
+server returned. A split transaction's Category row reads "Split in N parts" and opens the editor
+rather than asking for a category; its parts are listed by category with their treatment. The
+edit transaction form shows the same row in place of the category picker and New category, and
+never sends a category for a split transaction, because the server replaces every part with one
+when it receives a category; notes stay editable there. A transaction with one part is an ordinary
+categorized transaction and has no Splits section. A split transaction that is also awaiting
+review keeps the review's category controls, and resolving the review with one category replaces
+its parts. The
+transaction list read does not return parts, so a list row cannot yet tell a split transaction
+from an uncategorized one. The reusable merchant rule the web dialog offers for a single-category
+breakdown is not offered on iPhone.
+
+### Changing a manual transaction's date
+
+A transaction on a manual account can have its date corrected; a synced one cannot, because its date
+is the provider's evidence. In transaction details the Date row of a manual transaction opens the
+edit form on the Date field and reads "Change the date" to assistive technology. A synced
+transaction's Date row is plain text. The edit form shows a date-only Date field, in the Finance
+accent, above the category and notes only when the transaction's account is a manual one in the
+accounts list. While that list is loading, or after its read has failed, the form shows that read
+state (with its retry) where the Date field goes instead of an editor with no date, and a date is
+never sent for a synced transaction. The date is sent only when it was changed and not cleared, with the revision the
+form opened with; a category or note change in the same save travels with it. A save that changes
+only the date is therefore allowed, and a save with no change says "No changes to save".
+
+The API rule is in `updateTransaction`. A date requires the transaction's current revision
+(`expectedTransactionUpdatedAt`) and is refused with a 400 when the revision is missing, when the
+account is not manual ("Dates on synced transactions can't be changed.") and, for an agent, when it
+is combined with a category. A revision that no longer matches is a 409, checked before and after
+the row lock. A confirmed change records the old and new date in the audit event and refreshes cash
+flow intelligence. The same optional `date` is accepted through the MCP
+`update_finance_transaction` tool under the same rules, and the web transaction dialog has a
+matching date editor for manual transactions.
+
+A 409 says the transaction changed elsewhere and keeps the draft. Another confirmed rejection
+(a 4xx other than 408) says the transaction could not be saved and gives the server's reason, and an
+unknown outcome says the save could not be confirmed. Neither navigates away or retries. Only a
+confirmed save closes the form.
+
+### Finance goal management
+
+Plan › Wealth lists every goal that has not been removed and offers Add as a command above the
+list, for the same reason Spending has no floating plus. A goal row opens the goal's own page,
+which shows its confirmed progress, target, deadline, priority and status. Its top-right action
+menu holds Edit goal, Confirm progress, Pause goal or Resume goal, Mark complete and, last and
+destructive, Remove goal. Pause is offered for an active goal, Resume for a paused one, and Mark
+complete until the goal is completed. Mark complete and Remove goal each keep a native
+confirmation that names the goal; Pause and Resume act at once. In the browser build, where the
+native alert does nothing, these confirmations and the forms' discard prompt use the browser's own
+confirmation. A removed goal leaves the list and its page closes.
+
+Progress is a recorded statement, never an inference: the person's own, or one their agent
+recorded for them, which the goal page labels as such. A goal shows an amount and a
+percentage only when the server returns a statement recorded for exactly the goal version on
+screen, owned by the signed-in person, matching the recorded amount and not dated in the future;
+the app applies the same rule as the domain's planning-evidence check, whose currency lookup is
+unavailable in the app runtime. Otherwise the goal reads "progress not confirmed" and its recorded
+amount is not shown as progress. Every change to a goal starts a new version, so an edit, pause,
+resume or completion returns the goal to "progress not confirmed"; the edit form and the
+completion prompt say so; Pause and Resume do not warn. A goal has no currency of its own: its
+target reads in the currency of its latest progress statement, even one that no longer applies,
+or the product's USD default when it has none.
+
+The add and edit form holds Name, Target, Deadline and Priority and a floating Save. Name and
+Target are required, with Required as their placeholder. The target is at most 21,474,836.47,
+the largest the stored record holds, although the API accepts more;
+an empty Deadline reads as not set. Confirm progress is its own form: Amount (zero is valid), Currency and As of, which
+defaults to today in the account planning timezone and cannot be later. Currency starts from the
+goal's last statement. Each form names its required fields. An invalid Target, Amount or Currency
+states its correction beside the field; a typed Deadline or As of that is not a real calendar
+date holds Save and is corrected in a line under the fields; a future As of date is corrected in a line under the
+fields, and a cleared one only disables Save.
+
+Every goal write carries the version that was on screen and an idempotency key. The key is kept
+while the outcome is unknown and replaced only after a definitive rejection, so repeating the same
+change cannot act twice. A changed goal is a conflict: the toast says to review the latest version
+and nothing is overwritten. After an add whose outcome is unknown, saving the same draft repeats
+it under the same key; saving a corrected draft first looks for a new goal under the earlier name
+and adds nothing when it finds one. An earlier attempt that reaches the server only after that
+look can still leave two goals; closing that gap needs a server-side key shared by both drafts.
+A goal's actions stay disabled until the changed goal is on screen, so a second press cannot send
+the version the first one replaced. One toast runs from loading to the confirmed result; a failed
+or unknown save keeps the draft and the form open and never reads as saved.
+
+### Finance cash flow, recurring items and income
+
+Plan › Cash flow keeps the outlook: expected income and bills for the next 30 days, read from
+confirmed schedules and described as an upcoming schedule, not a projected account balance. Each
+outlook row opens its expected item. Under it, Recurring leads to four pages on one route
+(`/finance-cashflow`, named by `view`): Income, Bills & subscriptions, Recent expected items and
+Scenarios. The Plan tab reads nothing for those pages until one is opened.
+
+Income lists every income stream with its status (Needs confirmation, Active or Paused), how
+often it repeats, its next expected date and its expected amount. Bills & subscriptions lists
+obligations under Bills, Subscriptions and Savings and states that changing a pattern does not
+cancel a subscription or change a payment with its provider. An amount takes its currency from the
+item's account; an item without an account uses the product's USD default, as elsewhere in
+Finances, and an amount whose account is not known yet is shown without a currency. A row opens the recurring item: expected amount, status, kind, cadence, last seen date,
+account, who found it, whether its schedule is confirmed and, for a bill or subscription, its cost
+statement. A schedule statement and a cost statement each describe one revision of the item; once
+the item changes they read as needing confirmation again, because the server stops using them.
+
+The recurring item's top-right menu holds Confirm schedule or Revise schedule, Confirm cost or
+Edit cost statement (bills and subscriptions only), Pause, Resume or Confirm pattern (for an item
+that needs confirmation) and, last and destructive, Mark cancelled. Mark cancelled is offered for
+obligations only, because the API rejects it for income, and keeps a confirmation that says
+nothing is cancelled with the provider. Schedule and cost are offered only while the item is
+active or needs confirmation; a paused or cancelled item offers Resume, and its page says to
+resume it first. Each of these changes, and each schedule or cost statement, starts a new revision
+of the item, so stating a cost makes the schedule need confirming again and the reverse; both
+forms say so.
+
+Confirm schedule is a form with a floating Save: Repeats, Timezone, First date, Effective from,
+the two days of the month for a twice-monthly schedule, Amount type (Fixed or Variable), Expected
+amount and Currency. The account is shown but not chosen: the server accepts a schedule only for
+the item's own account. Timezone starts from the account planning timezone and Currency from the
+account; a revision also starts from the previous statement. Cadence, dates and amount are never
+taken from the detected pattern. A revision needs an effective date after the previous one. Confirm
+cost records whether the expected payment is fixed or variable, its currency and an as-of date
+that cannot be in the future, and needs the "This is my statement" switch.
+
+Recent expected items lists the last 30 days of expected items from confirmed schedules, newest
+first, because that is where posted transactions are. An expected item shows what was expected,
+what is matched and what is still expected, its matches that have not been reversed and, once a
+match has been reversed, its full history. A match the server no longer counts (for example after
+its transaction changed) is labelled as such and can still be reversed. Match opens a form that lists posted transactions in the same account
+and currency within two weeks of the expected date that the server marks eligible; a pending,
+uncategorized or transfer transaction is not offered. A split transaction also asks which part
+covers the item. The amount matched is at most what is still expected and at most the chosen
+transaction or part, and a reason is required. Opening a match reverses the whole match with a
+reason; the original stays in the history. An item from an earlier schedule can only have an
+existing match reversed. Matching never creates or changes a payment.
+
+Scenarios compares a baseline with up to five alternatives over a horizon of 1 to 120 months.
+Each scenario needs a name, starting cash, monthly income, housing, debt payment and reserve
+contribution, and either category spending lines or the "no other monthly spending" switch; debt
+balance, goal target, goal savings and assumptions are optional. The first thing still missing is
+named above the Compare button, which stays disabled until the comparison can be sent. Results
+are the server's: monthly cash flow, projected lowest balance, reserve runway, debt payoff, goal
+effects, warnings and assumptions. Scenario amounts carry no currency, so none is shown. Results
+are read only, never change the plan, and are marked as belonging to the previous entries after an
+edit.
+
+Every write here uses one toast from loading to the confirmed result. Finance data is re-read
+before the result is reported, and the item's actions stay disabled until that re-read has
+succeeded: if it fails after a confirmed write, the write is reported and the actions wait for the
+read to be retried. A schedule or cost form that is open when the item is paused elsewhere stays
+open with its entries, cannot be saved and says why. A match or reverse form likewise stays
+open through the re-read its own write causes, so it always reports the result and closes. The
+day a match was recorded is shown in the account planning timezone. A refused write
+(4xx) says nothing was changed or keeps the form open with its entries; a 409 says what changed
+elsewhere; a write with no answer says it could not be confirmed, and sending it again from the
+same open form or page reuses its idempotency key, so it cannot act twice. A form that is closed
+and reopened starts a new key. A form opens only on a fresh read of what it states against, never
+on a cached copy that is still being re-read.
+
+Not on iPhone yet: the web outlook's date range and account filters, calendar presentation,
+payday projection and balance statements, and reimbursements inside Cash flow (they are reached
+from Assistant). A past expected item older than 30 days cannot be opened.
+
+### Finance CSV import and export
+
+Import is offered in the account's top-right menu as Import CSV, only for a PayPal, Venmo or Zelle
+account: the server imports an export only into an account of the same provider, so the provider
+is not a choice on the import form. A manual or connected account can never take an import. So
+that an import has somewhere to go, Add account has a "Records from" choice: Entered by hand (the
+default), or PayPal, Venmo or Zelle CSV exports. The choice is made when the account is added and
+is not editable afterwards; the form says that a CSV can only be imported into an account of the
+same service. A PayPal, Venmo or Zelle account is kept by hand: the Accounts list labels it
+"CSV imports", its page shows its source as "Venmo CSV imports" and its records as added by CSV
+import, with no connection status or sync time, and a balance that was never entered reads "Not
+set". It is never shown as needing a reconnect, although the server files it under that status;
+for the same reason the server leaves it out of net worth, and Plan › Wealth says so. The import form shows the account, the provider and the chosen file. Choose file
+opens the system file picker from the file-system module the app already ships; no new native
+module was added. On iPhone the picker hands the app a temporary copy, which is deleted as soon as
+its text has been read. A file over four megabytes is not read at all and is reported as too
+large.
+
+Nothing is sent until the person chooses Import. Before that the form shows what will be
+imported: the number of transactions, their date range and the first 50 rows with date, name, note
+and signed amount (in the account's currency when it has one, otherwise as a plain number), read by the same rules the server uses. A file that cannot be read in full
+says which line and why, shows no rows and cannot be imported. The server reads the file again
+and is the authority. The API imports all or nothing: one row it cannot read fails the whole file
+and nothing is written. It has no preview route and reports only how many rows were imported and
+how many were skipped because they were already in the account, so the result names those two
+counts; there is no per-row rejection list to show.
+A file with no transaction ID column says that an already imported row is recognized only while
+the file keeps the same rows in the same order.
+
+The import uses one toast from loading to the confirmed result. It is done only when the API
+confirms it: "Imported 12 transactions; 3 already in this account were skipped." A refusal says
+nothing was imported, adds the server's own reason and keeps the form. An unanswered import says it could not be confirmed and
+is sent again from the open form under the same idempotency key, which the server answers once;
+importing the same file again is also safe because rows already in the account are skipped.
+
+Export is a command beside Select and Filters on every transaction list that has those commands;
+the list under a spending category, which has none, has no export. It exports the view that
+is on screen (its account, dates, search, status, category, review state and order), reading every
+page of it up to 5,000 transactions, and says so when a view is longer. The CSV has Date,
+Merchant, Amount (signed, plain number), Currency, Type, Status, Category and Notes; every cell is
+quoted and text that a spreadsheet would run as a formula is neutralized. The file is written to
+one export directory in the app's cache only while the system share sheet is open, where the
+person chooses its destination. The directory is removed whether they share it, cancel or the
+sheet fails, and is emptied before every export, so a file left behind when the app is closed with
+the sheet open is gone at the next export. One toast reports
+the count exported, a cancelled export or a failure. If the view changes while its pages are
+being read, nothing is exported and the toast says to export again. Export is offered on iPhone
+only.
 
 ### Transaction conversations and review
 
@@ -246,6 +675,165 @@ identity component in account rows and details.
 - Money uses a currency prefix, with `$` for USD and legacy records without a currency. Explicit non-USD source currencies remain identified; missing amounts remain unavailable and mixed-currency totals are not combined.
 - Message nohmi from transaction details opens the workspace conversation with a removable transaction attachment. Show merchant and amount before sending. Attachment removal preserves the draft; confirmed delivery clears it. Unavailable references block sending until removed, and uncertain retries retain both the reference and delivery key.
 - Sent references remain accessible in conversation history. Chat context is distinct from a transaction note and does not itself confirm a categorization change.
+
+### Finance reviews and corrections
+
+Assistant › For you carries the review work that does not need chat: Needs your input,
+Approvals, and a Reviews and checks list. Every page behind that list is the single
+`/finance-reviews` route; its `view` parameter names the page.
+
+- **Approvals** lists agent-prepared changes still `pending`. Approve reports "Approved and
+  applied" only for an `applied` outcome; `pending_review` and `needs_input` say the change
+  was not applied. A 404 or 409 says nothing was applied. After an outcome nobody confirmed,
+  the card stays locked until the reviews have been read again. Dismiss reports the status
+  the server returned, so an already applied review is never called dismissed.
+- **Period review** opens the latest saved review named by Finance status. It is read-only;
+  an amount the review did not record shows Unavailable, never zero.
+- **Review backlog** shows flag and review counts without adding them together, then the
+  records of one group. A record opens its transaction, where it is worked. Pages belong to
+  one snapshot: a 409 on a further page restarts the list from the top with one toast.
+- **Review history** pages resolved and deferred reviews and opens the recorded outcome of
+  one. An archived review has no transaction to open.
+- **Ledger checks** shows the ledger counts and the open alerts. Run checks again is an
+  explicit command with the full Sonner lifecycle. An alert is resolved or dismissed, and is
+  reported only in the status the server returned.
+- **Reimbursements** lists claims, then one claim with its receipts and past corrections.
+  Correct expectation and Remove receipt match send the revision on screen and one
+  idempotency key. After an unknown outcome the form locks and offers Retry same correction,
+  which resends that exact request; only a definite rejection frees the form for a new one.
+  That includes the server reporting the earlier attempt as failed: nothing was saved, the
+  draft stays, and Save sends it under a new key. A cancelled claim offers no correction.
+- **Contextual questions** opened from chat take an answer in place. The same text is resent
+  under the same operation id, and the text is locked while a send is unconfirmed. A
+  `blocked` answer says nothing was saved and closes the form.
+- **A split transaction under review** reads "Split in N parts". Approve splits keeps the
+  parts. Choosing one category asks "Replace N parts?" first, because it removes them.
+
+### Finance spending views, saved defaults and Assistant state
+
+Spending reads on the account's saved Spending defaults: accounting basis, whether pending is
+included, whether matched refunds are subtracted and whether uncategorized spending is included.
+The line under the total states what it counts, written from those defaults ("Full outflow · pending
+left out · …"), and uncategorized spending that was left out is stated with its amount. Spending
+waits for the defaults and the saved week start before it reads: a total is never shown on an
+assumed basis, and a failed read of the defaults offers Retry instead of falling back to product
+defaults. The iPhone applies these defaults and does not change them; they are edited in Finance
+settings, whose "Spending defaults" group says they apply on iPhone, web and desktop. Summary
+opens on the saved Spending view (List, Trends or Rhythm); a saved bubbles view, which iPhone does
+not have, opens as List. Choosing another view lasts for the visit and is not saved. The saved
+grouping and transaction layout remain web and desktop choices, and iPhone Spending always reads
+every account. In Settings the "Finance layout" group says the Spending view applies on iPhone and
+that grouping and transaction layout apply on web and desktop, and the "Calendar layout" group says
+week start applies on iPhone too, to the Calendar week and to where the Spending week begins.
+
+The period control offers Today, Week, Month and Custom. A visit opens on the saved
+default period unless a link names one; choosing another period lasts for the visit and is not
+saved. The week follows the account's "Week starts on" choice. Custom shows From and Through date
+fields and starts as today; a range that is incomplete, reversed or longer than the API's ten-year
+limit is explained beside the fields and is not read: Summary shows no figures for it. Transactions
+keeps its list on the last custom range that could be read (today when there has been none) and a
+line under the explanation names the dates still shown "until these dates are corrected". Dates are
+days in the account timezone.
+
+Summary has three views, chosen with a segmented control:
+
+- **List** keeps the daily bars and the category or bucket rows.
+- **Trends** shows the period so far as bars (days up to a month, weeks counted from the range
+  start up to half a year, then months), the equal span before it with the difference, and one row
+  per day, week or month. A comparison that rests on incomplete or out-of-date data says so. When
+  only the comparison period fails, the trend stays and the comparison offers Retry.
+- **Rhythm** is a grid whose colour strength is the amount: hours for a single day, days under
+  their weekday for up to two months, then calendar weeks, months or years. Choosing a block names
+  it, its amount and its state below the grid. An hour is assigned only from a source timestamp;
+  purchases without a time are one "Time not provided" block.
+
+Every bar and block carries its amount and state in its accessible label, so coverage, pending,
+refunds and future days are not carried by colour. A group, a trend row and a chosen rhythm block
+open the transactions behind them with the exact query and server revision that produced the
+summary; an hour of the day never does, because a date-only record cannot select an hour. Without
+a server revision nothing offers a drill-down. Bubbles is not offered on iPhone (open decision).
+
+A recorded activity row opens its evidence in place: who acted and when, the explanation, the
+records it concerns, source messages, the audited before and after of each changed field, the
+authority it ran under and its identifiers. Records this app can open are links (transaction,
+account, review case, question, the conversation); any other record, and any reference whose stated
+source disagrees with its kind, is shown as text. Further evidence loads on request through one
+Sonner toast and is refused whole if it does not continue the loaded evidence; evidence the account
+may no longer read is dropped from the screen.
+
+The Assistant tab carries the unread count of the Finance conversation as a native tab badge, named
+for a screen reader ("assistant, 3 unread messages"), and the conversation row says the same. An
+unknown count shows no badge; it is never shown as zero. The conversation is recorded as read
+through its latest loaded message when the transcript is on screen at that message, however many
+earlier messages are still unloaded, so a read mark far behind the latest page does not leave the
+badge standing. Opening the tab or a mounted but hidden transcript marks nothing. A failed mark is
+silent and is taken again at the next chance.
+
+### Finance setup and maintenance
+
+Finance setup is a screen of its own, `/finance-setup`, reached from the "Finish Finance setup" row
+at the top of Overview. The row appears only when a server read of the onboarding says it is not
+complete. While that read is pending or has failed the row is absent and nothing is raised, and setup
+never redirects or blocks the rest of Finance.
+
+The screen has three parts. The review lists each setup question with Answered (offered only when a
+saved answer exists, which is shown under the row as "Saved answer"), None (only when the question
+allows it) and Not sure, a switch for having reviewed display preferences, and an Automation choice
+of Later or Set up automation now. Save review stores the answers that were reviewed and leaves the
+rest. Finish setup is enabled only when the draft has been saved and the server's readiness has no
+blocker; each blocker is a line of the same copy the web review uses. Setup shows as finished only
+when the server's snapshot has a completion time, and a completion response without one says setup
+is still pending. While the choice is Set up automation now and setup is not complete, a Finance
+automations row opens the automations screen.
+
+Both writes carry the snapshot's revision and an idempotency key made for that request (operation,
+revision and payload) and kept while the outcome is unknown. A 409 reads the review again and says it
+changed elsewhere. A confirmed rejection gives the server's reason and leaves the draft editable. An
+unknown outcome (no answer, 408 or a server error) locks both writes until Reload setup review
+succeeds; a failed reload keeps the draft and the lock. A background refetch never replaces unsaved
+choices, and a clean review takes a newer snapshot but never an older revision.
+
+Budget offers Prepare budget when no plan exists, which prepares a draft from what has been
+recorded, and Open budget once one does. It says unknown amounts stay unknown and that approval is
+separate. Check records starts maintenance, or resumes an unfinished run, and shows the stage, any
+recovery or next-action reason and, from an action's response, its headline and required
+disclosures. The card shows the newer of the latest run the server lists and the last response to
+an action here, decided by the run's own server times, so a later read of the run replaces an older
+response. A run that awaits approval or finished with questions offers Answer in Review. Both
+actions use one Sonner toast from loading to the outcome and never resend after an unknown outcome.
+After an unknown maintenance outcome the latest run is read again before the action is enabled, so
+a start that did arrive is resumed and not repeated. If that read fails the action stays disabled
+and a Check the latest run row reads it again under its own toast.
+
+### Finance automations
+
+Automations lists the account's registered host schedules; it opens from the Assistant tab's For you
+card and from the setup review. Each registration shows its State, its next expected start, when it
+was last observed and, only when it is overdue, a Check-in row; a declared daily cadence titles the
+next start "Projected next start", as `automation-hosts.md` requires. The host and cadence line and
+the web's cause copy are shown. Register automation asks for a name, an authorized connection (only
+connections that allow Finance maintenance), the host (Codex interval, Claude daily times or Claude
+event), that host's cadence field and a time zone.
+
+Per registration, Rename saves a new name. A registration awaiting setup offers Enter host
+automation ID (with Next run for Codex) and Cancel setup; an active or paused one offers Remove
+registration after a destructive confirmation. A cancelled or removed one offers nothing. Every write
+sends the registration's version, and cancel and remove also send the state the person saw. One write
+runs at a time with one Sonner toast. A confirmed write is reported as soon as the server answers;
+the list is read again behind that toast after every attempt, and no further write is accepted until
+that read settles. A registration's state is always the one read, never the write's response. A 409
+says the automation changed elsewhere and that nothing was saved; an unknown outcome says it could
+not be confirmed and is never retried.
+
+Register is offered only once the existing registrations have been read. After a registration whose
+outcome is unknown, the registrations are read again and compared with the ones the form opened
+with: a new one with the form's name, connection, host and full trigger (cadence and time zone) is
+reported as registered and closes the form; when none is listed the toast says it could not be
+confirmed. One read that does not show the request is not proof it failed, so whether none is
+listed or that read fails, Register stays disabled and a Check automations row reads the
+list again under its own toast, which reports the registration as found, says it is not listed and
+can be registered again, or says the list could not be read. The screen says "Fire tokens, host prompts and run recovery are managed on the web"; none
+of those are available on iPhone.
 
 ### Workspace conversations
 
@@ -269,9 +857,171 @@ Category identity follows the record throughout transaction lists, detail rows, 
 
 Coming next and Cash flow show the scheduled date, saved recurring type and matching icon, signed amount, and expected status. Recurring types (Income, Bill, Subscription, Savings) are distinct from transaction-category assignments; never infer a transaction category from the merchant name. Upcoming previews sort chronologically and exclude matched or superseded occurrences.
 
+### Calendar day and agenda
+
+Calendar on iPhone is one screen with Day and Agenda segments; it does not reproduce the web week
+grid. The heading names the chosen day. Previous/next arrows step one day, a week strip that starts on
+the account's "Week starts on" setting jumps within the week and marks today and days that have
+events, and Today returns to the
+current day in the account planning timezone. Day shows all-day events as rows above an hour
+timeline that covers 8 AM–6 PM and widens to contain earlier or later events; overlapping events
+sit side by side and say so in their accessible label. Agenda lists the next 14 days from the
+chosen day, grouped by day, omitting empty days.
+
+Reads are bounded: Day loads the chosen week and Agenda its 14 days, both as instants derived from
+the account timezone. Provider all-day events stay on their calendar date; an event that crosses
+midnight appears on each day with From/Until wording. Rows carry time, tentative/cancelled state,
+location, a video-call marker and the calendar name; color comes from the calendar.
+
+Choose calendars opens a sheet of every calendar with its source account, read-only state and
+last-update freshness. Showing or hiding a calendar saves the same account-level choice web and
+Settings use, then re-reads events; success is silent and failure uses Sonner. Hidden or absent
+calendars and calendars that may be out of date are stated on the page rather than rendered as an
+empty day. Event details show date and time with the display timezone and the event's
+own timezone when different, repeat/tentative/cancelled state, location, the meeting link or its
+pending/failed state, calendar and source, freshness, reminders, guests and notes. Blocking time
+and conflict review are separate work (COO-242).
+
+### Calendar event create, edit and delete
+
+The agenda's floating plus opens a new event on the chosen day; it is absent when no calendar can
+be written to. Event details offer Edit and Delete in the top-right action control only when the
+event's calendar is writable and the event is not a busy block that mirrors another event. A
+read-only calendar offers neither.
+
+The event form follows [Mobile settings-style forms](mobile-forms.md): title, then When (All day,
+Starts, Start time, Ends, End time), Calendar, and Details (Location, Notes). A new event starts
+at the next whole hour today, or 9 AM on another chosen day, lasts the account's default event
+length, and goes to the approved default calendar, else the primary writable one. Moving the start
+keeps the event's length, and turning All day on for an event shorter than a day makes it that
+one day. Without an approved default, a calendar the agenda shows is preferred. An event stays on its calendar; the Calendar row is fixed when editing.
+Guests, reminders, repeat rules and meeting links are not edited on iPhone.
+
+Dates and times are entered in the account planning timezone and saved with it; there is no
+per-event timezone selector. An all-day event covers whole calendar days through its last day and
+is sent the way each calendar reads it back: nohmi and Google calendars take the date in the
+event's timezone, iCloud takes the UTC date. An edit sends only the fields the person changed plus
+the revision the form opened with, so a change made elsewhere is a conflict rather than an
+overwrite. A repeating event says that changes and deletion apply to every occurrence.
+
+These writes change the person's calendar at its provider, so the app reports only what the API
+confirms. Each write is one Sonner toast from pending to its outcome, and the page shows no result
+copy. An end that is not after the start is one Sonner error and sends nothing. A refusal from
+the API keeps the draft open. A conflict keeps the draft, disables Save and offers Reload event
+(discard changes). When a result cannot be confirmed (no response, or a server or provider
+failure) the app says so, re-reads the calendar, and never shows the change as saved:
+
+- An unconfirmed create freezes the draft and offers Review calendar before creating again or
+  Check calendar and create again. The second, after a confirmation, first reads that calendar
+  over the event's days. If an event with the same calendar, title and span is there, the first
+  attempt worked: it is reported as created and nothing more is sent. If the read fails, nothing
+  is sent and the choice stays. Only when the read succeeds and finds no such event is exactly
+  the first payload sent again. The API does not yet deduplicate event creation (COO-27), so
+  the app never retries by itself.
+  Events are read from shown calendars only, so on a hidden calendar the second create is not
+  offered at all; the person reviews the calendar instead.
+- When the failure says the provider did create the event but nohmi could not record it, no
+  second create is offered: the toast says the event will appear after the next sync and the
+  form offers only Close and review calendar.
+- An unconfirmed edit or delete can be tried again; it still carries the reviewed revision, so
+  the API refuses it if the first attempt did land.
+
+A refusal that arrives after part of a write already reached a provider (an event with busy
+blocks on other calendars) counts as unconfirmed, not as a refusal. The re-read after a write
+never delays that write's result and raises no notice of its own.
+
+Delete asks for confirmation, then moves the event to the API's recoverable deleted state. Its
+confirmed toast offers Undo for ten seconds, which restores the event with the revision the delete
+returned and reports its own result, inside the session that deleted it. An unconfirmed delete
+offers no Undo. A restore the API plainly refuses changed nothing, so its error toast offers Try again
+once (not after a conflict or a missing record); an unconfirmed restore is never repeated. Undo is offered only when restoring returns the same event: always for nohmi's
+own calendars, and for a provider event only when it has no guests, repeat rule or meeting link
+(the API re-creates a provider event from its title, time, location and notes) and is not an
+all-day event that nohmi changed since its last sync. Otherwise the confirmation says the delete
+cannot be undone from nohmi.
+
+### Calendar blocks, conflicts and the free-time check
+
+Event details offer Block time in the top-right action control for any event that is not itself
+a block and has another writable calendar to block, including an event on a read-only calendar.
+When the event already blocks time, a row names each calendar and how its block reads, and opens
+the same page.
+
+Block time follows [Mobile settings-style forms](mobile-forms.md). New blocks show starts from
+the saved busy-block privacy (Busy when Calendar guidance is not active) and applies to blocks
+added on this visit; it is not saved back. Each other writable calendar has one switch, Block on
+<calendar>, and a blocked calendar adds <calendar> shows to change that block between Busy and
+Details. Busy shows only that the person is busy; Details copies the event's title, location,
+notes and link. A calendar with several linked copies reads as Details when any copy does. The event's own calendars and read-only calendars are not offered. The same occurrence
+can sit on several calendars, each with its own linked copy on one destination; a switch or
+choice changes every copy there. One event record carries only its own blocks, so the page and
+the details row also read the event list for that time, which names the other calendars and
+their blocks. The list shows one record per occurrence, and the API exposes no
+occurrence identity. A record listed under another copy's id is taken for this event only when
+it carries a block linked to this very event; a record that merely has the same title, time and
+calendar could be another meeting, so its blocks are never merged or changed. An event opened
+by a non-listed copy's id that has no block of its own therefore shows only its own record. Which
+records are one occurrence is the API's decision: it groups provider events from different
+accounts that share a title and exact time, and the page shows and changes the blocks of the
+whole group, as the web app does. In
+the conflict checks an event is left out by its own id, or, when the list does not hold that id,
+by a single look-alike; two look-alikes are both listed. Opened for an event on a
+hidden calendar, which the list does not return, the page knows only that record's own blocks.
+
+Every switch and choice is one write to a real calendar. It is one Sonner toast from pending to
+its outcome with no result copy on the page, and the control moves only after the API confirms
+the change. Each write carries the event and block revisions the page showed. A change made
+elsewhere is reported as such, sends nothing further and re-reads the event. Once one of several
+copies has changed, a later failure is reported as unconfirmed.
+
+An unconfirmed block attempt (no response, a server or provider failure, or a refusal that
+carried a provider effect) is remembered for that event and calendar, with what was sent and the
+calendar's last sync time, until one is confirmed or the app restarts. The next attempt there
+reads before it writes:
+
+- The event is read first. If it now carries the block, that is reported and nothing is sent.
+- A nohmi calendar has no provider, so the event read is enough and the block is sent.
+- A hidden calendar's events cannot be read back, so nothing is sent and the toast says to show
+  the calendar or check it in the provider's app.
+- nohmi sees a provider calendar only as of its last sync. Until that calendar has synced again
+  since the attempt, nothing is sent and the toast says to try again after it syncs.
+- Then that calendar is read over the event's days for an unlinked copy of what the earlier
+  attempt sent (its privacy, title and time, not what is chosen now). If one is there, nothing
+  is sent and the toast says to remove it first. The one exception is a single unlinked Busy
+  copy at exactly the event's start and end when Busy is chosen again: it is sent on, because
+  the API links it instead of writing another.
+- The sync time at the attempt comes only from a read made right after the failure. If that
+  read fails too, the time is unknown: the next attempt records the calendar's sync time then
+  and sends nothing, so only a later sync opens the way.
+- If any of these reads fails, nothing is sent.
+
+What can still go wrong: a sync that fetched from the provider before the copy landed but
+finished after the attempt counts as "synced since" and would not show the copy, so a repeat
+could write a second one. The API does not expose when a sync began.
+
+Removing a block or changing what it shows can be tried again after an unconfirmed result: the
+page is re-read first and the next attempt carries the revisions it then shows.
+
+Event details list Conflicts when another event overlaps this one, using the Calendar review's
+rule: timed, busy, not cancelled, not a linked block and not a repeating series, with touching
+ends not counted. Each row opens the other event. Nothing is listed for an event the rule leaves
+out. A failed check shows one retry row and no toast.
+
+The event form states under When what the time on screen overlaps: no one-off timed event, or
+the first overlapping event and how many more. That note and the Conflicts list both say that
+repeating and all-day events are not checked. It is read again whenever the time changes, shows nothing
+while reading or while the end is not after the start, says that all-day events are not
+compared, and offers Check this time again after a failed read. It never stops a save. Both
+checks see only the calendars the person shows, and say so; the API has no free/busy read that
+includes hidden calendars. The Calendar review itself is not opened or changed on iPhone.
+
 ### Briefings and compact record rows
 
-Today is a short, cross-workspace briefing: Needs you, Coming up, and Handled for you. Bound each preview to three entries and link directly to the existing entity detail or workspace view. Use Tasks' authoritative Auto ordering for today's open work, including overdue tasks; combine upcoming tasks/reminders with expected Finance occurrences using the user's timezone. Label expected amounts rather than implying payment. Only confirmed applied agent actions belong under Handled for you; pending proposals and the user's actions do not. Distinguish partial/unavailable reads from an empty or all-clear state and make freshness and refresh accessible. The current native slice covers Tasks and Finance, not Mail/Calendar or complete connection monitoring.
+Today is a short, cross-workspace briefing: Needs you, Coming up, and Handled for you. Bound each preview to three entries and link directly to the existing entity detail or workspace view. Use Tasks' authoritative Auto ordering for today's open work, including overdue tasks; combine upcoming tasks/reminders with expected Finance occurrences using the user's timezone. Label expected amounts rather than implying payment. Only confirmed applied agent actions belong under Handled for you; pending proposals and the user's actions do not. Distinguish partial/unavailable reads from an empty or all-clear state and make freshness and refresh accessible. The native briefing covers Tasks, Calendar, Mail and Finance; complete connection monitoring is not part of it.
+
+Today’s events lists what is left of the day in the account timezone: events still running or ahead by start time, then all-day events; ended and cancelled events are left out. A row carries the time on this day, Tentative and the location, marks a running event Now, and opens the event’s detail. Mail lists open Mail attention items (the first 100 the API returns), most important first; expired items and run summaries are left out. A row tied to a conversation opens that conversation in the Mail reader over Today, and any other row opens Mail. Opening a conversation keeps only its body-free summary; the reader loads and discards message text as it does in Mail. Both sections keep the three-row limit and say how many more there are; the summary chips carry the count of events left (opens Calendar) and, when there is any, unread inbox mail (opens Mail).
+
+Each source fails alone: an unavailable Calendar or Mail read is named in its own section while the others stay on screen, and a failed refresh keeps the last results marked Partial or cached. No calendars, every calendar hidden and no connected mail account are each stated as a row that opens the place to fix it, never as an empty day or a clear inbox. The freshness line names the workspaces the briefing actually read.
 
 Record-row trailing values and disclosure/actions occupy the heading line only. Descriptions below it use the full available content width, aligned with the title; do not reserve an empty trailing column beside every description line. Leading identity icons remain top-left and actions top-right. Use the shared `RecordRow` for informational rows; preserve vertically centered settings rows for editable label/value fields.
 
@@ -283,12 +1033,178 @@ conditions independently of app light/dark mode; keep the briefing canvas opaque
 Use a small weather/location caption for opt-in and fallback clarity. See
 [the mobile sky boundary](../engineering/mobile-today-sky.md) for permission, freshness and lifecycle rules.
 
+### Mail reading
+
+Inbox is the unified inbox across connected accounts; Mailboxes lists each account's mailboxes with standard folders first (Inbox, Drafts, Sent, Archive, Spam, Trash), then the account's own folders by name, and the unread count as the trailing value. Choosing a mailbox shows its conversations in place with a back control to Mailboxes. A conversation row carries sender, time, subject, message count and a two-line preview; unread is a dot plus heavier weight, never colour alone.
+
+Thread lists read only the body-free summary contract (`GET /v1/mail/thread-summaries`): no body text, recipient lists or provider thread identifier. Only these summaries may be cached. Message bodies, recipients and attachment names load when a conversation opens, stay in memory while the reader is open and are discarded when it closes. When a conversation cannot be read, keep the subject visible and say that message text is never stored on the device and needs a connection.
+
+Search is typed in the workspace header and runs on the server against the current mailbox, debounced, through the `mailSearch` route parameter; the header shows no results overlay on Mail, and the list keeps a visible indicator until the search read settles; results never mix with the unfiltered list, and switching mailbox clears the search. A search typed over the mailbox list, with no mailbox open, shows matches from every inbox. Distinguish an unavailable read from an empty mailbox, no connected account and no search matches. Pull-to-refresh follows the native refresh exception; an explicit Try again uses one Sonner toast from loading to outcome.
+
+### Header search results
+
+The header field has two behaviours and never shows sample data. Tasks, Mail and Finances Accounts
+filter their own live list in place. Every other page opens a results list under the field, read
+from the workspace search route (`GET /v1/workspaces/:workspace/search`, content only, so agent
+reviews are not listed): Today searches Tasks, Mail, Finances and Calendar; a Calendar or Finances
+page searches its own workspace. Typing is debounced, the field accepts 200 characters, and results for an older query are never
+shown.
+
+Results are grouped under a workspace heading in workspace-selector order, each as a shared record
+row with the kind's registry icon in the workspace color, the server preview and any state
+(Completed, Archived, Pending, Hidden calendar). Today shows up to five per workspace and a
+workspace page up to twenty; when the server holds more, the group says how many are shown and to
+keep typing. There is no paging.
+
+The API admits one search per account at a time and replaces an account's queued search with a newer
+one, so workspaces are asked one after another, never in parallel; groups appear as each answers and
+a spinner stays until the last settles. Workspaces that fail are named together in one Sonner
+error per search, which blames the connection only when the server did not answer, and the other
+groups stay in place. The list itself carries no failure copy: it offers "Search
+<workspaces> again", which runs one toast from loading to outcome, and "No matches in …" names only
+the workspaces that answered.
+
+Include archive is a chip in the list. It starts from each workspace's "Include archived in
+search" preference, re-read when a search starts, and a press overrides it for that search. An
+unreadable preference falls back to the server default, which includes archived records.
+
+Choosing a result clears the search and opens an existing screen; search never mutates. Events,
+tasks, reminders, transactions and accounts open their detail; a list or project opens its task
+browser, with every status when it is archived or closed; a calendar or mail rule opens its
+settings page, a finance category Finances settings, a plan the Plan tab and a mailbox the mailbox
+list. Mail has no conversation route, so a conversation opens Mail searched for its subject. That
+list reads inboxes only and accepts 200 characters, so the subject is cut to that length, an
+archived conversation opens the mailbox list instead, and a snoozed conversation or one that exists
+only in Sent or Drafts is not found by the subject search. COO-259 tracks the Mail conversation
+route that removes these limits. Result previews are private: they are not kept in the query cache after the
+list closes.
+
+### nohmi web links
+
+A nohmi web link to one record opens that record in the app (Universal Links, COO-233). The app
+claims only these links on its web origin; every other nohmi page stays in the browser.
+
+| Web link | Opens |
+| --- | --- |
+| `/tasks?task=<id>` | the task editor |
+| `/reminders?reminder=<id>` | the reminder editor |
+| `/finances/transactions?transactionId=<id>` | the transaction |
+| `/calendar?…&event=<id>` | the event |
+| `/mail?…&thread=<id>` | the conversation in the Mail reader, read-only |
+
+- `features/links/parse.ts` is the one list of supported links. The hosted association file
+  (`apps/web/public/.well-known/apple-app-site-association`) must claim exactly that list; a test
+  compares them. Adding a link means changing both.
+- A web link is never routed by its web path. `+native-intent` validates it (configured web
+  origin, known path, one well-formed id), queues it, and the signed-in shell opens it above the
+  current screen, the way a notification tap does. A link that arrives signed out waits in memory
+  for sign-in. A link the app is handed but cannot open raises one Sonner error and changes no
+  screen.
+- A conversation is read by id and shown in the shared reader without actions. Opening,
+  a conversation that no longer exists and a failed read are reported by Sonner only.
+- `/plaid/return` is reserved as the return link for a bank sign-in started in the app (Plaid
+  OAuth, COO-234). The association file claims it with any parameters, so iOS brings the app
+  back to the front; the link handler opens no screen for it and never reads, stores or logs
+  its parameters. The native SDK that started the flow resumes it. Nothing serves this path
+  on the web: without the app it shows the web app's unknown-page state.
+- Custom-scheme paths (`personal-os://`) keep the router's own handling and still prompt in iOS.
+- iOS does not hand over a link followed inside Safari on the same site, a link typed into the
+  address bar, or one the person chose to open in the browser; those stay on the web.
+
+### Mail read state and archive
+
+A conversation offers Mark as read or Mark as unread, whichever changes it, and Archive when it is in an inbox. Archive removes it from every inbox and keeps its other mailboxes; a conversation that is in no inbox, or whose mailboxes have not loaded, offers no Archive. The actions sit in the action slot at the trailing end of the row's first line, where the disclosure chevron was, and in the conversation's header: a menu when there are two, a single control when there is one. Opening a conversation does not mark it read, as on web. Snooze and selection are described below, as are drafts, reply and send; deletion is not offered.
+
+These actions change the person's mailbox at the provider, so the list shows the change at once but records it only when the API confirms it. The pending change is an overlay on the cached list, never a cache write: an archived conversation leaves the list, a read change restyles the row, the conversation's actions are disabled until the write settles, and archiving from the open conversation closes it. One Sonner toast runs from loading to the outcome and names the action ("Marked as read", "Conversation archived"). A confirmed change is written to cached summaries from the body-free fields of the response and Mail is then re-read for unread counts and other mailboxes; a failure of that read never reports the write as failed.
+
+Every write carries the conversation's displayed `updatedAt`, so a conversation that changed elsewhere is rejected rather than overwritten. A definitive rejection (a 4xx other than 408 that does not carry `partialEffect`) puts the conversation back as it was and says it was not changed, that it changed, or that it is no longer available. Anything else (a timeout, a lost connection, a server fault, or a provider change the API could not record) is unconfirmed: the conversation goes back to its last confirmed state, the toast says the change could not be confirmed and may have reached the mailbox, and Mail is re-read rather than assuming either outcome. Nothing is retried automatically. That re-read returns nohmi's record, which catches up with the provider at the account's next sync, so Mail is read once more five seconds later. An outcome is reported against the session that sent the change: one that settles after the list has closed still reports, and one that settles after sign-out reports nothing and its Undo does nothing.
+
+A confirmed Archive of a Gmail conversation offers Undo for ten seconds. An iCloud archive moves the message to another mailbox and the API cannot yet move it back (it would report success without changing the mailbox), so an iCloud archive offers no Undo. Undo is used once, restores the mailboxes the conversation had against the revision the archive returned, and reports its own outcome in its own toast. A confirmed Undo puts the conversation back in the loaded inbox at its place by date without waiting for the read that follows; a search is left to that read. Read and unread are their own inverse and offer no Undo. No action-result copy is rendered in the list or the conversation.
+
+### Mail snooze and selection
+
+Snooze is nohmi's own record, not a change to the provider mailbox. A conversation's actions include Snooze, which opens a sheet asking when it should return: In 3 hours, Tomorrow morning and Next week (eight o'clock, next week on Monday), or any day and time still ahead. Every time is read and shown in the account's planning time zone, wherever the device is. The time sent is worked out when a row is pressed, not when the sheet opened, and a time that is no longer ahead is refused with a toast and nothing is sent. Choosing a time is the whole decision: the sheet closes, the conversation leaves the list and one Sonner toast runs from loading to "Snoozed until …" with Undo. Opened from a conversation, the sheet sits over it and the conversation closes once a time is chosen. The iOS menu reads its icons once when it mounts, so Mail gives a conversation's menu a new key whenever its actions or their icons change; without that an action that arrives after the mailboxes load shows the wrong icon or none. Mailboxes lists Snoozed under All inboxes. Each row there shows when the conversation returns ("Returns …", also read to assistive technology), from the `snoozedUntil` the API includes on conversations listed as snoozed, and offers End snooze instead of Snooze. End snooze removes the record through `DELETE /v1/mail/threads/:id/snooze`, which leaves a conversation that is not snoozed as it is. Its toast offers Undo, which snoozes the conversation again until the time it was waiting for, while that time is still ahead. A snooze or an End snooze that is refused or unconfirmed puts the conversation back and re-reads Mail.
+
+Touching and holding a conversation starts a selection. While one is under way a tap selects instead of opening, each row shows whether it is selected, and the rows' own actions step aside. The bar under the title shows the number selected, Cancel, Select all, and the actions the selection allows: Mark as read and Mark as unread when some selected conversation would change, Archive when every selected conversation is in an inbox, and Snooze (End snooze under Snoozed). A selection holds at most 100 conversations; Select all takes the first 100 listed. The selection is what is still listed, and a new search clears it.
+
+A selection's action writes one conversation at a time through the same guarded writes as a single change, because the bulk route returns no revisions to undo against. One toast reports the whole action: every change confirmed is a success; some confirmed is an error that says how many changed and how many were not confirmed; none confirmed says whether they were refused or could not be confirmed. Conversations that were not confirmed stay selected and the rest leave the selection. A selection's snooze toast names the return time. Undo is offered only for confirmed changes that can be reversed (a Gmail archive, a snooze, an ended snooze whose time is still ahead) and reverses exactly those, with its own toast and no further Undo; a read or unread change offers none, alone or in a selection. The selection takes no second action while one is in flight and cannot be changed or cancelled until that action reports, because the conversations it could not confirm are handed back as the selection. A session that changes mid-way stops the remaining writes and reports nothing.
+
+### Mail attention, steward findings and questions
+
+Above the inbox, and only there, a Needs you section lists the open Mail attention items the steward
+raised, most important first, with Critical and High marked. Expired items and run summaries are
+left out. It shows three and one Show all N action expands the rest; it renders nothing when none are
+open and is hidden while a selection is under way and while search results show. An item about a
+conversation opens that conversation, reading it first when the list has not loaded it (one toast,
+and a plain error toast if it is gone or cannot be read); an item with no conversation is not a
+button. A failed attention read adds nothing to the inbox and raises no toast; pulling the inbox to
+refresh reads it again and reports a failure with the usual single toast.
+
+A conversation's reader has a What nohmi found section under the subject: the steward's disposition
+and reason, its open obligations with kind, due date and reason, and each open question with its
+reason, the sources it was based on and its options. A question with no options shows its reason
+only. Choosing an option enables Send answer, which sends the option with the question's version and
+no generalization. One toast follows the action: "Answer sent", "This question changed elsewhere.",
+"This question is no longer available.", "Couldn’t send the answer. It was not saved." for another
+rejection, and, for an unknown outcome, that the answer could not be confirmed. An unknown outcome is
+never sent again. After every outcome the findings and the attention list are read again, and Send
+answer stays off until that read settles. A choice is kept until it is confirmed and is forgotten on
+a 409 or 404, so an option the reloaded question no longer offers is never sent. A failed read of the
+findings leaves the messages readable and raises one toast. Findings are not kept after the reader
+closes. Editing a disposition or an obligation is not offered.
+
+### Mail rules
+
+Mail rules are in Settings under the Mail workspace. The list shows each rule's name, whether it is
+on and its policy, with Add rule at the end. A rule's page shows its name, status, policy, a When row
+and a Then row in plain words (for example "Sender, subject or preview ends with “@shop.example”" and
+"Mark as read right away; Archive after 1 day"), and Disable, which asks for a native confirmation.
+Disabling and every other change are reported by one toast. Disable reads "Mail rule disabled" only
+from the rule the server returns. A confirmed rejection other than a 409 shows the server's reason.
+A 409 says the rule changed elsewhere, and an unknown outcome says the disable could not be
+confirmed; both read the rules again and the change is never sent a second time.
+
+Add rule opens a form with Rule name, Look in (anywhere, sender, subject or preview text), Match
+(contains, is exactly or ends with), Text, one Action (Archive, Mark as read, Star or Move to Trash)
+and the Mail accounts it covers. A lone account is chosen for the person, and the form is disabled
+until a name, text, an account and the Mail guidance read have all resolved. Adding a label is not
+offered, since it needs a mailbox owned by one account. A rule is always created off with the Preview
+policy, and the form says it can be turned on once Mail guidance is active (or that guidance is
+needed first). A confirmed create adds the rule to the list as Off · Preview and closes the form. A
+create whose outcome is unknown says it could not be confirmed, reads the rules again and does not
+close.
+
+Preview on a rule's page reads what the saved rule would match, without changing anything, and shows
+Matches, Checked ("N recent conversations"), a note when only the most recent conversations were
+checked, and each matching conversation's subject and sender. Turn on appears only when the rule is
+off and a preview of its current version is on screen. After a native confirmation it sends the
+conversations, fingerprint and time of that preview and the rule's version. The status changes to On
+only from the rule the server returns. A 409 says the rule or its matches changed and to preview
+again, clears the preview and reads the rules again. Another confirmed rejection shows the server's
+reason and keeps the preview. An unknown outcome says it could not be confirmed, is never sent again,
+clears the preview and reads the rules again. A preview of another version of the rule is neither
+shown nor sendable. An unknown preview outcome says the preview could not be loaded and to try
+again.
+
+### Mail drafts, reply and send
+
+Mailboxes lists nohmi's unsent drafts, including ones an agent prepared, with Needs review or Sending beside a draft whose send is not settled. Inbox and mailbox lists offer New message, and a loaded conversation opened from Mail offers Reply and Forward; the conversation opened from Today offers neither. A reply stays in its conversation and goes to the sender, their reply address, or the other party when the latest message is the person's own. A forward is a new message carrying the latest message's text. Messages are plain text, and attachments cannot be added or forwarded because the draft API has no attachment field.
+
+The composer is a full-screen sheet, so a swipe cannot dismiss typed text; Close asks before discarding anything not yet saved. Draft text is held only while a screen shows it, like an open conversation. Save draft creates or updates the draft against the revision it opened with. A draft that changed elsewhere is not overwritten: the toast says so and the typed text stays. A create the API never confirmed may have landed, so the next save reads the drafts first and never adopts a draft for it, because the API gives a create no identity: if a draft that did not exist before now holds exactly this text, nothing is written and the toast sends the person to Drafts to open it; text that has changed since is saved as a new draft, which can leave the interrupted copy in Drafts; if the drafts cannot be read, nothing is written. An interrupted update is treated the same way. A recipient name that holds a comma or semicolon is quoted so it stays one recipient.
+
+Sending takes two deliberate steps. Review and send saves the draft and shows the saved record back: sender, recipients, subject and message. Only Send message on that review sends it, at the revision reviewed; a second tap while one is in flight does nothing. A send is called sent only when the API confirms it. After any failure the draft is read again and its record decides: recorded as sent is reported as sent; a refusal the API vouches for (a 4xx other than 408 without `partialEffect`, or `retrySafe`) with the draft still unsent returns to the draft and says it was not sent; everything else is unconfirmed, including an unsent record after a lost connection, because that request may still reach the provider. An unconfirmed message locks: it shows the message read-only with Check again, which reads the draft's record and sends nothing, and, once the API marks it for review, It was sent and It was not sent, which record what the person found in Sent mail. A draft is marked on the device before its send leaves and unmarked only by a confirmed outcome or a successful check, so neither reopening the draft nor restarting the app lifts the lock; only draft ids are stored, never message text. Stored marks are read back before any mark is written, from every composer entry point, so a write never replaces marks the app has not yet seen. If the mark cannot be stored, nothing is sent; if stored marks cannot be read, drafts stay closed behind Load drafts until they can. When a check finds the draft recorded as unsent, the draft is saved again unchanged before it unlocks: that moves its revision on, so the API refuses an interrupted request that had not yet claimed the draft. It does not stop a send the API had already claimed: if the provider call outlives the API's claim timeout and the person records It was not sent, that message can still be delivered afterwards and a resend would duplicate it. Looking in Sent mail can show a delivery that has already happened; it cannot rule out one that happens afterwards. Closing that gap needs an API change. When the record reads unsent but that save is refused (a disconnected account, a deleted conversation), the locked message also offers Discard draft, which warns that the message may already have been sent, sends nothing and ends the lock once the API confirms the draft is gone. A check that finds the draft no longer exists ends the lock and closes the message. A draft whose earlier send is still unconfirmed is never sent again, even if device storage fails, and marks are written one at a time so a slow earlier write cannot replace a later mark. A sent reply re-reads its open conversation. Nothing is ever sent again automatically, and a locked message offers no send. Each action reports through one Sonner toast and no action-result copy is rendered in the composer; the locked note states the draft's recorded state.
+
 ### Transparent sticky workspace search
 
 The workspace search header floats above page content without an opaque full-width backing strip.
 Keep its native Liquid Glass capsule and reserve its safe-area-plus-header height inside page content
 so initial headings never sit under the controls. Shared Screen and virtualized Tasks lists use the
 same header inset; scrolling content and decorative backgrounds can pass behind the fixed header.
+Because pages own that spacing, native tab pages turn off UIKit's automatic content insets, so a
+list is never inset twice. A tab page therefore also clears the floating tab bar itself: lists pad
+their end by 100 points and the five Finances tab pages pass `tabBar` to the shared `Screen`, which
+applies the same clearance whether or not the page scrolls. Routes that open above the tabs, such
+as Finances details and editors, do not.
 Keep the glass material's system appearance stable during scrolling; adapt foreground contrast
 without changing the navigator or scroll surface's identity.
 

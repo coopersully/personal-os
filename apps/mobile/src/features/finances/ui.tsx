@@ -8,8 +8,10 @@ import {
   useId,
   useRef,
 } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
+import { FormSave } from "../../components/forms/form-save";
 import { Icon, type IconName } from "../../components/icons";
 import { RecordRow } from "../../components/record-row";
 import { Screen } from "../../components/screen";
@@ -17,34 +19,42 @@ import { radius, spacing, useTheme, workspaceColor } from "../../theme";
 import { useFinanceRefresh } from "./data";
 
 const refreshKeys: Record<string, readonly string[]> = {
-  Overview: ["attention", "spending", "upcoming", "accounts", "recent-activity"],
-  Spending: ["spending", "transactions"],
+  Overview: ["spending", "upcoming", "accounts", "recent-activity"],
+  Spending: ["spending", "transactions", "spending-preferences"],
   Accounts: ["accounts"],
   Plan: ["budget-status", "budget", "upcoming", "accounts", "goals"],
-  Assistant: ["attention", "conversation-readiness", "reviews", "activity", "conversation"],
+  Assistant: [
+    "conversation-readiness",
+    "reviews",
+    "action-reviews",
+    "status",
+    "activity",
+    "conversation",
+    "conversation-unread",
+  ],
 };
 const noKeys: readonly string[] = [];
 export function FinanceScreen({
   title,
   children,
   scroll = true,
-  showTitle = true,
-}: PropsWithChildren<{ title: string; scroll?: boolean; showTitle?: boolean }>) {
+  tabBar = false,
+}: PropsWithChildren<{
+  title: string;
+  scroll?: boolean;
+  /** Set on the five Finances tab pages; detail and editor routes open above the tabs. */
+  tabBar?: boolean;
+}>) {
   useFinanceRefresh(refreshKeys[title] ?? noKeys);
   const t = useTheme();
   return (
-    <Screen chrome scroll={scroll}>
+    <Screen chrome scroll={scroll} tabBar={tabBar}>
       <View
         style={{ gap: spacing.lg, paddingTop: 8, ...(!scroll ? { flex: 1, minHeight: 0 } : {}) }}
       >
-        {showTitle ? (
-          <Text
-            accessibilityRole="header"
-            style={{ color: t.ink, fontSize: 28, fontWeight: "700" }}
-          >
-            {title}
-          </Text>
-        ) : null}
+        <Text accessibilityRole="header" style={{ color: t.ink, fontSize: 28, fontWeight: "700" }}>
+          {title}
+        </Text>
         {children}
       </View>
     </Screen>
@@ -327,4 +337,29 @@ export function ReadState({
   if (query.isError && (!query.data || unavailable))
     return <FinanceRow title="Retry loading" icon="disconnected" onPress={() => void retry()} />;
   return <>{children}</>;
+}
+
+/** The capture button of a Finance tab, lifted clear of the native tab bar. */
+export function FinanceFloatingAdd({ label, onPress }: { label: string; onPress: () => void }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View
+      pointerEvents="box-none"
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: Platform.OS === "ios" ? 96 - Math.max(insets.bottom, 16) : 0,
+      }}
+    >
+      <FormSave
+        workspace="finances"
+        keyboardOffset={0}
+        label={label}
+        icon="add"
+        disabled={false}
+        onPress={onPress}
+      />
+    </View>
+  );
 }

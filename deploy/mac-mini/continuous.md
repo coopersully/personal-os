@@ -159,6 +159,68 @@ the failed `continuous-state.json` outside its active path. The next controller
 start seeds its deployed revision from the repaired active configuration. Never
 clear a lock/state receipt merely to repeat a failed migration.
 
+## Docker disk headroom
+
+On 2026-11-14 the dedicated VM's 24 GiB Docker disk filled with about 208 old
+release images (roughly 820 MB per revision) and build cache. PostgreSQL failed
+with ENOSPC while a deploy was quiescing, blocking it for attended recovery. The
+controller now bounds that growth itself, under the same operation lock:
+
+- **Headroom preflight.** Before building it requires 6 GiB free on the VM's
+  `/var/lib/docker` (4 GiB plus a 2 GiB build allowance, because the build grows
+  the disk the live PostgreSQL uses). After building, and before quiescing, it
+  requires 4 GiB. The probe runs `df` from the pinned local PostgreSQL image
+  through the dedicated socket with `--pull never`, no network, a read-only root
+  and a read-only mount. When space is short, or the probe itself fails (a full
+  disk can prevent creating the probe container), it reclaims (below) and
+  measures again. A partial reclaim failure is recorded but still re-measured.
+  Still short: the attempt ends `idle` with `error: insufficient-docker-disk`
+  and the normal fifteen-minute backoff. Still unmeasurable: `prepare-failed`.
+  Either way no writer is stopped and the live release keeps serving. `status`
+  shows the last measurement as `dockerFree`.
+- **Rollback release.** On each completed switch the controller records the
+  replaced release's revision and API/MCP/web image IDs as `rollback` (shown by
+  `status`). Only completion sets it, so a resumed or failed attempt never
+  displaces it. State from an earlier controller falls back to its completed
+  transaction's previous configuration; a first install has none until its
+  first switch.
+- **Retention.** After a successful switch (skipped while maintenance is
+  requested) it keeps the new revision and the rollback release; a preflight
+  reclaim keeps the serving revision, the candidate and the rollback release.
+  Every other `ilo-local/{api,mcp,web}:<40-hex SHA>` tag is removed in batches
+  of 50. Images referenced by any container (running or stopped), the active
+  configuration's image IDs and the rollback image IDs are excluded, under any
+  tag. A container whose image identity is not an exact ID fails the reclaim
+  before anything is removed. Removal is by tag without `--force`: removing an
+  image's last tag deletes it (Docker still refuses one a container uses);
+  otherwise it is only untagged. It then runs `docker builder prune --force
+  --keep-storage 3GB`. Volumes, containers, digest-pinned ancillary images and
+  other repositories are never touched. Dangling untagged images are not pruned.
+- A reclaim failure records `retentionError: image-retention-failed` in `status`
+  and never blocks or rolls back a release; the next reclaim retries and clears it.
+- Pruning build cache means the next build re-downloads and re-verifies pinned
+  remote files such as the AWS RDS CA bundle. A rotated upstream file then fails
+  that build (`prepare-failed`, live release unaffected) until its checksum pin
+  is updated.
+
+If the preflight keeps failing, inspect `docker system df` through the dedicated
+socket. Space held by the kept revisions, PostgreSQL data or non-release images
+needs an attended decision; do not delete volumes to make room.
+
+**Attended installation verification.** Tests cannot prove the live daemon's
+behavior. When installing this controller, before loading the LaunchAgent and
+again after its first completed switch, record on the tracking issue: `docker
+version`; `docker info --format '{{.Driver}} {{.DriverStatus}}'` (overlay2 or
+the containerd image store, which keeps image content under `/var/lib/containerd`
+and may sit on a different filesystem than the probe measures); `docker buildx
+ls` and `docker builder du` (the builder pruned through the dedicated socket);
+`docker system df`; and `colima ssh -- df -h /var/lib/docker /var/lib/containerd`
+compared with the controller's `dockerFree`. Also confirm `docker builder prune
+--keep-storage` is still accepted (newer releases deprecate it for
+`--reserved-space`). With a large existing backlog, the first reclaim may hold
+the operation lock for several minutes; an attended prune of old `ilo-local`
+tags at installation avoids that.
+
 ## Bounds and evidence
 
 - Health observations run at most once per minute. Only label-matching, running
@@ -180,8 +242,10 @@ clear a lock/state receipt merely to repeat a failed migration.
   bounded restart history, one latest transaction and redacted failure codes.
   `continuous-errors.log` retains at most 100 sanitized outer errors. Both are
   owner-only. This is local observability; there is no offsite alert or backup.
-  Encrypted backups and Docker build cache accumulate until attended cleanup;
-  no automatic pruning or deletion of production recovery material is performed.
+  Encrypted backups accumulate until attended cleanup; no production recovery
+  material is pruned or deleted automatically. Release images (about 820 MB per
+  revision) and Docker build cache are bounded as described in **Docker disk
+  headroom**.
 
 Run `pnpm test:mac-production` and `pnpm verify` before publishing. Behavior tests
 exercise release eligibility, real state-file switches, maintenance, restart

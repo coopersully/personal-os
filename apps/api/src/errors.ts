@@ -11,7 +11,8 @@ export type ErrorCode =
   | "not_found"
   | "rate_limited"
   | "service_unavailable"
-  | "unauthorized";
+  | "unauthorized"
+  | "unprocessable";
 
 const statuses = {
   conflict: 409,
@@ -23,12 +24,13 @@ const statuses = {
   rate_limited: 429,
   service_unavailable: 503,
   unauthorized: 401,
+  unprocessable: 422,
 } as const;
 
 export class AppError extends Error {
   public readonly code: ErrorCode;
   public readonly details?: unknown;
-  public readonly status: 400 | 401 | 403 | 404 | 409 | 410 | 429 | 500 | 503;
+  public readonly status: 400 | 401 | 403 | 404 | 409 | 410 | 422 | 429 | 500 | 503;
 
   public constructor(code: ErrorCode, message: string, details?: unknown) {
     super(message);

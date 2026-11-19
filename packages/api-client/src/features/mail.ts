@@ -13,7 +13,9 @@ import type {
   MailRule,
   MailRulePreview,
   MailSetupContext,
+  MailSummaryQuery,
   MailThread,
+  MailThreadSummary,
   PreviewMailRuleInput,
   ReconcileMailDraftInput,
   SendMailDraftInput,
@@ -51,8 +53,12 @@ export type MailApiClient = {
   listMailRules(): Promise<MailRule[]>;
   getMailSetupContext(): Promise<MailSetupContext>;
   listMailboxes(): Promise<Mailbox[]>;
+  /** Body-free list rows; the only Mail thread read a client may cache. */
+  listMailThreadSummaries(query?: Partial<MailSummaryQuery>): Promise<MailThreadSummary[]>;
   listMailThreads(query?: Partial<MailListQuery>): Promise<MailThread[]>;
   snoozeMailThread(id: string, until: string): Promise<void>;
+  /** Ends a snooze; a conversation that is not snoozed is left as it is. */
+  unsnoozeMailThread(id: string): Promise<void>;
   previewMailRule(input: PreviewMailRuleInput): Promise<MailRulePreview>;
   previewSavedMailRule(id: string): Promise<MailRulePreview>;
   reconcileMailDraft(id: string, input: ReconcileMailDraftInput): Promise<MailDraft>;
@@ -118,7 +124,9 @@ export function createMailApiClient(
       await request<void>(`/v1/mail/drafts/${id}`, { method: "DELETE" });
     },
     async getMailThread(id) {
-      const response = await request<{ thread: MailThread }>(`/v1/mail/threads/${id}`);
+      const response = await request<{ thread: MailThread }>(
+        `/v1/mail/threads/${encodeURIComponent(id)}`,
+      );
       return response.thread;
     },
     async getMailSetupContext() {
@@ -127,7 +135,7 @@ export function createMailApiClient(
     },
     async listMailMessages(threadId) {
       const response = await request<{ messages: MailMessage[] }>(
-        `/v1/mail/threads/${threadId}/messages`,
+        `/v1/mail/threads/${encodeURIComponent(threadId)}/messages`,
       );
       return response.messages;
     },
@@ -167,6 +175,12 @@ export function createMailApiClient(
         method: "POST",
       });
     },
+    async listMailThreadSummaries(query = {}) {
+      const response = await request<{ threads: MailThreadSummary[] }>(
+        `/v1/mail/thread-summaries?${toQuery(query)}`,
+      );
+      return response.threads;
+    },
     async listMailThreads(query = {}) {
       const response = await request<{ threads: MailThread[] }>(
         `/v1/mail/threads?${toQuery(query)}`,
@@ -205,6 +219,11 @@ export function createMailApiClient(
       await request<void>(`/v1/mail/threads/${id}/snooze`, {
         body: JSON.stringify({ until }),
         method: "POST",
+      });
+    },
+    async unsnoozeMailThread(id) {
+      await request<void>(`/v1/mail/threads/${encodeURIComponent(id)}/snooze`, {
+        method: "DELETE",
       });
     },
   };

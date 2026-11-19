@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SettingsHome } from "./home";
-import { settingsDestinations } from "./navigation";
+import { settingsDestinations, settingsPath } from "./navigation";
 import { SettingsRow } from "./settings-row";
 import { SettingsScreen } from "./settings-screen";
 
@@ -106,7 +106,7 @@ it("opens every registered destination from the grouped root without a Settings 
   ]);
   for (const destination of settingsDestinations) {
     fireEvent.click(screen.getByRole("button", { name: destination.label }));
-    expect(h.push).toHaveBeenLastCalledWith(`/settings/${destination.id}`);
+    expect(h.push).toHaveBeenLastCalledWith(settingsPath(destination.id));
   }
   expect(screen.queryByRole("tablist")).toBeNull();
   expect(screen.queryByRole("button", { name: "About" })).toBeNull();

@@ -25,6 +25,7 @@ function setup(scopes: AccessScope[] = ["finances:read", "finances:write", "fina
     previewBudgetStart: vi.fn(async () => ({ id })),
     getBudgetStartPreview: vi.fn(async () => ({ id })),
     applyBudgetStart: vi.fn(async () => ({ revision: 1 })),
+    declineBudgetStartPreview: vi.fn(async () => ({ kind: "budget_start_preview", id })),
   };
   const opening = {
     readOpeningPosition: vi.fn(async () => ({ qualified: false })),
@@ -57,6 +58,22 @@ describe("Finance attention API", () => {
     const f = setup();
     expect((await f.app.request("/v1/finances/opening-position?month=2026-99")).status).toBe(400);
     expect(f.opening.readOpeningPosition).not.toHaveBeenCalled();
+  });
+  it("passes a starting-month decline to the service and requires write access", async () => {
+    const post = { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" };
+    const f = setup();
+    const response = await f.app.request(`/v1/finances/budget-start/previews/${id}/decline`, post);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(f.attention.declineBudgetStartPreview).toHaveBeenCalledWith(
+      { principal: f.principal, requestId: "attention-test" },
+      id,
+    );
+    const denied = setup(["finances:read"]);
+    expect(
+      (await denied.app.request(`/v1/finances/budget-start/previews/${id}/decline`, post)).status,
+    ).toBe(403);
+    expect(denied.attention.declineBudgetStartPreview).not.toHaveBeenCalled();
   });
   it("requires maintain and write for durable source refresh", async () => {
     const input = {

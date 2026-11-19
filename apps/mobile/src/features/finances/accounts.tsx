@@ -1,11 +1,22 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
+import { View } from "react-native";
+import { ConnectBank } from "./bank-link";
+import { csvFed } from "./csv-import";
 import { useFinanceRead } from "./data";
 import { InstitutionLogo } from "./institution-logo";
 import { formatMoney } from "./presentation";
-import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Segments } from "./ui";
+import {
+  Card,
+  Copy,
+  FinanceFloatingAdd,
+  FinanceRow,
+  FinanceScreen,
+  ReadState,
+  Segments,
+} from "./ui";
 
-export function FinanceAccountsScreen() {
+function AccountList() {
   const [tab, setTab] = useState<"Cash" | "Investments" | "Debt" | "Other">("Cash");
   const { accountSearch = "" } = useLocalSearchParams<{ accountSearch?: string }>();
   const search = accountSearch.trim();
@@ -20,7 +31,7 @@ export function FinanceAccountsScreen() {
   if (query.data?.accounts.some((account) => account.kind === "other") || tab === "Other")
     options.push("Other");
   return (
-    <FinanceScreen title="Accounts">
+    <FinanceScreen title="Accounts" tabBar>
       <Segments value={tab} options={options} onChange={setTab} />
       <ReadState query={query}>
         {!visible.length && (
@@ -43,18 +54,24 @@ export function FinanceAccountsScreen() {
                 subtitle={[
                   account.institution,
                   account.accountMask ? `••${account.accountMask}` : null,
-                  account.status === "needs_reauth"
-                    ? "Reconnect needed"
-                    : account.status === "manual"
-                      ? "Manual"
-                      : account.lastSyncedAt
-                        ? `Updated ${new Date(account.lastSyncedAt).toLocaleDateString()}`
-                        : "Not synced",
+                  csvFed(account)
+                    ? "CSV imports"
+                    : account.status === "needs_reauth"
+                      ? "Reconnect needed"
+                      : account.status === "manual"
+                        ? "Manual"
+                        : account.lastSyncedAt
+                          ? `Updated ${new Date(account.lastSyncedAt).toLocaleDateString()}`
+                          : "Not synced",
                   !account.includeInPlanning ? "Excluded from planning" : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
-                value={formatMoney(account.balance, account.currencyCode)}
+                value={
+                  csvFed(account) && account.balance == null
+                    ? "Not set"
+                    : formatMoney(account.balance, account.currencyCode)
+                }
                 leading={<InstitutionLogo account={account} />}
                 onPress={() =>
                   router.push({ pathname: "/finance-account", params: { id: account.id } })
@@ -64,6 +81,19 @@ export function FinanceAccountsScreen() {
           </Card>
         )}
       </ReadState>
+      <ConnectBank />
+      <View style={{ height: 80 }} />
     </FinanceScreen>
+  );
+}
+export function FinanceAccountsScreen() {
+  return (
+    <View style={{ flex: 1 }}>
+      <AccountList />
+      <FinanceFloatingAdd
+        label="Add account"
+        onPress={() => router.push("/finance-account-edit")}
+      />
+    </View>
   );
 }

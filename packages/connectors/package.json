@@ -16,7 +16,7 @@
   "dependencies": {
     "@personal-os/domain": "workspace:*",
     "ical.js": "^2.2.1",
-    "imapflow": "^1.7.0",
+    "imapflow": "^2.12.1",
     "mailparser": "^3.9.23",
     "nodemailer": "10.1.4",
     "tsdav": "^2.3.1",

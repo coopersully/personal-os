@@ -17,6 +17,7 @@ import {
   CardTitle,
 } from "../../components/ui/card.js";
 import { Skeleton } from "../../components/ui/skeleton.js";
+import { RitualBreathing } from "./ritual-breathing.js";
 import { RitualChecklist } from "./ritual-overlay.js";
 import { ritualClock, ritualTargetLine } from "./ritual-ready-card.js";
 import { ritualCommitments, ritualEvents } from "./ritual-today.js";
@@ -142,6 +143,7 @@ export function RitualDashboard({
       </header>
       <div className="ritual-dashboard__body">
         <section aria-label="Today" className="ritual-dashboard__today">
+          {occurrence.definition.kind === "morning" ? <RitualBreathing /> : null}
           <TodayList
             title="Schedule"
             empty="Nothing else scheduled today"

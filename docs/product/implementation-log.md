@@ -10,6 +10,9 @@
   schedule, overdue and due-today tasks and reminders, and the ritual steps as one panel with
   streak and seven-day strip. Minimize or Escape returns to the card. The browser no longer
   offers Snooze, and Skip for Today takes one confirmation instead of a 30-second hold.
+- The morning dashboard has an optional guided breathing minute (four rounds of in 4 s, hold 4 s,
+  out 6 s) that is not recorded. The sky behind the card and the dashboard is blurred more
+  strongly than the checklist sky.
 - `targetTime` is an optional field on the ritual definition, stored in the existing definition
   JSON with no migration. Web settings edit it; an iPhone save carries it through unchanged.
 - Not changed: the macOS desktop presentation still fills the primary display with Snooze and

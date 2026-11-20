@@ -154,6 +154,7 @@ it("rests as a card that leaves the page usable and opens only when asked", asyn
   expect(screen.getByRole("checkbox", { name: "Drink water" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "3-day morning streak" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Schedule" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Start breathing exercise" })).toBeInTheDocument();
   expect(screen.getByText("Standup")).toBeInTheDocument();
   expect(screen.getByText("File taxes")).toBeInTheDocument();
   expect(screen.getByText("Overdue")).toBeInTheDocument();
@@ -475,6 +476,7 @@ it("presents the evening ritual by its product name without a target line when n
   expect(await screen.findByRole("dialog", { name: "Evening ritual" })).toBeInTheDocument();
   expect(screen.queryByText(/(until|past|Right at) 9:00 AM/)).not.toBeInTheDocument();
   expect(screen.getByText("All day")).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Breathe" })).not.toBeInTheDocument();
   expect(screen.getByText("Today")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Minimize" }));
   expect(await screen.findByText("1 task due · 0 of 1 steps done")).toBeInTheDocument();

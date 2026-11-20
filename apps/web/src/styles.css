@@ -7096,7 +7096,7 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   /* The narrow dock owns the bottom edge. */
   .ritual-ready-card { --ritual-card-inset-bottom: calc(5.5rem + env(safe-area-inset-bottom)); }
 }
-.ritual-ready-card .ritual-scene { position: absolute; filter: blur(10px); scale: 1.25; }
+.ritual-ready-card .ritual-scene { position: absolute; filter: blur(18px); scale: 1.4; }
 .ritual-ready-card__content {
   position: relative;
   z-index: 1;
@@ -7123,6 +7123,8 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   overflow: hidden;
   text-align: left;
 }
+/* Softer than the checklist sky so the dashboard's cards read first; scaled to hide the blur's edge. */
+.ritual-dashboard-surface .ritual-scene { filter: blur(8px); scale: 1.08; }
 .ritual-dashboard {
   position: relative;
   z-index: 1;

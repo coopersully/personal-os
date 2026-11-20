@@ -336,6 +336,9 @@ arrow keys; the placement is remembered on that device.
 Opening the card expands its sky to fill the viewport and shows the ritual dashboard: the time,
 date, target distance and weather, today's remaining schedule, the tasks and reminders that are
 overdue or due today, and the ritual's own steps as one panel with its streak and seven-day strip.
+The morning dashboard also offers Breathe: an optional guided minute of four rounds — in for four
+seconds, hold for four, out for six — with an expanding and settling circle, a countdown, and the
+phase announced once to assistive technology. It is never recorded and never gates completion.
 Minimize, or Escape, returns to the card and changes nothing on the account; minimizing replaces
 snooze. Completing or skipping settles the occurrence and removes the card. Today's facts are
 supplementary: when they cannot be loaded the card shows no count and the dashboard offers a retry,

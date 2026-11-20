@@ -406,6 +406,12 @@ test("browser rituals preserve the current page and save real answers and option
     await expect(ritual.getByRole("button", { name: "0-day morning streak" })).toBeVisible();
     await expect(ritual.getByRole("heading", { name: "Schedule" })).toBeVisible();
     await expect(ritual.getByRole("heading", { name: "Tasks and reminders" })).toBeVisible();
+    // The morning dashboard offers an optional guided breathing minute that records nothing.
+    await ritual.getByRole("button", { name: "Start breathing exercise" }).click();
+    await expect(ritual.getByText("Breathe in", { exact: true })).toBeVisible();
+    await expect(ritual.getByText("Round 1 of 4")).toBeVisible();
+    await ritual.getByRole("button", { name: "Stop breathing exercise" }).click();
+    await expect(ritual.getByText("In, hold, out")).toBeVisible();
     await expect(ritual.getByRole("button", { name: "Snooze" })).toHaveCount(0);
     await page.keyboard.press("Control+k");
     await expect(page.getByRole("dialog")).toHaveCount(1);

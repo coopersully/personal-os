@@ -491,7 +491,7 @@ it("locks dependent schedule fields until the ritual is enabled and keeps their 
   expect(reminder).toBeDisabled();
   expect(
     screen.getByLabelText(
-      "Turn on Enable morning ritual to change its schedule and reminder time.",
+      "Turn on Enable morning ritual to change its schedule, target, and reminder time.",
     ),
   ).toHaveAttribute("tabindex", "0");
   fireEvent.click(toggle);
@@ -500,6 +500,27 @@ it("locks dependent schedule fields until the ritual is enabled and keeps their 
   fireEvent.click(toggle);
   expect(time).toBeDisabled();
   expect(time).toHaveValue("06:00");
+});
+
+it("saves a chosen target time and omits it again once cleared", async () => {
+  mocks.list.mockResolvedValue({ rituals: [] });
+  mocks.save.mockImplementation(async (input) => ({ ...input, id: input.kind, revision: 1 }));
+  openSubpage("morning");
+  fireEvent.click(await screen.findByRole("switch", { name: "Enable morning ritual" }));
+  const target = screen.getByLabelText("Target time");
+  expect(target).toHaveValue("");
+  fireEvent.change(target, { target: { value: "09:00" } });
+  await waitFor(() =>
+    expect(mocks.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: true, targetTime: "09:00" }),
+    ),
+  );
+  fireEvent.change(target, { target: { value: "" } });
+  await waitFor(() =>
+    expect(mocks.save).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ targetTime: expect.anything() }),
+    ),
+  );
 });
 
 it("offers recovery when definitions fail without blocking the independent history collection", async () => {

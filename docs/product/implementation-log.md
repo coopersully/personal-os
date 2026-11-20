@@ -1,5 +1,24 @@
 # nohmi — Implementation Log
 
+## 2026-11-20 — Browser rituals as a resting card and today dashboard (not merged)
+
+- COO-269 — In the browser a due ritual no longer covers the page. It rests as a card with a
+  blurred ritual sky, the count of tasks and reminders due, step progress, the next event, the
+  time, and the distance from a new optional target time. The card moves between eight anchors by
+  drag or arrow keys and remembers its place in that browser.
+- Opening the card expands the sky into a full-viewport dashboard: weather, today's remaining
+  schedule, overdue and due-today tasks and reminders, and the ritual steps as one panel with
+  streak and seven-day strip. Minimize or Escape returns to the card. The browser no longer
+  offers Snooze, and Skip for Today takes one confirmation instead of a 30-second hold.
+- `targetTime` is an optional field on the ritual definition, stored in the existing definition
+  JSON with no migration. Web settings edit it; an iPhone save carries it through unchanged.
+- Not changed: the macOS desktop presentation still fills the primary display with Snooze and
+  the hold-to-skip (COO-270). There is no Slack connection (COO-272), and the dashboard has no
+  Mail or Finances panel. Server snooze rules are unchanged and still apply to desktop.
+- Focused domain and web tests, lint and type checking passed, and the browser ritual end-to-end
+  tests passed on desktop and mobile Chromium against a local server. The full `pnpm verify`
+  has not been run, and this is not a production release.
+
 ## 2026-11-18 — Agent-managed memory foundation (PR #419, not merged)
 
 - COO-166, COO-167 — Agents manage memory and the person is the override, per the

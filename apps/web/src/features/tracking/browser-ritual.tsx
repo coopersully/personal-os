@@ -5,23 +5,31 @@ import {
   ritualShouldPresent,
 } from "@personal-os/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { m } from "motion/react";
 import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { api } from "../../api.js";
 import { classifyMutationError } from "../../lib/feedback.js";
-import { RitualChecklist } from "./ritual-overlay.js";
+import { RitualDashboard } from "./ritual-dashboard.js";
+import { RitualReadyCard, ritualSkyLayoutId } from "./ritual-ready-card.js";
+import { ritualCommitments, ritualEvents } from "./ritual-today.js";
+import { RitualWeatherSky, useRitualWeather } from "./ritual-weather-sky.js";
 
 type Snapshot = { state: RitualState; receivedAt: number };
 const currentKey = (userId: string) => ["ritual-current", userId];
 
-/** The browser presents the real account occurrence; the native shell owns desktop delivery. */
+/**
+ * The browser presents the real account occurrence as a resting card that the person opens into a
+ * dashboard when ready; it never covers the page by itself. The native shell owns desktop delivery.
+ */
 export function BrowserRitual({ userId }: { userId: string }) {
   const cache = useQueryClient();
   const owner = useRef(userId);
   owner.current = userId;
   const active = useRef(false);
-  const previousFocus = useRef<HTMLElement | null>(null);
+  const card = useRef<HTMLButtonElement>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const errorToast = useId();
   const lastError = useRef<string | null>(null);
   const [, tick] = useState(0);
@@ -117,61 +125,92 @@ export function BrowserRitual({ userId }: { userId: string }) {
   const now = snapshot
     ? Date.parse(snapshot.state.serverNow) + Math.max(0, performance.now() - snapshot.receivedAt)
     : NaN;
-  if (
-    !snapshot ||
-    !current ||
-    !Number.isFinite(now) ||
-    !ritualShouldPresent(current, new Date(now).toISOString())
-  )
-    return null;
+  const presenting =
+    !!snapshot &&
+    !!current &&
+    Number.isFinite(now) &&
+    ritualShouldPresent(current, new Date(now).toISOString());
+  const open = presenting && expanded === current.id;
+  // Today's facts are supplementary: the ritual stays usable while they load or fail.
+  const brief = useQuery({
+    enabled: presenting,
+    queryFn: api.getDailyBrief,
+    queryKey: ["daily-brief", current?.timeZone],
+    refetchInterval: 60_000,
+  });
+  // Weather is decorative context read outside the query cache, like the sky itself, so a
+  // provider outage can never raise the app-wide recovery gate over a ritual.
+  const weather = useRitualWeather(presenting);
+  if (!presenting) return null;
+  const kind = current.definition.kind;
   return (
-    <Dialog open>
-      <DialogContent
-        showCloseButton={false}
-        className="ritual-fullscreen browser-ritual translate-x-0 translate-y-0"
-        onEscapeKeyDown={(event) => event.preventDefault()}
-        onKeyDown={(event) => {
-          // Keep app-wide shortcuts from opening a second editor above the ritual.
-          // Native copy/paste shortcuts still work because their default is preserved.
-          if (event.metaKey || event.ctrlKey) event.stopPropagation();
-        }}
-        onInteractOutside={(event) => event.preventDefault()}
-        onOpenAutoFocus={(event) => {
-          previousFocus.current =
-            document.activeElement instanceof HTMLElement ? document.activeElement : null;
-          const question = document.querySelector<HTMLElement>(
-            '[aria-label="Ritual questions"] [data-slot="card-content"] :is(button, input, textarea, select):not([disabled])',
-          );
-          if (question) {
-            event.preventDefault();
-            question.focus({ preventScroll: true });
+    <>
+      {open ? null : (
+        <RitualReadyCard
+          ref={card}
+          occurrence={current}
+          weather={weather}
+          now={now}
+          dueCount={brief.data ? ritualCommitments(brief.data, now).length : undefined}
+          nextEvent={
+            brief.data
+              ? ritualEvents(brief.data).find(
+                  (event) => !event.allDay && Date.parse(event.startsAt) > now,
+                )
+              : undefined
           }
-        }}
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          if (previousFocus.current?.isConnected)
-            previousFocus.current.focus({ preventScroll: true });
-        }}
-      >
-        <DialogTitle className="sr-only">
-          {current.definition.kind === "night" ? "Evening ritual" : "Morning ritual"}
-        </DialogTitle>
-        <DialogDescription className="sr-only">
-          Complete, snooze, or skip your ritual to return to your page.
-        </DialogDescription>
-        <div className="ritual-surface" data-ritual-kind={current.definition.kind}>
-          <div className="flex max-h-full min-h-0 w-full max-w-lg flex-col items-center">
-            <RitualChecklist
-              key={`${userId}:${current.id}`}
+          onOpen={() => setExpanded(current.id)}
+        />
+      )}
+      <Dialog open={open} onOpenChange={(next) => !next && setExpanded(null)}>
+        <DialogContent
+          showCloseButton={false}
+          className="ritual-fullscreen browser-ritual translate-x-0 translate-y-0"
+          onKeyDown={(event) => {
+            // Keep app-wide shortcuts from opening a second editor above the ritual.
+            // Native copy/paste shortcuts still work because their default is preserved.
+            if (event.metaKey || event.ctrlKey) event.stopPropagation();
+          }}
+          onCloseAutoFocus={(event) => {
+            // The card remounts as the dashboard leaves; return focus to it once it exists.
+            event.preventDefault();
+            requestAnimationFrame(() => card.current?.focus({ preventScroll: true }));
+          }}
+        >
+          <DialogTitle className="sr-only">
+            {kind === "night" ? "Evening ritual" : "Morning ritual"}
+          </DialogTitle>
+          <DialogDescription className="sr-only">
+            Today’s schedule, tasks, and your ritual steps. Minimize to return to your page.
+          </DialogDescription>
+          <m.div
+            layout
+            layoutId={ritualSkyLayoutId}
+            className="ritual-surface ritual-dashboard-surface"
+            data-ritual-kind={kind}
+            style={{ borderRadius: 0 }}
+          >
+            <RitualWeatherSky
+              key={current.id}
+              occurrenceId={current.id}
+              kind={kind}
+              timeZone={current.timeZone}
+              observed={{ weather }}
+            />
+            <RitualDashboard
               state={snapshot.state}
+              now={now}
+              brief={brief}
+              weather={weather}
+              onMinimize={() => setExpanded(null)}
               saveResponse={(stepId, input) =>
                 response.mutateAsync({ id: current.id, stepId, input, user: userId })
               }
               act={(input) => action.mutateAsync({ id: current.id, input, user: userId })}
             />
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+          </m.div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

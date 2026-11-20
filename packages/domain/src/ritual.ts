@@ -39,6 +39,8 @@ export const ritualDefinitionInputSchema = z.object({
   enabled: z.boolean(),
   time: wallTime,
   reminderTime: wallTime.optional(),
+  // When the person aims to do the ritual; "Available from" stays the opening boundary.
+  targetTime: wallTime.optional(),
   timeZone: z
     .string()
     .max(100)
@@ -307,6 +309,35 @@ export function nextRitualReminderAt(
   return Date.parse(today) > Date.parse(now)
     ? today
     : boundary({ ...definition, time }, addLocalDays(date, 1));
+}
+
+/** The instant a person aims to do this occurrence; a target before its opening lands on the next day. */
+export function ritualTargetAt(
+  occurrence: Pick<RitualOccurrence, "definition" | "scheduledLocalDate" | "dueAt">,
+): string | null {
+  const { definition } = occurrence;
+  if (!definition.targetTime) return null;
+  const date = localDateAt(new Date(`${occurrence.scheduledLocalDate}T12:00:00Z`), "UTC");
+  const target = { ...definition, time: definition.targetTime };
+  const sameDay = boundary(target, date);
+  return Date.parse(sameDay) >= Date.parse(occurrence.dueAt)
+    ? sameDay
+    : boundary(target, addLocalDays(date, 1));
+}
+
+/** Whole minutes from the target to now: negative before it, positive once it has passed. */
+export function ritualTargetOffsetMinutes(targetAt: string, now: string): number {
+  return Math.trunc((Date.parse(now) - Date.parse(targetAt)) / 60000);
+}
+
+/** "20 min until 9:00 AM", "Right at 9:00 AM", or "1h 5m past 9:00 AM". */
+export function formatRitualTargetOffset(offsetMinutes: number, targetLabel: string): string {
+  if (offsetMinutes === 0) return `Right at ${targetLabel}`;
+  const minutes = Math.abs(offsetMinutes);
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  const duration = hours ? `${hours}h${rest ? ` ${rest}m` : ""}` : `${minutes} min`;
+  return `${duration} ${offsetMinutes > 0 ? "past" : "until"} ${targetLabel}`;
 }
 
 /** Counts consecutive completed scheduled days, leaving today's pending ritual open. */

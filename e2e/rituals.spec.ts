@@ -357,6 +357,7 @@ test("browser rituals preserve the current page and save real answers and option
         title: "Browser morning",
         enabled: true,
         time: "00:00",
+        targetTime: "00:00",
         timeZone: (await (await page.request.get("/v1/me")).json()).user.planningTimezone,
         steps: [
           { id: "water", label: "Drink browser water", kind: "checkbox" },
@@ -366,8 +367,28 @@ test("browser rituals preserve the current page and save real answers and option
     });
     expect(saved.ok()).toBe(true);
     const ritual = page.getByRole("dialog", { name: "Morning ritual", exact: true });
-    await expect(ritual).toBeVisible({ timeout: 15000 });
+    const card = page.getByRole("button", { name: "Open morning ritual" });
+    await expect(card).toBeVisible({ timeout: 15000 });
     await applyProductionStyles(page);
+    // The ritual rests as a card: the page behind it stays usable and nothing is modal.
+    await expect(ritual).toHaveCount(0);
+    await expect(page.getByText("Your morning ritual is ready")).toBeVisible();
+    await expect(page.getByText(/past 12:00 AM/)).toBeVisible();
+    await search.fill("calendars");
+    await search.fill("calendar");
+    const resting = page.locator(".ritual-ready-card");
+    await expect(resting).toHaveAttribute("data-anchor", "4");
+    await card.focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect(resting).toHaveAttribute("data-anchor", "5");
+    await page.keyboard.press("ArrowRight");
+    await expect(resting).toHaveAttribute("data-anchor", "4");
+    await page.screenshot({
+      path: test.info().outputPath("browser-ritual-card.png"),
+      animations: "disabled",
+    });
+    await card.click();
+    await expect(ritual).toBeVisible();
     await expect
       .poll(async () => {
         const bounds = await ritual.boundingBox();
@@ -383,17 +404,26 @@ test("browser rituals preserve the current page and save real answers and option
       })
       .toBe(true);
     await expect(ritual.getByRole("button", { name: "0-day morning streak" })).toBeVisible();
+    await expect(ritual.getByRole("heading", { name: "Schedule" })).toBeVisible();
+    await expect(ritual.getByRole("heading", { name: "Tasks and reminders" })).toBeVisible();
+    await expect(ritual.getByRole("button", { name: "Snooze" })).toHaveCount(0);
     await page.keyboard.press("Control+k");
     await expect(page.getByRole("dialog")).toHaveCount(1);
-    await expect(ritual).toBeVisible();
+    // Escape and Minimize both return to the card instead of trapping the person.
     await page.keyboard.press("Escape");
+    await expect(ritual).toHaveCount(0);
+    await expect(card).toBeFocused();
+    await page.keyboard.press("Enter");
     await expect(ritual).toBeVisible();
+    await ritual.getByRole("button", { name: "Minimize" }).click();
+    await expect(ritual).toHaveCount(0);
+    await card.click();
     await ritual.getByRole("button", { name: "Skip for Today" }).click();
-    await expect(ritual.getByRole("region", { name: "Confirm skip" })).toBeVisible();
-    await expect(ritual.getByRole("region", { name: "Ritual progress" })).toHaveCount(0);
-    await expect(ritual.getByText("Saved to your account", { exact: true })).toHaveCount(0);
-    await page.keyboard.press("Escape");
-    await expect(ritual.getByRole("region", { name: "Confirm skip" })).toHaveCount(0);
+    const skip = page.getByRole("dialog", { name: "Skip today’s ritual?" });
+    await expect(skip).toBeVisible();
+    await expect(page.getByRole("button", { name: /Hold to skip/ })).toHaveCount(0);
+    await skip.getByRole("button", { name: "Cancel" }).click();
+    await expect(skip).toHaveCount(0);
     await expect(ritual.getByRole("region", { name: "Past 7 ritual days" })).toBeVisible();
     await page.screenshot({
       path: test.info().outputPath("browser-ritual.png"),
@@ -427,7 +457,7 @@ test("browser rituals preserve the current page and save real answers and option
   }
 });
 
-test("browser snooze survives reload and another client can settle the same ritual", async ({
+test("a minimized browser ritual survives reload, another client can settle it, and skip takes one confirmation", async ({
   page,
   cleanup,
 }) => {
@@ -458,51 +488,32 @@ test("browser snooze survives reload and another client can settle the same ritu
     });
     expect(saved.ok()).toBe(true);
     const ritual = page.getByRole("dialog", { name: "Evening ritual", exact: true });
-    await expect(ritual).toBeVisible({ timeout: 15000 });
-    await expect
-      .poll(async () => {
-        const bounds = await ritual.boundingBox();
-        const viewport = page.viewportSize();
-        return (
-          !!bounds &&
-          !!viewport &&
-          Math.abs(bounds.x) <= 1 &&
-          Math.abs(bounds.y) <= 1 &&
-          Math.abs(bounds.width - viewport.width) <= 1 &&
-          Math.abs(bounds.height - viewport.height) <= 1
-        );
-      })
-      .toBe(true);
+    const card = page.getByRole("button", { name: "Open evening ritual" });
+    await expect(card).toBeVisible({ timeout: 15000 });
     await applyProductionStyles(page);
     for (const size of [
       { width: 1440, height: 1000 },
       { width: 320, height: 568 },
     ]) {
       await page.setViewportSize(size);
-      for (const name of ["Snooze", "Skip for Today"]) {
-        const escapeButton = ritual.getByRole("button", { name, exact: true });
-        await expect(
-          ritual.locator(".ritual-card").getByRole("button", { name, exact: true }),
-        ).toHaveCount(1);
-        await expect(escapeButton).toBeInViewport({ ratio: 1 });
-        await escapeButton.click({ trial: true });
+      await expect(card).toBeInViewport({ ratio: 1 });
+      await card.click();
+      for (const name of ["Minimize", "Skip for Today"]) {
+        const control = ritual.getByRole("button", { name, exact: true });
+        await control.scrollIntoViewIfNeeded();
+        await control.click({ trial: true });
       }
+      await ritual.getByRole("button", { name: "Minimize", exact: true }).click();
+      await expect(ritual).toHaveCount(0);
     }
-    await ritual.getByRole("button", { name: "Snooze", exact: true }).click();
-    await expect
-      .poll(async () => {
-        const response = await page.request.get("/v1/rituals/current");
-        expect(response.ok()).toBe(true);
-        const state = await response.json();
-        return Date.parse(state.current?.snoozedUntil) > Date.parse(state.serverNow);
-      })
-      .toBe(true);
-    await expect(ritual).toHaveCount(0);
+    // Minimizing is local presentation: the occurrence stays pending and is never snoozed.
     await page.reload();
     await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
+    await expect(card).toBeVisible({ timeout: 15000 });
     await expect(ritual).toHaveCount(0);
     const current = await (await page.request.get("/v1/rituals/current")).json();
-    expect(Date.parse(current.current.snoozedUntil)).toBeGreaterThan(Date.parse(current.serverNow));
+    expect(current.current.status).toBe("pending");
+    expect(current.current.snoozedUntil).toBeNull();
     const complete = await page.request.post(
       `/v1/rituals/occurrences/${current.current.id}/actions`,
       {
@@ -520,5 +531,35 @@ test("browser snooze survives reload and another client can settle the same ritu
     await page.reload();
     await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
     await expect(ritual).toHaveCount(0);
+    await expect(card).toHaveCount(0);
+    // A fresh occurrence is skipped with one ordinary confirmation.
+    await page.request.delete("/v1/rituals/night/data");
+    const again = await page.request.put("/v1/rituals/night", {
+      data: {
+        requestId: crypto.randomUUID(),
+        deviceId: "browser-acceptance",
+        expectedRevision: 0,
+        kind: "night",
+        title: "Browser evening",
+        enabled: true,
+        time: "00:01",
+        timeZone: (await (await page.request.get("/v1/me")).json()).user.planningTimezone,
+        steps: [{ id: "reflect", label: "Evening reflection", kind: "checkbox", optional: true }],
+      },
+    });
+    expect(again.ok()).toBe(true);
+    await page.reload();
+    await expect(card).toBeVisible({ timeout: 15000 });
+    await card.click();
+    await ritual.getByRole("button", { name: "Skip for Today" }).click();
+    await page
+      .getByRole("dialog", { name: "Skip today’s ritual?" })
+      .getByRole("button", { name: "Skip for Today" })
+      .click();
+    await expect(ritual).toHaveCount(0);
+    await expect(card).toHaveCount(0);
+    expect((await (await page.request.get("/v1/rituals/current")).json()).current.status).toBe(
+      "skipped",
+    );
   }
 });

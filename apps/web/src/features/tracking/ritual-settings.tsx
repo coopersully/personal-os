@@ -146,6 +146,8 @@ function initialDraft(
         : (definition?.title ?? `Good ${kind === "morning" ? "morning" : "evening"}`),
     enabled: definition?.enabled ?? false,
     reminderTime: defaultRitualReminderTime(definition ?? { kind }),
+    // Empty means no target; the schema field is omitted rather than saved blank.
+    targetTime: definition?.targetTime ?? "",
     time: definition?.time ?? (kind === "morning" ? "06:00" : "21:00"),
     timeZone,
     steps: definition?.steps ?? [
@@ -153,6 +155,11 @@ function initialDraft(
       { id: crypto.randomUUID(), label: "Journal", kind: "short_text" as const },
     ],
   };
+}
+/** A blank target is "not set", which the contract expresses by omission. */
+function withoutBlankTarget<T extends { targetTime: string }>(draft: T) {
+  const { targetTime, ...rest } = draft;
+  return targetTime ? { ...rest, targetTime } : rest;
 }
 function RitualForm({
   kind,
@@ -200,6 +207,7 @@ function RitualForm({
         "enabled",
         "time",
         "reminderTime",
+        "targetTime",
         "timeZone",
         "steps",
       ] as const) {
@@ -224,7 +232,7 @@ function RitualForm({
   const serialized = JSON.stringify(draft);
   const dirty = serialized !== saved.current;
   const input = ritualDefinitionInputSchema.safeParse({
-    ...draft,
+    ...withoutBlankTarget(draft),
     requestId: crypto.randomUUID(),
     deviceId: ritualDeviceId(),
     expectedRevision: revision.current,
@@ -232,7 +240,7 @@ function RitualForm({
   useEffect(() => {
     if (!dirty || busy || error) return;
     const value = ritualDefinitionInputSchema.safeParse({
-      ...JSON.parse(serialized),
+      ...withoutBlankTarget(JSON.parse(serialized) as typeof draft),
       requestId: crypto.randomUUID(),
       deviceId: ritualDeviceId(),
       expectedRevision: revision.current,
@@ -305,7 +313,7 @@ function RitualForm({
     patch({ steps });
   }
   const previewDefinition: RitualDefinition = {
-    ...draft,
+    ...withoutBlankTarget(draft),
     id: definition?.id ?? `preview-${kind}`,
     revision: revision.current || 1,
     enabledAt: definition?.enabledAt ?? new Date().toISOString(),
@@ -361,8 +369,12 @@ function RitualForm({
             }
             description={
               kind === "morning"
-                ? "Start your day with intention. At your chosen time, the ritual covers your screen and guides you through your steps before you continue. You can snooze or skip when needed."
-                : "Wind down and prepare for tomorrow. At your chosen time, the ritual covers your screen for a moment of reflection and your evening steps. You can snooze or skip when needed."
+                ? isDesktop()
+                  ? "Start your day with intention. At your chosen time, the ritual covers your screen and guides you through your steps before you continue. You can snooze or skip when needed."
+                  : "Start your day with intention. From your chosen time, a ritual card waits for you and opens into your day and your steps when you are ready. You can minimize or skip it."
+                : isDesktop()
+                  ? "Wind down and prepare for tomorrow. At your chosen time, the ritual covers your screen for a moment of reflection and your evening steps. You can snooze or skip when needed."
+                  : "Wind down and prepare for tomorrow. From your chosen time, a ritual card waits for you and opens into your day and your evening steps when you are ready. You can minimize or skip it."
             }
           >
             <FieldGroup>
@@ -378,7 +390,7 @@ function RitualForm({
               </Field>
               <DependentSetting
                 enabled={draft.enabled}
-                reason={`Turn on Enable ${label.toLowerCase()} ritual to change its schedule and reminder time.`}
+                reason={`Turn on Enable ${label.toLowerCase()} ritual to change its schedule, target, and reminder time.`}
               >
                 <Field>
                   <FieldLabel htmlFor={`${kind}-time`}>Available from</FieldLabel>
@@ -390,6 +402,19 @@ function RitualForm({
                     onChange={(e) => patch({ time: e.target.value })}
                   />
                   <FieldDescription>Stays available until you complete or skip it</FieldDescription>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor={`${kind}-target-time`}>Target time</FieldLabel>
+                  <Input
+                    id={`${kind}-target-time`}
+                    type="time"
+                    disabled={!draft.enabled}
+                    value={draft.targetTime}
+                    onChange={(event) => patch({ targetTime: event.target.value })}
+                  />
+                  <FieldDescription>
+                    When you aim to do it. The ritual shows how far you are from this time
+                  </FieldDescription>
                 </Field>
                 <Field>
                   <FieldLabel htmlFor={`${kind}-reminder-time`}>{label} reminder time</FieldLabel>

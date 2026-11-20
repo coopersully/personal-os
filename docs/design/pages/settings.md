@@ -424,12 +424,13 @@ clears its toast. Quiet-hour From and Until controls share a row on larger scree
 
 ## Ritual step configuration
 
-Enabled rituals run automatically over the person's current page while the signed-in browser
-app is open. Keep this capability clear in the Ritual view description. The browser uses real
-account state; the explicit Show ritual preview remains a separate, non-recording preview.
-Browser presentation preserves the underlying page and traps focus until completion, snoozing,
-skipping, expiry, or settlement from another client; it does not appear in sign-in or setup. Browser
-secondary controls use readable theme foreground over a tinted blurred backdrop; native ambient
+Enabled rituals appear as a resting ritual card over the person's current page while the
+signed-in browser app is open. Keep this capability clear in the Ritual view description. The
+browser uses real account state; the explicit Show ritual preview remains a separate,
+non-recording preview. The card never traps focus or opens by itself; it does not appear in
+sign-in or setup. Opening it shows the ritual dashboard as a full-viewport dialog whose Minimize
+action and Escape both return to the card and restore focus to it. Schedule settings include an
+optional Target time beside Available from; leaving it empty saves no target. Native ambient
 chrome remains separate because its wallpaper treatment has different contrast conditions.
 
 The immediate job is to define a realistic morning or evening checklist. Keep the ordered steps
@@ -638,8 +639,10 @@ is off. Disable editing, fade the controls and labels, and provide a keyboard-
 accessible tooltip naming the prerequisite and how to enable it. Never imply
 that a disabled dependency is missing configuration or silently clear it.
 
-Ritual overview headers explain that the ritual covers the screen at its scheduled
-time, its morning/evening purpose, and the available snooze/skip escape. Show the
+Ritual overview headers explain that a ritual card waits from the chosen time and opens
+into the day and the steps when the person is ready, its morning/evening purpose, and that it
+can be minimized or skipped. The desktop app keeps its cover-the-screen wording until its
+card ships. Show the
 current streak and seven dated completion indicators using the shared domain logic.
 Call the editable collection “Steps,” because it includes actions and questions,
 not only checkboxes. The bottom navigation row opens the routine's Steps subpage.
@@ -906,10 +909,13 @@ sky scene in every weather state, including browser/native routines and thumbnai
 question card, logo, and controls outside the filtered layer.
 
 
-Scheduled browser routines and full previews always fill the viewport on desktop and mobile;
-they do not use the shared centered modal or bottom drawer presentation. Keep focus trapped
-until a routine action returns to the underlying page, preserving its drafts. Previews retain
-their Close Preview action and Escape dismissal. Snooze and skip decisions use the same bounded,
+An opened browser ritual dashboard and full previews always fill the viewport on desktop and
+mobile; they do not use the shared centered modal or bottom drawer presentation. The dashboard
+keeps focus inside until Minimize, Escape, completion or skip returns to the underlying page,
+preserving its drafts. Below 900 px the dashboard is one scrolling column with the ritual steps
+first, and the resting card clears the bottom dock. The card-to-dashboard expansion is one shared
+layout transition of the sky; reduced motion swaps the two states without movement. Previews
+retain their Close Preview action and Escape dismissal. Snooze and skip decisions use the same bounded,
 opaque shared Card as the checklist. Moving between these screens uses a brief 240 ms fade and
 8 px vertical entry with no delayed child stagger; reduced motion is static. Keep the background
 and logo mounted, retain answers, and do not restart a skip hold when background state polling

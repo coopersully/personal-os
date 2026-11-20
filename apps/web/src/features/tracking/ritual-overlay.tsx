@@ -15,6 +15,7 @@ import {
 import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { PersonalOsBrandMark } from "../../components/brand-marks.js";
+import { useConfirmAction } from "../../components/confirm-action.js";
 import {
   AlertTriangleIcon,
   CheckIcon,
@@ -159,10 +160,13 @@ export function RitualChecklist({
   saveResponse,
   act,
   preview = false,
+  panel = false,
   onPreviewDateChange,
 }: {
   state: RitualState;
   preview?: boolean;
+  /** One panel of the browser dashboard: the dashboard owns the sky, and minimizing replaces snooze. */
+  panel?: boolean;
   onPreviewDateChange?: ((date: string) => void) | undefined;
   saveResponse: (stepId: string, input: RitualResponseInput) => Promise<RitualState>;
   act: (input: RitualActionInput) => Promise<RitualActionResult>;
@@ -172,6 +176,7 @@ export function RitualChecklist({
   const [hasFailedSave, setHasFailedSave] = useState(false);
   const [confirmSkip, setConfirmSkip] = useState(false);
   const [confirmComplete, setConfirmComplete] = useState(false);
+  const { confirm, confirmation } = useConfirmAction();
   const actionToast = useId();
   const completionHint = useId();
   const showError = (message: string) => toast.error(message, { id: actionToast });
@@ -523,7 +528,25 @@ export function RitualChecklist({
           ) : null}
         </>
       ) : null}
-      {!preview && mainScreen ? (
+      {!preview && mainScreen && panel ? (
+        <Button
+          variant="ghost"
+          disabled={busy || dirty}
+          onClick={() =>
+            confirm({
+              title: "Skip today’s ritual?",
+              description: state.streakCount
+                ? `Skipping ends your ${state.streakCount}-day streak. Today is recorded as skipped.`
+                : "Today is recorded as skipped.",
+              actionLabel: "Skip for Today",
+              onConfirm: () => void escapeRef.current("skip"),
+            })
+          }
+        >
+          Skip for Today
+        </Button>
+      ) : null}
+      {!preview && mainScreen && !panel ? (
         <div className="flex w-full gap-2">
           <Button
             variant="secondary"
@@ -546,10 +569,12 @@ export function RitualChecklist({
     </section>
   );
   const presentation = (
-    <div className="ritual-presentation">
-      <div className="ritual-logo">
-        <PersonalOsBrandMark symbol />
-      </div>
+    <div className={panel ? "ritual-presentation ritual-panel" : "ritual-presentation"}>
+      {panel ? null : (
+        <div className="ritual-logo">
+          <PersonalOsBrandMark symbol />
+        </div>
+      )}
       <h1 className="sr-only">{occurrence.definition.title}</h1>
       {!preview && mainScreen ? (
         <TooltipProvider>
@@ -825,6 +850,13 @@ export function RitualChecklist({
       ) : null}
     </div>
   );
+  if (panel)
+    return (
+      <>
+        {presentation}
+        {confirmation}
+      </>
+    );
   return (
     <>
       <RitualWeatherSky

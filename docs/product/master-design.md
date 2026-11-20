@@ -325,24 +325,39 @@ Knowledge rather than a separate top-level workspace.
 
 #### Morning and evening rituals
 
-Enabled rituals also present automatically inside the signed-in browser application. A due,
-unexpired, unsnoozed occurrence opens the shared checklist in a full-viewport ritual surface on
-desktop and mobile. Full previews use the same screen-filling presentation. The illustrated sky
-fills the surface behind a centered, readable checklist card; snooze and skip confirmations share
-that card treatment. Active rituals keep Snooze and Skip for Today as visible secondary buttons
-beneath Done in the card footer, disabled while answers are saving or unsaved. Preview keeps its
-explicit close action instead of these account actions. Keep the underlying page mounted and restore
-its focus when the ritual is completed, snoozed, skipped, or settled by another client. Escape and outside clicks do not bypass
-a scheduled ritual; previews retain their explicit close action. Authentication and standalone
-setup flows remain unobstructed; the desktop shell keeps its native presentation without a
-duplicate browser ritual. On macOS, the checklist fills the system primary display and adapts in
-place to display changes. Secondary displays share only the decorative weather background and
-brief guidance to continue on the main display; the sun and moon appear only on the main display.
+A due ritual is an invitation, not an interruption. From its “Available from” time, a due,
+unexpired, unsnoozed occurrence rests as a ritual card: a standard card over the person's current
+page that says the ritual is ready, how many tasks and reminders are due, step progress, the next
+event, the current time, and the distance from the ritual's target time (“1h 5m past 9:00 AM”).
+The card's background is a blurred copy of the ritual sky. It never opens by itself and never
+blocks the page behind it. The person can drag it to any of eight edge anchors or move it with the
+arrow keys; the placement is remembered on that device.
+
+Opening the card expands its sky to fill the viewport and shows the ritual dashboard: the time,
+date, target distance and weather, today's remaining schedule, the tasks and reminders that are
+overdue or due today, and the ritual's own steps as one panel with its streak and seven-day strip.
+Minimize, or Escape, returns to the card and changes nothing on the account; minimizing replaces
+snooze. Completing or skipping settles the occurrence and removes the card. Today's facts are
+supplementary: when they cannot be loaded the card shows no count and the dashboard offers a retry,
+while the steps stay usable. Authentication and standalone setup flows remain unobstructed.
+
+Each ritual has an optional target time, separate from “Available from”. A target earlier in the
+day than the opening time belongs to the following day, so an evening ritual that opens at 21:00
+can target 00:30. Without a target the card and dashboard show the time alone.
+
+The target for macOS is the same card in the desktop pet's place, with the pet on top, the pet's
+anchors, and a dashboard that hides the Dock while open. A Slack connection will add unread direct
+message and mention counts to the dashboard. Mail and Finances panels follow the mobile home
+screen. Until those ship, the desktop shell keeps its native presentation without a duplicate
+browser ritual: the checklist fills the system primary display and adapts in place to display
+changes, secondary displays share only the decorative weather background and brief guidance to
+continue on the main display, and Snooze and Skip for Today sit beneath Done. Full previews keep
+the screen-filling checklist with their explicit close action.
 
 The browser and desktop use the same account occurrence, revisions, answers, streaks, weekly
 progress, optional follow-ups, and snooze/skip policy. Browser writes require API acceptance and
-never claim to be queued offline. Refresh while visible and on focus/reconnection; recheck snooze
-and expiry using server time plus elapsed monotonic time. Read access denials and session expiry clear private state;
+never claim to be queued offline. Refresh while visible and on focus/reconnection; recheck expiry
+and a snooze applied on another client using server time plus elapsed monotonic time. Read access denials and session expiry clear private state;
 read outages use deduplicated Sonner feedback and retry. Browser presentation covers only the
 open nohmi tab, with no screen capture or control over other tabs/apps. Use the shared browser
 interface for rapid visual iteration, then smoke-test native presentation on macOS.
@@ -386,11 +401,12 @@ Queued local completions update the current day and remain labeled as waiting to
 cached weekly progress when offline advancement changes the current occurrence.
 
 
-“Skip for Today” first shows this ritual's applied skip count over the last 72 hours and warns
-when a streak will end. Require a continuous 30-second pointer or keyboard hold, with a visible
-countdown and progress fill, before submitting the skip. Release, pointer exit/cancellation,
-focus loss, tab visibility changes, or leaving confirmation resets the hold. The hold is an
-interaction safeguard in the shared web/desktop checklist, not an API authorization boundary.
+In the browser, “Skip for Today” asks for one ordinary confirmation that states when a streak
+will end, then records the skip. The desktop checklist still shows this ritual's applied skip
+count over the last 72 hours and requires a continuous 30-second pointer or keyboard hold, with a
+visible countdown and progress fill; release, pointer exit/cancellation, focus loss, tab
+visibility changes, or leaving confirmation resets the hold. Neither confirmation is an API
+authorization boundary, and the desktop hold is retired with its card redesign.
 Offline skip history is explicitly unavailable; cached streaks are labeled as last synchronized
 and are cleared when advancing to another occurrence.
 

@@ -34,7 +34,7 @@ async function grantedWeatherCoordinates(): Promise<WeatherCoordinates | undefin
 }
 
 /** Account weather reuses existing location consent or the saved location; it never requests permission. */
-function useRitualWeather(enabled: boolean) {
+export function useRitualWeather(enabled: boolean) {
   const [weather, setWeather] = useState<WeatherSnapshot>();
   useEffect(() => {
     if (!enabled) return;
@@ -137,13 +137,17 @@ export function RitualWeatherSky({
   timeZone = "UTC",
   thumbnail = false,
   occurrenceId,
+  observed,
 }: {
   kind: "morning" | "night";
   timeZone?: string;
   thumbnail?: boolean;
   occurrenceId?: string;
+  /** A caller that already reads ritual weather shares it, so the scene makes no second request. */
+  observed?: { weather: WeatherSnapshot | undefined };
 }) {
-  const weather = useRitualWeather(!thumbnail);
+  const own = useRitualWeather(!thumbnail && !observed);
+  const weather = observed ? observed.weather : own;
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     if (thumbnail) return;

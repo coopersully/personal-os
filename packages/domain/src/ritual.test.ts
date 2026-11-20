@@ -1,5 +1,6 @@
 import {
   currentRitualWindow,
+  formatRitualTargetOffset,
   type RitualOccurrence,
   type RitualStep,
   requiresSnoozeConfirmation,
@@ -8,6 +9,8 @@ import {
   ritualIsAnswered,
   ritualStepSchema,
   ritualStreakCount,
+  ritualTargetAt,
+  ritualTargetOffsetMinutes,
   upcomingRitualWindows,
 } from "./ritual.js";
 
@@ -365,5 +368,41 @@ describe("ritual presentation", () => {
         "2026-10-20T07:00:00Z",
       ),
     ).toBe(true);
+  });
+});
+
+describe("ritual target time", () => {
+  const occurrence = (time: string, targetTime?: string) => ({
+    definition: { ...definition("night", time), ...(targetTime ? { targetTime } : {}) },
+    scheduledLocalDate: "2026-09-29",
+    dueAt: "2026-09-30T01:00:00.000Z",
+  });
+  it("has no target until one is chosen and validates its format", () => {
+    expect(ritualTargetAt(occurrence("21:00"))).toBeNull();
+    const input = {
+      ...definition("morning"),
+      requestId: crypto.randomUUID(),
+      deviceId: "device",
+      expectedRevision: 0,
+    };
+    expect(ritualDefinitionInputSchema.safeParse({ ...input, targetTime: "09:00" }).success).toBe(
+      true,
+    );
+    expect(ritualDefinitionInputSchema.safeParse({ ...input, targetTime: "9am" }).success).toBe(
+      false,
+    );
+  });
+  it("resolves the target on the ritual's local date in its time zone", () =>
+    expect(ritualTargetAt(occurrence("21:00", "22:30"))).toBe("2026-09-30T02:30:00.000Z"));
+  it("moves a target earlier than the opening time to the next day", () =>
+    expect(ritualTargetAt(occurrence("21:00", "00:30"))).toBe("2026-09-30T04:30:00.000Z"));
+  it("measures and words the distance from the target", () => {
+    const target = "2026-09-30T02:30:00.000Z";
+    expect(ritualTargetOffsetMinutes(target, "2026-09-30T02:10:30.000Z")).toBe(-19);
+    expect(ritualTargetOffsetMinutes(target, "2026-09-30T03:35:00.000Z")).toBe(65);
+    expect(formatRitualTargetOffset(-20, "9:00 AM")).toBe("20 min until 9:00 AM");
+    expect(formatRitualTargetOffset(0, "9:00 AM")).toBe("Right at 9:00 AM");
+    expect(formatRitualTargetOffset(60, "9:00 AM")).toBe("1h past 9:00 AM");
+    expect(formatRitualTargetOffset(65, "9:00 AM")).toBe("1h 5m past 9:00 AM");
   });
 });

@@ -52,6 +52,8 @@ function initialDraft(kind: "morning" | "night", definition?: RitualDefinition) 
     enabled: definition?.enabled ?? false,
     time: definition?.time ?? (kind === "morning" ? "08:00" : "20:00"),
     reminderTime: definition?.reminderTime ?? "",
+    // Set on the web; carried through so a mobile save cannot clear it.
+    ...(definition?.targetTime ? { targetTime: definition.targetTime } : {}),
     steps: definition?.steps ?? [
       { id: randomUUID(), label: "Check in", kind: "checkbox" as const },
     ],

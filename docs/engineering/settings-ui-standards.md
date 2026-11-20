@@ -520,8 +520,10 @@ is off. Disable editing, fade the controls and labels, and provide a keyboard-
 accessible tooltip naming the prerequisite and how to enable it. Never imply
 that a disabled dependency is missing configuration or silently clear it.
 
-Ritual overview headers explain that the ritual covers the screen at its scheduled
-time, its morning/evening purpose, and the available snooze/skip escape. Show the
+Ritual overview headers explain that a ritual card waits from the chosen time and opens
+into the day and the steps when the person is ready, its morning/evening purpose, and that it
+can be minimized or skipped. The desktop app keeps its cover-the-screen wording until its
+card ships. Show the
 current streak and seven dated completion indicators using the shared domain logic.
 Call the editable collection “Steps,” because it includes actions and questions,
 not only checkboxes. The bottom navigation row opens the routine's Steps subpage.

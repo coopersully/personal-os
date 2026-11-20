@@ -7068,6 +7068,102 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   background: var(--ritual-sky);
 }
 
+/* Browser rituals rest as a card and open into a dashboard only when the person asks.
+   The blurred sky is the one sanctioned blur: it is the same illustration the opened ritual shows. */
+.ritual-ready-card {
+  position: fixed;
+  z-index: 40;
+  width: min(20rem, calc(100vw - 2rem));
+  isolation: isolate;
+  overflow: hidden;
+  background: var(--ritual-morning-sky);
+  color: var(--ritual-morning-content);
+  touch-action: none;
+  --ritual-card-inset: 1rem;
+  --ritual-card-inset-bottom: calc(1rem + env(safe-area-inset-bottom));
+}
+.ritual-ready-card[data-ritual-kind="night"] { background: var(--ritual-evening-sky); color: var(--ritual-evening-content); }
+.ritual-ready-card:has(.ritual-scene[data-sky-dark="true"]) { color: var(--ritual-evening-content); }
+.ritual-ready-card:has(.ritual-scene[data-sky-dark="false"]) { color: var(--ritual-morning-content); }
+.ritual-ready-card[data-dragging="true"] { cursor: grabbing; }
+.ritual-ready-card:is([data-anchor="0"], [data-anchor="6"], [data-anchor="7"]) { left: var(--ritual-card-inset); }
+.ritual-ready-card:is([data-anchor="2"], [data-anchor="3"], [data-anchor="4"]) { right: var(--ritual-card-inset); }
+.ritual-ready-card:is([data-anchor="1"], [data-anchor="5"]) { left: 0; right: 0; margin-inline: auto; }
+.ritual-ready-card:is([data-anchor="0"], [data-anchor="1"], [data-anchor="2"]) { top: var(--ritual-card-inset); }
+.ritual-ready-card:is([data-anchor="4"], [data-anchor="5"], [data-anchor="6"]) { bottom: var(--ritual-card-inset-bottom); }
+.ritual-ready-card:is([data-anchor="3"], [data-anchor="7"]) { top: 0; bottom: 0; margin-block: auto; height: fit-content; }
+@media (max-width: 899px) {
+  /* The narrow dock owns the bottom edge. */
+  .ritual-ready-card { --ritual-card-inset-bottom: calc(5.5rem + env(safe-area-inset-bottom)); }
+}
+.ritual-ready-card .ritual-scene { position: absolute; filter: blur(10px); scale: 1.25; }
+.ritual-ready-card__content {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.ritual-ready-card__content :is([data-slot="card-description"], .text-muted-foreground) { color: inherit; }
+.ritual-ready-card__open {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  cursor: pointer;
+}
+.ritual-ready-card__open:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+
+[data-slot="dialog-content"].ritual-fullscreen.browser-ritual { background: transparent; }
+.ritual-surface.ritual-dashboard-surface {
+  display: flex;
+  flex-direction: column;
+  place-items: stretch;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+}
+.ritual-dashboard {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: 100%;
+  max-width: 72rem;
+  min-height: 0;
+  margin-inline: auto;
+  padding: max(1.5rem, env(safe-area-inset-top)) 1.5rem max(1.5rem, env(safe-area-inset-bottom));
+  animation: ritual-chrome-enter 220ms ease-out 140ms backwards;
+}
+.ritual-dashboard__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--ritual-chrome);
+}
+.ritual-dashboard__body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 28rem);
+  gap: 1.25rem;
+  min-height: 0;
+}
+.ritual-dashboard__today { display: grid; grid-auto-rows: minmax(0, max-content); align-content: start; gap: 1.25rem; min-height: 0; }
+.ritual-dashboard__ritual { display: flex; min-height: 0; }
+.ritual-presentation.ritual-panel { max-width: none; max-height: 100%; }
+.ritual-panel .ritual-card, .ritual-panel .ritual-card.ritual-screen { animation: none; }
+@media (max-width: 899px) {
+  .ritual-dashboard { overflow-y: auto; padding-inline: 1rem; }
+  .ritual-dashboard__body { display: flex; flex: none; flex-direction: column; }
+  .ritual-dashboard__ritual { order: -1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ritual-dashboard { animation: none; }
+}
+
 .ritual-surface[data-ready="false"] { visibility: hidden; }
 .ritual-surface[data-ready="false"] .ritual-logo,
 .ritual-surface[data-ready="false"] .ritual-card,

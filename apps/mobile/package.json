@@ -8,6 +8,7 @@
     "@expo/ui": "~58.0.27",
     "@personal-os/api-client": "workspace:*",
     "@personal-os/domain": "workspace:*",
+    "@personal-os/web": "workspace:*",
     "@tanstack/react-query": "^5.101.2",
     "expo": "~58.0.23",
     "expo-asset": "~58.0.20",
@@ -38,22 +39,24 @@
     "sonner-native": "^0.27.0"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.5",
     "@types/react": "~19.3.0",
     "typescript": "~6.0.3"
   },
   "scripts": {
     "start": "expo start",
     "ios": "expo run:ios",
-    "web": "expo start --web",
+    "web": "node scripts/sync-web-public.mjs && expo start --web",
     "typecheck": "tsc --noEmit",
-    "export": "expo export --platform ios --platform web",
+    "export": "node scripts/sync-web-public.mjs && expo export --platform ios --platform web",
     "build:simulator": "node scripts/ios-build.mjs simulator",
     "archive": "node scripts/ios-build.mjs archive",
-    "build": "expo export --platform ios --platform web",
+    "build": "node scripts/sync-web-public.mjs && expo export --platform ios --platform web",
     "icon": "node scripts/generate-icon.mjs",
     "native:generate": "expo prebuild --platform ios",
     "upload": "node scripts/ios-build.mjs upload",
-    "icons": "tsx scripts/generate-navigation-icons.mjs && tsx scripts/generate-enum-menu-icons.mjs"
+    "icons": "tsx scripts/generate-navigation-icons.mjs && tsx scripts/generate-enum-menu-icons.mjs",
+    "export:web": "node scripts/sync-web-public.mjs && expo export --platform web"
   },
   "private": true
 }

@@ -115,7 +115,8 @@ const cases = [
       browser: true,
       desktop: true,
       containers: true,
-      changed_packages: ["@personal-os/ui", "@personal-os/web"],
+      // The Expo project hosts the shared web UI on its web target.
+      changed_packages: ["@personal-os/mobile", "@personal-os/ui", "@personal-os/web"],
     }),
   ],
   [
@@ -126,7 +127,7 @@ const cases = [
       browser: true,
       desktop: true,
       containers: true,
-      changed_packages: ["@personal-os/web"],
+      changed_packages: ["@personal-os/mobile", "@personal-os/web"],
     }),
   ],
   [

@@ -11,6 +11,8 @@ Share API/domain contracts, entity vocabulary, account preferences and product b
 Use native mobile presentation where it improves interaction; parity does not require identical
 layout. Follow the design system, feedback rules and account/record authority boundaries.
 Use theme tokens, shared atomic primitives and feature compositions instead of page-local copies.
+The Expo project's web target renders the shared web UI rather than these native screens; the
+[Expo web migration](../engineering/expo-web-migration.md) tracks moving web routing onto Expo Router.
 
 Use Apple's actual native tab bar on supported iOS, including system Liquid Glass, selection,
 dragging, labels and animation. Do not recreate it with a blurred custom bar. Native menus and

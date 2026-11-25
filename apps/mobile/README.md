@@ -8,7 +8,9 @@ plus category/notes editing, category budget limits and conversation sending. To
 Tasks and Finance reads with a time/weather hero and optional foreground location. Other workspace experiences
 retain their existing preview boundaries. Full Finance web parity (creation, approvals, imports and automation configuration)
 remains in progress.
-The existing web and Tauri desktop UI remain separate consumers of shared domain/API contracts.
+On web, this Expo project now renders the full nohmi web UI from `apps/web` instead of the native
+screens; Vite still builds the production PWA and the Tauri desktop UI. See the
+[Expo web migration](../../docs/engineering/expo-web-migration.md) for how that works and what remains.
 
 Sessions use SecureStore; domain reads stay in memory and writes require connectivity. Encrypted
 offline caching is not implemented in this increment. Signed builds claim nohmi record links on
@@ -30,7 +32,8 @@ From the repository root:
 ```sh
 pnpm install --frozen-lockfile
 pnpm --filter @personal-os/mobile start
-pnpm --filter @personal-os/mobile web
+pnpm --filter @personal-os/mobile web          # the shared web UI on Expo web
+pnpm --filter @personal-os/mobile export:web
 pnpm --filter @personal-os/mobile typecheck
 pnpm --filter @personal-os/mobile export
 ```

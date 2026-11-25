@@ -30,6 +30,7 @@ describe("Finance reimbursement credit candidates", () => {
           credit("transfer-in", { category: "TRANSFER_IN" }),
           credit("transfer-out", { category: "TRANSFER_OUT" }),
           credit("income", { category: "INCOME" }),
+          credit("ledger-income", { category: "Income" }),
           credit("salary", { merchant: "Payroll deposit" }),
           credit("unrelated", { merchant: "Grocery store" }),
           credit("payer-match", { merchant: "Venmo Alex" }),

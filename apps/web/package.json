@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./expo-host": {
+      "types": "./types/expo-host.d.ts",
+      "default": "./src/expo-host.tsx"
+    }
+  },
   "scripts": {
     "build": "pnpm public:generate && vite build",
     "dev": "pnpm public:generate && vite --host 0.0.0.0",

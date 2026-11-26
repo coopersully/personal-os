@@ -239,6 +239,8 @@ describe("Finance service deterministic helpers", () => {
       ({ amount: 2500, category, direction, pending }) as never;
     expect(isRefundOrReversal(row("income", "Dining"))).toBe(true);
     expect(isRefundOrReversal(row("income", "INCOME"))).toBe(false);
+    expect(isRefundOrReversal(row("income", "Income"))).toBe(false);
+    expect(isRefundOrReversal(row("income", null))).toBe(true);
     expect(isRefundOrReversal(row("income", "OTHER"))).toBe(false);
     expect(isRefundOrReversal(row("income", "Transfers"))).toBe(false);
     expect(isRefundOrReversal(row("expense", "Dining"))).toBe(false);
@@ -246,6 +248,7 @@ describe("Finance service deterministic helpers", () => {
     expect(budgetImpact(row("expense", "Dining", true), true)).toBe(2500);
     expect(budgetImpact(row("income", "Dining"))).toBe(-2500);
     expect(budgetImpact(row("income", "INCOME"))).toBe(0);
+    expect(budgetImpact(row("income", "Income"))).toBe(0);
     expect(budgetImpact(row("income", "Transfers"))).toBe(0);
     expect(budgetImpact(row("expense", "Dining"))).toBe(2500);
   });

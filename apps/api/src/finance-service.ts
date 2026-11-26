@@ -547,10 +547,19 @@ export function providerConfidence(value: PlaidCategoryConfidence) {
 export function providerNeedsReview(value: PlaidCategoryConfidence) {
   return value === "LOW" || value === "MEDIUM" || value === "UNKNOWN" || value === undefined;
 }
+/**
+ * Income may carry the provider's `INCOME` category or the ledger's own `Income` category, so
+ * match it without regard to case. Treating a categorized paycheck as a refund would subtract it
+ * from spending.
+ */
+export function isIncomeCategory(category: string | null) {
+  return category?.toUpperCase() === "INCOME";
+}
+
 export function isRefundOrReversal(row: typeof financeTransactions.$inferSelect) {
   return (
     row.direction === "income" &&
-    row.category !== "INCOME" &&
+    !isIncomeCategory(row.category) &&
     row.category !== "OTHER" &&
     row.category !== transferCategory
   );
@@ -8170,7 +8179,7 @@ export function createFinanceService({
           unmatchedAmount <= 0 ||
           isProviderTransfer(credit.category) ||
           /\b(?:salary|payroll|paycheck)\b/i.test(credit.merchant) ||
-          credit.category === "INCOME" ||
+          isIncomeCategory(credit.category) ||
           isRefundOrReversal(credit)
         )
           continue;
@@ -9712,7 +9721,7 @@ export function createFinanceService({
       const matchedCredit = matchedReimbursementCentsByCredit(matches);
       const observedAnnualIncome =
         income
-          .filter((item) => item.direction === "income" && item.category === "INCOME")
+          .filter((item) => item.direction === "income" && isIncomeCategory(item.category))
           .reduce(
             (sum, item) => sum + Math.max(0, item.amount - (matchedCredit.get(item.id) ?? 0)),
             0,

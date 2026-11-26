@@ -2302,7 +2302,9 @@ export function FinanceBudgetDetailDialog({
     (item) =>
       item.date.startsWith(month) &&
       (item.direction === "expense" ||
-        (item.direction === "income" && item.category !== "INCOME" && item.category !== "OTHER")),
+        (item.direction === "income" &&
+          item.category?.toUpperCase() !== "INCOME" &&
+          item.category !== "OTHER")),
   );
   const spentByCategory = new Map<string, number>();
   for (const item of expenses) {

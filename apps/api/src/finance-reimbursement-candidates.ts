@@ -44,7 +44,7 @@ export function selectPlausibleReimbursementCredits(input: {
       credit.pending ||
       credit.category === "TRANSFER_IN" ||
       credit.category === "TRANSFER_OUT" ||
-      credit.category === "INCOME" ||
+      credit.category?.toUpperCase() === "INCOME" ||
       /\b(?:salary|payroll|paycheck|refund|chargeback)\b/i.test(credit.merchant) ||
       !/\b(?:venmo|paypal|zelle|cash ?app|reimburs|repay|split)\b/i.test(credit.merchant)
     )

@@ -11,10 +11,13 @@ import {
 describe("native Settings navigation", () => {
   const available = settingsDestinations.map((destination) => destination.id);
   it("resolves every planned destination to a stable detail route", () => {
-    expect(new Set(available).size).toBe(14);
+    expect(new Set(available).size).toBe(15);
     for (const destination of settingsDestinations) {
       expect(findSettingsDestination(destination.id)).toBe(destination);
-      expect(settingsPath(destination.id)).toBe(`/settings/${destination.id}`);
+      // Memory is a full page of its own, reached from Settings but routed outside it.
+      expect(settingsPath(destination.id)).toBe(
+        destination.id === "memory" ? "/memory" : `/settings/${destination.id}`,
+      );
     }
     expect(findSettingsDestination("unknown")).toBeUndefined();
   });
@@ -22,6 +25,8 @@ describe("native Settings navigation", () => {
     const before = JSON.stringify(settingsDestinations);
     expect(searchSettings("  TIMEZONE ", available).map((row) => row.id)).toEqual(["profile"]);
     expect(searchSettings("account email", available).map((row) => row.id)).toEqual(["profile"]);
+    expect(searchSettings("memory tags", available).map((row) => row.id)).toEqual(["memory"]);
+    expect(searchSettings("conflicts", available).map((row) => row.id)).toEqual(["memory"]);
     expect(searchSettings("unmatched", available)).toEqual([]);
     expect(JSON.stringify(settingsDestinations)).toBe(before);
   });

@@ -11,6 +11,10 @@ describe("Settings URL hierarchy", () => {
     expect(settingsPath("profile")).toBe("/settings?page=profile");
     expect(settingsPath("calendar")).toBe("/settings?page=calendar");
   });
+  it("round trips the public Memory destination", () => {
+    expect(settingsPath("memory")).toBe("/settings?section=memory");
+    expect(settingsRoute("?section=memory")).toBe("memory");
+  });
   it("round trips every registered subpage", () => {
     for (const [subpage, parent] of Object.entries(settingsParents)) {
       const path = settingsPath(subpage);

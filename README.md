@@ -1,212 +1,51 @@
+<p align="center"><img src="apps/web/public/icon-192.png" width="80" height="80" alt="nohmi app mark"></p>
+
 # nohmi
 
-Agents: start with [AGENTS.md](AGENTS.md) and the
-[product decision guide](docs/engineering/agent-context.md). Development-network assignments use
-the [role and merge contract](docs/engineering/autonomous-development.md).
+nohmi is a personal harness for mail, tasks, calendar, and finances. You can work in each workspace yourself or give an external agent scoped access to help. The Today view brings upcoming commitments and items that need a decision into one place.
 
-> **Status:** invite-only hosted beta. nohmi is self-hostable under the
-> [GNU Affero General Public License v3.0](LICENSE); commercial licensing and
-> trademark terms are available in [COMMERCIAL.md](COMMERCIAL.md) and
-> [TRADEMARKS.md](TRADEMARKS.md).
+The hosted app is in **invite-only alpha**. You can also run nohmi yourself under the [GNU Affero General Public License v3.0](LICENSE).
 
-nohmi is a personal harness: context, tools, and controls built around a person. It connects
-mail, tasks, calendar, and finances so the person can work directly and choose what to delegate
-to agents. The target is ownership of their data, workflows, knowledge, and agent authority;
-current implementation is documented separately below.
+## Workspaces
 
-The internal application name is Personal OS (`personal-os` in repository and infrastructure identifiers); `nohmi` is the user-facing product
-name and is always lowercase.
+| Workspace | What you can do |
+| --- | --- |
+| Mail | Read and search conversations across connected Google and iCloud accounts. |
+| Tasks | Capture tasks and reminders, organize projects, and track commitments. |
+| Calendar | View connected calendars together and manage events. |
+| Finances | Review transactions, reconcile accounts, and maintain a budget. |
 
-## Product model
+The [implementation log](docs/product/implementation-log.md) records delivered capabilities. The [product design](docs/product/master-design.md) describes the longer-term direction for the workspaces and the agents that help maintain them.
 
-nohmi unifies four core workspaces and makes each available through a simple, familiar application,
-the public API, and MCP:
+## Run locally
 
-| Workspace | User interface | Agent outcome |
-| --- | --- | --- |
-| Mail | A complete unified mail client across accounts | Triage communication, resolve safe work, and leave only genuine decisions |
-| Tasks | An authoritative task manager fed by local capture and external imports | Keep commitments clarified, intentional, feasible, and connected to priorities |
-| Calendar | A unified calendar across accounts | Protect time, reconcile conflicts, and make schedules reflect the person's reality |
-| Finances | A budget, cash-flow, balance, transaction, and net-worth application | Keep financial activity understood and plans aligned with current evidence and goals |
+Install Node.js 22 or later and the pnpm version pinned in [package.json](package.json). Start Docker with Compose support. From a clean checkout, run:
 
-Today is the calm cross-workspace operating surface. It shows what matters now, what requires a
-decision, and what nohmi completed without replacing the native models owned by each workspace.
-
-Texting is the shared general inbox rather than a fifth workspace. A person can send a free-form
-request that nohmi routes to the owning workspaces, answer exact questions or reversible reviews,
-and receive concise maintenance results and first-party links according to global and per-workspace
-settings.
-
-Every workspace provides narrow surgical tools plus a domain-owned setup, status, and maintenance
-workflow. External platforms such as ChatGPT, Codex, Claude, Gemini, or an operating-system
-scheduler may choose when to invoke maintenance; nohmi owns the expertise, User Knowledge retrieval,
-policy, durable execution, questions, audit, recovery, and verified outcome.
-
-User Knowledge is the shared, typed, semantically searchable model of the person's goals,
-priorities, motives, relationships, circumstances, preferences, constraints, routines, and learned
-patterns. Reinforced low-risk inferences may become active safely, but knowledge never grants action
-authority; the person can always inspect, correct, promote, restrict, export, or delete it.
-
-The complete target is documented in:
-
-- [Master product and experience design](docs/product/master-design.md)
-- [Naming contract](docs/product/naming.md)
-- [Workspace purposes and interfaces](docs/product/workspaces.md)
-- [Workspace stewardship](docs/product/workspace-stewardship.md)
-- [Per-workspace settings](docs/product/workspace-settings.md)
-- [User Knowledge](docs/product/user-knowledge.md)
-- [Texting and SMS](docs/product/texting-operations.md)
-- [External automation hosts](docs/product/automation-hosts.md)
-- [Master delivery plan](docs/product/master-plan.md)
-- [MCP integration](docs/mcp.md)
-
-## Current implementation
-
-The current product slice is complete enough to run end to end, but it does not yet implement the
-entire target described above:
-
-- responsive installable React PWA;
-- installable macOS desktop app plus the shared desktop renderer and Windows build path;
-- organized Tasks workspace with Inbox, Lists, Projects, lifecycle, planning fields, Trash, and
-  revision-safe MCP operations;
-- reminder, unified-calendar, event-management, cross-provider deduplication, and selected-calendar
-  workflows;
-- unified Google and iCloud mailboxes with search, conversation reading, durable drafts,
-  human-confirmed sending, provider-backed actions, and reviewed retention rules;
-- multi-account Google Calendar/Gmail OAuth, discovery, synchronization, and calendar write-through CRUD;
-- one iCloud app-specific-password connection for IMAP Mail, CalDAV Calendar, or both;
-- Finance accounts, imports, transactions, ownership semantics, review inbox, budgets, playbook,
-  setup, maintenance, and review workflows;
-- opaque human sessions and separately scoped, revocable agent tokens;
-- MCP over stdio and Streamable HTTP;
-- agent texting through a hardened Twilio lifecycle;
-- a Settings-owned Reviews destination aggregating available Review and Attention work across Mail,
-  Calendar, Tasks, and Finances with workspace/type filters and domain-owned action links;
-- actor-aware, append-only activity history;
-- PostgreSQL migrations and production containers.
-
-Product scope and acceptance criteria live in [docs/product/mvp.md](docs/product/mvp.md). Architecture decisions live in [docs/architecture](docs/architecture). Before publishing a fork or deploying a hosted instance, read [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [docs/deployment.md](docs/deployment.md).
-
-Release and installer requirements are documented in [docs/releasing.md](docs/releasing.md).
-
-## Start locally
-
-Requirements: Node 22+, pnpm 11, Docker, and Rust stable for desktop builds.
-
-```bash
-pnpm env:start
-```
-
-The `personal-os` Codex environment setup fetches `origin/main`, advances a clean checkout to that exact revision, installs locked dependencies, and creates `.env` with a local encryption key when needed. Dirty checkouts and commits outside `origin/main` stop setup without discarding work. See [local development](docs/local-development.md) for setup and runtime migration details. For a manual first-time setup, run:
-
-```bash
+```sh
 bash ./.codex/scripts/environment.sh setup
 pnpm env:start
 ```
 
-Start prints the worktree's loopback URL. API routes and the MCP endpoint (`/mcp`) use the same origin. Every worktree receives a separate Compose project, network, and PostgreSQL volume. See [local development](docs/local-development.md) for lifecycle and recovery details.
+Setup fetches `origin/main`, brings the checkout to that revision, installs locked dependencies, and prepares the local environment. If Codex already ran setup, just run `pnpm env:start`.
 
-For a foreground-only web/API development session, `pnpm dev` remains available on Vite's default `:5173`; use the environment actions for the repeatable full-stack path.
+Open the loopback URL printed by Start. The web app, API, and MCP endpoint share that origin. Start stays attached to its terminal. From another terminal in the same worktree, run `pnpm env:stop` to stop the services and keep your database. See [local development](docs/local-development.md) for logs and recovery.
 
-## Codex environment actions
+## Clients and integrations
 
-The checked-in Codex environment exposes deterministic actions backed by one lifecycle controller:
+- **Web** — Install the web app as a PWA or use it in a browser.
+- **Desktop** — The native macOS shell uses the web renderer and adds Keychain session storage, notifications, and menu-bar controls. See the [desktop guide](apps/desktop/README.md).
+- **Mobile** — The Expo app includes native iPhone workflows. See the [mobile guide](apps/mobile/README.md) for supported features and build instructions.
+- **Agents** — Connect over Streamable HTTP at the worktree URL followed by `/mcp`, or use the stdio adapter. See [MCP integration](docs/mcp.md) for authentication and client setup.
 
-- **Start** derives an isolated Compose project from the worktree, assigns one available loopback port, and runs PostgreSQL plus the current API, MCP, and web source with Compose Watch. Multiple Codex worktrees can remain running concurrently.
-- **Stop** shuts down the runtime without deleting PostgreSQL data.
-- **Restart**, **Status**, **Logs**, and **GC Dry Run** provide predictable operational controls without hunting for processes.
-- **Destroy Worktree Runtime** removes only this worktree's labeled containers, network, and PostgreSQL volume.
-- **Load QA Fixtures** recreates the repository-owned demo, onboarding, empty, and recovery personas.
-- **Test** enforces the repository's coverage floor: 95% statements/functions/lines and 94% branches.
-- **E2E** runs the desktop and mobile Playwright acceptance suite.
-- **Verify** runs mirror checks, lint, types, coverage, every production build, and E2E acceptance tests.
-- **Build** builds all applications and packages, including the native desktop bundles.
+## Development and operations
 
-Playwright uses local web `5174` and API `8797` by default. See
-[local development](docs/local-development.md) for supported port overrides and isolated test
-servers.
+Personal OS is the internal application name. Repository and package identifiers use `personal-os`. See the [naming contract](docs/product/naming.md) for other surfaces.
 
-The first environment setup installs the lockfile exactly and creates `.env` with a valid local encryption key only when the file is missing. Start remains attached to its action terminal so crashes are immediately visible; use Stop from another action to shut it down.
-
-Linked worktrees copy the primary `.env` on setup and start, then generate an ignored `.env.codex.local` containing only non-secret runtime configuration. Docker labels record ownership, and Start removes confirmed orphan projects that no longer appear in `git worktree list`.
-
-The same controls are available outside Codex:
-
-```bash
-pnpm env:start
-pnpm env:status
-pnpm env:logs
-pnpm env:gc
-pnpm env:restart
-pnpm env:stop
-pnpm fixtures:list
-pnpm fixtures:load
-pnpm verify
-```
-
-Fixture credentials and scenario coverage are documented in
-[docs/engineering/qa-fixtures.md](docs/engineering/qa-fixtures.md).
-
-## Desktop app
-
-The macOS app connects to the hosted nohmi service by default and supports a validated custom HTTPS
-server or loopback development origin. Credentials live in Keychain; account-scoped settings cover
-resident lifecycle, menu-bar and Dock behavior, launch at login, notifications, WidgetKit widgets,
-the optional desktop pet, and wallpapers. See [desktop operations](apps/desktop/README.md) for local
-development, provisioning, signing, release, recovery, and installed-app acceptance.
-
-For desktop development and packaging:
-
-```bash
-pnpm --filter @personal-os/desktop dev
-pnpm --filter @personal-os/desktop build
-```
-
-The renderer is the same PWA. In the desktop shell, human sessions are kept locally and sent through the API's distinct `Session` authorization scheme. Agent tokens never gain human-only account or connector permissions.
-
-## MCP
-
-Create an agent token in **Settings → Agent access**, then configure a stdio client:
-
-```json
-{
-  "command": "node",
-    "args": ["/absolute/path/to/personal-os/apps/mcp/dist/stdio.js"],
-  "env": {
-    "PERSONAL_OS_API_URL": "http://localhost:8788",
-    "PERSONAL_OS_TOKEN": "pos_…",
-    "PERSONAL_OS_TIMEZONE": "America/New_York"
-  }
-}
-```
-
-For remote hosts, POST Streamable HTTP requests to `http://localhost:8789/mcp` with the agent token as `Authorization: Bearer pos_…`. See [docs/mcp.md](docs/mcp.md).
-
-## Production containers
-
-```bash
-export APP_ENCRYPTION_KEY="$(openssl rand -base64 32)"
-export MCP_INTERNAL_SECRET="$(openssl rand -hex 32)"
-docker compose up --build
-```
-
-This starts PostgreSQL, the API on `:8788`, MCP on `:8789`, and the web app on `:8081`. Set the public URLs plus Google or X credentials in the environment for a hosted deployment. See [docs/deployment.md](docs/deployment.md).
-
-## Repository layout
-
-```text
-apps/api       HTTP data plane and Google OAuth callback
-apps/mcp       MCP adapter over the public API
-apps/web       React PWA and shared desktop renderer
-apps/desktop   Tauri native shell
-packages/*     domain, database, connectors, API client, and UI primitives
-```
-
-## Verify
-
-```bash
-pnpm check
-pnpm test:e2e
-```
-
-`pnpm check` runs repository mirror checks, lint, type checking, coverage enforcement (95% statements/functions/lines and 94% branches), and all production builds.
+| If you want to… | Start here |
+| --- | --- |
+| Make a change | [Contributing](CONTRIBUTING.md) · [Code of conduct](CODE_OF_CONDUCT.md) |
+| Work on the repository with an agent | [Agent instructions](AGENTS.md) · [Engineering guide](docs/engineering/agent-context.md) |
+| Understand the architecture | [System shape](docs/architecture/0001-system-shape.md) |
+| Deploy or package a release | [Deployment](docs/deployment.md) · [Releases](docs/releasing.md) |
+| Report a vulnerability privately | [Security policy](SECURITY.md) |
+| Distribute or license a fork | [License](LICENSE) · [Commercial licensing](COMMERCIAL.md) · [Trademark policy](TRADEMARKS.md) |
